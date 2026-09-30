@@ -4,7 +4,29 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri + React + Typescript</title>
+    <title>MyEnglish</title>
+    <script>
+      (function() {
+        try {
+          var p = new URLSearchParams(window.location.search);
+          var w = p.get('window');
+          var tauriLabel = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
+          if (w === 'review-popup' || w === 'quick-input' || tauriLabel === 'review-popup' || tauriLabel === 'quick-input') {
+            document.documentElement.classList.add('transparent-window');
+            document.documentElement.style.background = 'transparent';
+            document.documentElement.style.backgroundColor = 'transparent';
+          }
+        } catch (e) {}
+      })();
+    </script>
+    <style>
+      html.transparent-window,
+      html.transparent-window body,
+      body.transparent-window {
+        background: transparent !important;
+        background-color: transparent !important;
+      }
+    </style>
   </head>
 
   <body>

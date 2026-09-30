@@ -28,6 +28,12 @@ import {
   Laptop,
   Tag,
   Folder,
+  Check,
+  RotateCw,
+  AlertCircle,
+  Loader2,
+  CheckCircle2,
+  Download,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -37,18 +43,25 @@ import { srsWorker, checkAndNotifyDueReviews } from "@/services/srs";
 import { parseTerms, parseCollocations, type WordDetail } from "@/types/database";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { getSavedTheme, setTheme, type ThemeMode } from "@/services/theme";
+import { CURRENT_VERSION, useUpdateStore } from "@/services/updateService";
 import FlashcardReview from "./FlashcardReview";
 import Heatmap from "./Heatmap";
 import WordTableView from "./WordTableView";
 import CliGuideView from "./CliGuideView";
+import FocusReviewModal from "./FocusReviewModal";
 
 interface MainDashboardProps {
   onOpenQuickInputPreview?: () => void;
+  onOpenReviewPopupPreview?: () => void;
 }
 
-export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboardProps) {
+export default function MainDashboard({
+  onOpenQuickInputPreview,
+  onOpenReviewPopupPreview,
+}: MainDashboardProps) {
   const [words, setWords] = useState<WordDetail[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMode, setFilterMode] = useState<"all" | "due" | "mastered">("all");
@@ -68,6 +81,18 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const {
+    status: updateStatus,
+    newVersion,
+    downloadProgress,
+    dismissed: updateDismissed,
+    downloadAndInstall,
+    restartApp,
+    dismiss: dismissUpdate,
+    checkForUpdates,
+    errorMessage,
+  } = useUpdateStore();
 
   const streakStats = useMemo(() => {
     return calculateStreakAndGoal(words);
@@ -108,6 +133,16 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
     setExpandedTerms((prev) => ({
       ...prev,
       [termKey]: !prev[termKey],
+    }));
+  };
+
+  const [collapsedQueueItems, setCollapsedQueueItems] = useState<Record<string, boolean>>({});
+
+  const toggleQueueItemCollapse = (wordKey: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    setCollapsedQueueItems((prev) => ({
+      ...prev,
+      [wordKey]: !prev[wordKey],
     }));
   };
 
@@ -167,10 +202,16 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
     let unlistenReviewFn: (() => void) | null = null;
     let unlistenNotifFn: (() => void) | null = null;
 
-    listen("open-review-tab", () => {
+    listen<{ auto_start?: boolean }>("open-review-tab", (event) => {
       if (isCancelled) return;
+      const autoStart = event.payload?.auto_start ?? false;
       setActiveTab("review");
-      setIsReviewing(false);
+      setGlobalToast(null);
+      if (autoStart) {
+        handleStartReview(true);
+      } else {
+        setIsReviewing(false);
+      }
       refreshWords();
     })
       .then((fn) => {
@@ -184,7 +225,7 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
       setGlobalToast(event.payload);
       setTimeout(() => {
         setGlobalToast((prev) => (prev?.title === event.payload.title ? null : prev));
-      }, 8000);
+      }, 12000);
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -192,10 +233,23 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
       })
       .catch(() => {});
 
+    const handleOpenPreview = () => {
+      if (onOpenReviewPopupPreview) {
+        onOpenReviewPopupPreview();
+      } else {
+        setShowReviewModalPreview(true);
+      }
+    };
+    const handleClosePreview = () => setShowReviewModalPreview(false);
+    window.addEventListener("open-review-popup-preview", handleOpenPreview);
+    window.addEventListener("close-review-popup-preview", handleClosePreview);
+
     return () => {
       isCancelled = true;
       srsWorker.stop();
       unsubscribePipeline();
+      window.removeEventListener("open-review-popup-preview", handleOpenPreview);
+      window.removeEventListener("close-review-popup-preview", handleClosePreview);
       if (unlistenFn) unlistenFn();
       if (unlistenReviewFn) unlistenReviewFn();
       if (unlistenNotifFn) unlistenNotifFn();
@@ -213,9 +267,25 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
         (w) => (w.topic || "General Tech").trim().toLowerCase() === topicFilter.trim().toLowerCase()
       );
     }
-    if (target.length === 0) return;
+    if (target.length === 0) {
+      if (onlyDue && words.length > 0) {
+        target = words;
+      } else {
+        return;
+      }
+    }
     setReviewSet(target);
     setIsReviewing(true);
+  };
+
+  const handleOpenReview = (autoStartFlashcard = false) => {
+    setActiveTab("review");
+    setGlobalToast(null);
+    if (autoStartFlashcard) {
+      handleStartReview(true);
+    } else {
+      setIsReviewing(false);
+    }
   };
 
   const handleUpdateTopic = async (wordId: string, newTopic: string) => {
@@ -254,14 +324,15 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
 
   const handleTestNotification = async () => {
     try {
-      const count = await checkAndNotifyDueReviews();
+      const count = await checkAndNotifyDueReviews(true);
       setMessage(
         count > 0
-          ? `System notification sent for ${count} due cards!`
-          : "System notification test sent! (Check macOS Notification Center)"
+          ? `Đã gửi thông báo nhắc ôn tập ${count} từ vựng!`
+          : "Đã gửi thông báo nhắc ôn tập! Hãy nhấp vào thông báo để mở màn hình ôn tập."
       );
+      setTimeout(() => setMessage(null), 4000);
     } catch (err) {
-      setMessage(`Notification error: ${err}`);
+      setMessage(`Lỗi gửi thông báo: ${err}`);
     }
   };
 
@@ -436,11 +507,7 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
       {/* GLOBAL NOTIFICATION INTERACTIVE TOAST */}
       {globalToast && (
         <div
-          onClick={() => {
-            setActiveTab("review");
-            setIsReviewing(false);
-            setGlobalToast(null);
-          }}
+          onClick={() => handleOpenReview(false)}
           className="fixed top-5 right-5 z-50 max-w-sm w-full bg-white dark:bg-zinc-900 border-2 border-orange-500/80 rounded-2xl shadow-2xl p-4 flex items-start gap-3 cursor-pointer hover:scale-[1.02] hover:shadow-orange-500/20 transition-all animate-in slide-in-from-top-4 duration-300 backdrop-blur-xl"
         >
           <div className="w-10 h-10 rounded-xl bg-orange-500/10 text-orange-500 flex items-center justify-center shrink-0">
@@ -456,9 +523,7 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
               <button
                 onClick={(e) => {
                   e.stopPropagation();
-                  setActiveTab("review");
-                  setIsReviewing(false);
-                  setGlobalToast(null);
+                  handleOpenReview(true);
                 }}
                 className="w-full py-1.5 px-3 rounded-lg bg-orange-500 hover:bg-orange-600 text-white font-medium text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors"
               >
@@ -485,19 +550,170 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
         <div className="p-4 space-y-6">
           {/* Logo & App title */}
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold">
+            <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold">
               <Code2 className="w-5 h-5 text-white" />
             </div>
-            <div>
-              <h1 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-1.5">
-                MyEnglish
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-800">
-                  Dev
-                </span>
-              </h1>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <h1 className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">
+                  MyEnglish
+                </h1>
+
+                {/* Interactive Version Badge / Check Update Button */}
+                {updateStatus === "checking" ? (
+                  <span
+                    title="Đang kiểm tra..."
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-50 dark:bg-cyan-950/80 border border-cyan-200 dark:border-cyan-800 text-cyan-600 dark:text-cyan-400 shrink-0"
+                  >
+                    <RotateCw className="w-2.5 h-2.5 animate-spin" />
+                    <span>Đang kiểm tra...</span>
+                  </span>
+                ) : updateStatus === "up-to-date" ? (
+                  <span
+                    title={`Bản mới nhất (v${CURRENT_VERSION})`}
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 border border-emerald-300/80 dark:border-emerald-700/80 text-emerald-600 dark:text-emerald-400 shrink-0 animate-in fade-in zoom-in-95 duration-200"
+                  >
+                    <Check className="w-2.5 h-2.5" />
+                    <span>Bản mới nhất</span>
+                  </span>
+                ) : updateStatus === "error" ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      checkForUpdates(true);
+                    }}
+                    title={errorMessage || "Lỗi kiểm tra"}
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-rose-50 dark:bg-rose-950/80 border border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/60 transition-colors shrink-0 cursor-pointer"
+                  >
+                    <AlertCircle className="w-2.5 h-2.5" />
+                    <span>Lỗi kiểm tra</span>
+                  </button>
+                ) : updateStatus === "available" ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      downloadAndInstall();
+                    }}
+                    title={`Đã có bản cập nhật mới: v${newVersion}`}
+                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-600 text-white shadow-sm shadow-cyan-600/30 hover:bg-cyan-700 transition-all shrink-0 cursor-pointer animate-pulse"
+                  >
+                    <Sparkles className="w-2.5 h-2.5" />
+                    <span>v{newVersion}</span>
+                  </button>
+                ) : updateStatus === "downloading" ? (
+                  <span
+                    title={`Đang tải... ${downloadProgress}%`}
+                    className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-cyan-50 dark:bg-cyan-950/80 border border-cyan-200 dark:border-cyan-800 text-cyan-600 dark:text-cyan-400 shrink-0"
+                  >
+                    <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                    <span>{downloadProgress}%</span>
+                  </span>
+                ) : updateStatus === "downloaded" ? (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      restartApp();
+                    }}
+                    title="Khởi động lại ngay để hoàn tất cập nhật"
+                    className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-600 text-white shadow-sm shadow-emerald-600/30 hover:bg-emerald-700 transition-all shrink-0 cursor-pointer"
+                  >
+                    <CheckCircle2 className="w-2.5 h-2.5" />
+                    <span>Khởi động lại</span>
+                  </button>
+                ) : (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      checkForUpdates(true);
+                    }}
+                    title={`Kiểm tra bản cập nhật (v${CURRENT_VERSION})`}
+                    className="group/badge inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-cyan-50 dark:bg-cyan-950/80 border border-cyan-200/60 dark:border-cyan-800/60 text-cyan-600 dark:text-cyan-400 hover:bg-cyan-100/80 dark:hover:bg-cyan-900/60 hover:border-cyan-300/80 dark:hover:border-cyan-700/80 active:scale-95 transition-all shrink-0 cursor-pointer"
+                  >
+                    <span>v{CURRENT_VERSION}</span>
+                    <RotateCw className="w-2.5 h-2.5 opacity-50 group-hover/badge:opacity-100 group-hover/badge:rotate-180 transition-all duration-300" />
+                  </button>
+                )}
+              </div>
               <p className="text-[11px] text-slate-500 dark:text-zinc-400">Contextual Tech Vocab</p>
             </div>
           </div>
+
+          {/* In-App Auto-Update Widget */}
+          {!updateDismissed &&
+            (updateStatus === "available" ||
+              updateStatus === "downloading" ||
+              updateStatus === "downloaded" ||
+              updateStatus === "error") && (
+              <div className="p-3 rounded-xl bg-gradient-to-br from-cyan-500/10 via-blue-500/10 to-indigo-500/5 dark:from-cyan-950/70 dark:via-blue-950/60 dark:to-zinc-900 border border-cyan-500/20 dark:border-cyan-500/30 shadow-sm animate-in fade-in slide-in-from-top-2 duration-200 space-y-2">
+                <div className="flex items-start justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-slate-900 dark:text-zinc-100 min-w-0">
+                    {updateStatus === "downloaded" ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+                    ) : updateStatus === "downloading" ? (
+                      <Loader2 className="w-4 h-4 text-cyan-500 animate-spin shrink-0" />
+                    ) : updateStatus === "error" ? (
+                      <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-cyan-500 shrink-0" />
+                    )}
+                    <span className="truncate">
+                      {updateStatus === "downloaded"
+                        ? "Đã cập nhật xong!"
+                        : updateStatus === "downloading"
+                        ? `Đang tải... ${downloadProgress}%`
+                        : updateStatus === "error"
+                        ? (errorMessage || "Lỗi cập nhật")
+                        : `Đã có bản cập nhật mới: v${newVersion}`}
+                    </span>
+                  </div>
+                  <button
+                    onClick={dismissUpdate}
+                    className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-0.5 rounded transition-colors shrink-0 cursor-pointer"
+                    title="Bỏ qua"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {updateStatus === "downloading" && (
+                  <div className="w-full bg-slate-200/80 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                    <div
+                      className="bg-cyan-600 dark:bg-cyan-500 h-full rounded-full transition-all duration-300 ease-out"
+                      style={{ width: `${downloadProgress}%` }}
+                    />
+                  </div>
+                )}
+
+                {updateStatus === "available" && (
+                  <button
+                    onClick={downloadAndInstall}
+                    className="w-full py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] text-white text-xs font-semibold shadow-sm shadow-cyan-600/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Cập nhật ngay</span>
+                  </button>
+                )}
+
+                {updateStatus === "downloaded" && (
+                  <button
+                    onClick={restartApp}
+                    className="w-full py-1.5 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-xs font-bold shadow-sm shadow-emerald-600/30 flex items-center justify-center gap-1.5 transition-all cursor-pointer"
+                  >
+                    <RotateCw className="w-3.5 h-3.5" />
+                    <span>Khởi động lại</span>
+                  </button>
+                )}
+
+                {updateStatus === "error" && (
+                  <button
+                    onClick={downloadAndInstall}
+                    className="w-full py-1 px-2 rounded-lg bg-slate-200 dark:bg-zinc-800 hover:bg-slate-300 dark:hover:bg-zinc-700 text-xs text-slate-700 dark:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    Thử lại
+                  </button>
+                )}
+              </div>
+            )}
 
           {/* Navigation Links */}
           <nav className="space-y-1">
@@ -1134,41 +1350,621 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
                   Hàng đợi phân tích AI
                 </h3>
                 <div className="space-y-3">
-                  {pipelineQueue.map((item, idx) => (
-                    <div
-                      key={idx}
-                      className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 space-y-2 shadow-sm"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-mono text-base font-bold text-slate-900 dark:text-white capitalize">
-                          {item.word}
-                        </span>
-                        <span
-                          className={`text-xs font-mono px-2.5 py-0.5 rounded-full border ${
-                            item.status === "analyzing"
-                              ? "bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 animate-pulse"
-                              : item.status === "completed"
-                              ? "bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300"
-                              : "bg-rose-100 dark:bg-rose-950/60 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-300"
-                          }`}
+                  {pipelineQueue.map((item, idx) => {
+                    const enrichedData =
+                      item.result ||
+                      (() => {
+                        const match = words.find(
+                          (w) =>
+                            (item.wordId && w.id === item.wordId) ||
+                            w.word.toLowerCase() === item.word.toLowerCase()
+                        );
+                        if (!match) return null;
+                        return {
+                          phonetic: match.phonetic || undefined,
+                          part_of_speech: match.part_of_speech || undefined,
+                          topic: match.topic || undefined,
+                          meaning_vn: match.meaning_vn,
+                          collocations: parseCollocations(match.collocations),
+                          code_snippet: match.code_snippet || undefined,
+                          synonyms: parseTerms(match.synonyms),
+                          antonyms: parseTerms(match.antonyms),
+                          examples: match.examples.map((ex) => ({
+                            sentence_en: ex.sentence_en,
+                            sentence_vn: ex.sentence_vn,
+                            grammar_analysis: ex.grammar_analysis,
+                          })),
+                        };
+                      })();
+
+                    const isCardCollapsed = !!collapsedQueueItems[item.word];
+                    const matchingWord = words.find(
+                      (w) =>
+                        (item.wordId && w.id === item.wordId) ||
+                        w.word.toLowerCase() === item.word.toLowerCase()
+                    );
+
+                    if (isCardCollapsed && enrichedData) {
+                      return (
+                        <div
+                          key={idx}
+                          className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 space-y-2 shadow-sm transition-all"
                         >
-                          {item.status === "analyzing" && "Analyzing with Gemini..."}
-                          {item.status === "completed" && "Saved to Library ✓"}
-                          {item.status === "failed" && "Failed"}
-                          {item.status === "pending" && "Queued"}
-                        </span>
+                          <div
+                            onClick={(e) => toggleQueueItemCollapse(item.word, e)}
+                            className="flex items-center justify-between cursor-pointer select-none"
+                          >
+                            <div className="flex items-center gap-2.5 flex-wrap">
+                              <span className="font-mono text-base font-bold text-slate-900 dark:text-white capitalize">
+                                {item.word}
+                              </span>
+                              {enrichedData.phonetic && (
+                                <span className="text-xs font-mono text-cyan-700 dark:text-cyan-400">
+                                  {enrichedData.phonetic}
+                                </span>
+                              )}
+                              {enrichedData.part_of_speech && (
+                                <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-semibold">
+                                  {enrichedData.part_of_speech}
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300">
+                                Saved to Library ✓
+                              </span>
+                              <div className="text-slate-400 p-0.5">
+                                <ChevronDown className="w-4 h-4" />
+                              </div>
+                            </div>
+                          </div>
+                          <p className="text-xs text-slate-700 dark:text-zinc-300">
+                            <span className="text-cyan-700 dark:text-cyan-400 font-medium">Nghĩa: </span>
+                            {enrichedData.meaning_vn}
+                          </p>
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div
+                        key={idx}
+                        className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-5 shadow-sm transition-all"
+                      >
+                        {/* Header Bar */}
+                        <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-zinc-800/80 flex-wrap gap-2">
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <span className="font-mono text-xl font-black text-slate-900 dark:text-white capitalize tracking-tight">
+                              {item.word}
+                            </span>
+                            {enrichedData?.phonetic && (
+                              <span className="text-xs font-mono text-cyan-700 dark:text-cyan-400">
+                                {enrichedData.phonetic}
+                              </span>
+                            )}
+                            {enrichedData?.part_of_speech && (
+                              <span className="text-[11px] font-mono uppercase px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800 font-semibold">
+                                {enrichedData.part_of_speech}
+                              </span>
+                            )}
+                            {enrichedData?.topic && (
+                              <span className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-cyan-100 dark:bg-cyan-950/70 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 shadow-sm flex items-center gap-1">
+                                <Tag className="w-3 h-3 text-cyan-600 dark:text-cyan-400" />
+                                <span>{enrichedData.topic}</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            {enrichedData && (
+                              <button
+                                type="button"
+                                onClick={() => handleSpeak(item.word)}
+                                title="Phát âm từ này"
+                                className="px-2.5 py-1 rounded-lg bg-cyan-50 dark:bg-cyan-500/10 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 transition-colors flex items-center gap-1 text-xs font-medium shadow-sm"
+                              >
+                                <Volume2 className="w-3.5 h-3.5" />
+                                <span>Phát âm</span>
+                              </button>
+                            )}
+
+                            {matchingWord && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSelectedWord(matchingWord);
+                                  setActiveTab("library");
+                                }}
+                                title="Xem chi tiết đầy đủ trong Thư viện"
+                                className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 transition-colors flex items-center gap-1 text-xs font-medium shadow-sm"
+                              >
+                                <BookOpen className="w-3.5 h-3.5 text-cyan-500" />
+                                <span>Thư viện</span>
+                              </button>
+                            )}
+
+                            <span
+                              className={`text-xs font-mono px-2.5 py-0.5 rounded-full border ${
+                                item.status === "analyzing"
+                                  ? "bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 animate-pulse"
+                                  : item.status === "completed"
+                                  ? "bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300"
+                                  : "bg-rose-100 dark:bg-rose-950/60 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-300"
+                              }`}
+                            >
+                              {item.status === "analyzing" && "Analyzing with Gemini..."}
+                              {item.status === "completed" && "Saved to Library ✓"}
+                              {item.status === "failed" && "Failed"}
+                              {item.status === "pending" && "Queued"}
+                            </span>
+
+                            {enrichedData && (
+                              <button
+                                type="button"
+                                onClick={(e) => toggleQueueItemCollapse(item.word, e)}
+                                title="Thu gọn thẻ"
+                                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 transition-colors"
+                              >
+                                <ChevronUp className="w-4 h-4" />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Analyzing Banner */}
+                        {item.status === "analyzing" && (
+                          <div className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/40 text-amber-800 dark:text-amber-300 text-xs">
+                            <Sparkles className="w-4 h-4 animate-spin text-amber-500 shrink-0" />
+                            <span>Gemini AI đang phân tích nghĩa, phát âm, từ đồng nghĩa, trái nghĩa và cấu trúc ví dụ...</span>
+                          </div>
+                        )}
+
+                        {item.error && <p className="text-xs text-rose-400">{item.error}</p>}
+
+                        {/* Complete Analysis Breakdown */}
+                        {enrichedData && (
+                          <div className="space-y-5 animate-in fade-in duration-200">
+                            {/* 1. Vietnamese Meaning Card */}
+                            <div className="p-3.5 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 space-y-1.5 shadow-sm">
+                              <div className="flex items-center gap-1.5 text-cyan-700 dark:text-cyan-400 font-mono text-[11px] font-semibold uppercase tracking-wider">
+                                <Sparkles className="w-3.5 h-3.5" />
+                                <span>Ý nghĩa Tiếng Việt (Chuyên ngành & Đời sống)</span>
+                              </div>
+                              <p className="text-sm text-slate-800 dark:text-zinc-200 font-normal leading-relaxed">
+                                {enrichedData.meaning_vn}
+                              </p>
+                            </div>
+
+                            {/* 2. Collocations */}
+                            {enrichedData.collocations && enrichedData.collocations.length > 0 && (
+                              <div className="p-3.5 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 space-y-2">
+                                <span className="text-xs font-mono font-bold text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                                  <Layers className="w-3.5 h-3.5" />
+                                  Cụm từ thường gặp (Collocations):
+                                </span>
+                                <div className="flex flex-wrap gap-1.5">
+                                  {enrichedData.collocations.map((c, cIdx) => (
+                                    <span
+                                      key={cIdx}
+                                      className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-700/70 text-slate-800 dark:text-zinc-200 font-mono text-xs hover:border-cyan-500/50 transition-colors"
+                                    >
+                                      {c}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 3. Synonyms Section */}
+                            {enrichedData.synonyms && enrichedData.synonyms.length > 0 && (
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                    Từ đồng nghĩa (Synonyms):
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-500">
+                                    {enrichedData.synonyms.length} từ • click để xem phân tích
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-2.5">
+                                  {enrichedData.synonyms.map((s, sIdx) => {
+                                    const termKey = `queue-${item.word}-syn-${s.word}`;
+                                    const isExpanded = !!expandedTerms[termKey];
+                                    const hasExamples = s.examples && s.examples.length > 0;
+
+                                    return (
+                                      <div
+                                        key={sIdx}
+                                        className={`rounded-2xl border transition-all overflow-hidden ${
+                                          isExpanded
+                                            ? "bg-emerald-50/40 dark:bg-zinc-900 border-emerald-400 dark:border-emerald-500/60 shadow-md shadow-emerald-500/5 ring-1 ring-emerald-500/20"
+                                            : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                        }`}
+                                      >
+                                        {/* Synonym Header */}
+                                        <div
+                                          onClick={(e) => toggleTermExpanded(termKey, e)}
+                                          className="p-3.5 cursor-pointer flex items-start justify-between gap-2 select-none"
+                                        >
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <span className="font-mono text-sm font-bold text-emerald-700 dark:text-emerald-300">
+                                                {s.word}
+                                              </span>
+                                              {s.phonetic && (
+                                                <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-400/90 bg-emerald-100/70 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800/50 px-1.5 py-0.2 rounded">
+                                                  {s.phonetic}
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => handleSpeak(s.word, e)}
+                                                title="Phát âm"
+                                                className="text-slate-400 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 p-0.5 rounded transition-colors"
+                                              >
+                                                <Volume2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                            {s.meaning_vn && (
+                                              <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">
+                                                {s.meaning_vn}
+                                              </p>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 shrink-0 text-slate-400 dark:text-zinc-400">
+                                            {hasExamples ? (
+                                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/90 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60 font-medium">
+                                                {s.examples!.length} câu ví dụ
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-400">
+                                                Chi tiết
+                                              </span>
+                                            )}
+                                            <div className="p-1 rounded text-slate-400 group-hover:text-slate-700 dark:text-zinc-400 dark:group-hover:text-white transition-colors">
+                                              {isExpanded ? (
+                                                <ChevronUp className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                                              ) : (
+                                                <ChevronDown className="w-4 h-4 text-slate-400 dark:text-zinc-400" />
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Synonym Body */}
+                                        {isExpanded && (
+                                          <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-200 dark:border-zinc-800/80 space-y-3 animate-in slide-in-from-top-2 duration-150">
+                                            {hasExamples ? (
+                                              <div className="space-y-3 pt-2">
+                                                {s.examples!.map((ex, exIdx) => (
+                                                  <div
+                                                    key={exIdx}
+                                                    className="p-3 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800/90 space-y-2.5 text-xs shadow-sm"
+                                                  >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                      <div className="flex items-start gap-2">
+                                                        <span className="font-mono text-emerald-600 dark:text-emerald-400 font-bold text-[11px] shrink-0 mt-0.5">
+                                                          #{exIdx + 1}
+                                                        </span>
+                                                        <p className="text-xs font-semibold text-slate-900 dark:text-white leading-relaxed">
+                                                          "{ex.sentence_en}"
+                                                        </p>
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => handleSpeak(ex.sentence_en, e)}
+                                                        title="Nghe câu"
+                                                        className="text-slate-400 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 p-0.5 rounded shrink-0"
+                                                      >
+                                                        <Volume2 className="w-3.5 h-3.5" />
+                                                      </button>
+                                                    </div>
+
+                                                    {ex.meaning_vn && (
+                                                      <div className="p-2 rounded-lg bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900/40 text-[11px] text-cyan-900 dark:text-cyan-200 leading-relaxed">
+                                                        <span className="font-bold text-cyan-700 dark:text-cyan-400 block mb-0.5">
+                                                          📖 Ý nghĩa của câu:
+                                                        </span>
+                                                        {ex.meaning_vn}
+                                                      </div>
+                                                    )}
+
+                                                    {ex.structure && (
+                                                      <div className="p-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900/40 text-[11px] text-emerald-900 dark:text-emerald-200 font-mono leading-relaxed">
+                                                        <span className="font-bold text-emerald-700 dark:text-emerald-400 block mb-0.5 font-sans">
+                                                          🧩 Cấu trúc câu:
+                                                        </span>
+                                                        {ex.structure}
+                                                      </div>
+                                                    )}
+
+                                                    {ex.why_used && (
+                                                      <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
+                                                        <span className="font-bold text-amber-700 dark:text-amber-400 block mb-0.5">
+                                                          💡 Giải thích lý do dùng cấu trúc:
+                                                        </span>
+                                                        {ex.why_used}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <div className="py-2.5 text-[11px] text-slate-500 dark:text-zinc-500 italic text-center">
+                                                Từ này đã được tự động lưu vào thư viện từ vựng.
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 4. Antonyms Section */}
+                            {enrichedData.antonyms && enrichedData.antonyms.length > 0 && (
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider flex items-center gap-1.5">
+                                    <span className="w-2 h-2 rounded-full bg-rose-500" />
+                                    Từ trái nghĩa (Antonyms):
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-500">
+                                    {enrichedData.antonyms.length} từ • click để xem phân tích
+                                  </span>
+                                </div>
+
+                                <div className="grid grid-cols-1 gap-2.5">
+                                  {enrichedData.antonyms.map((a, aIdx) => {
+                                    const termKey = `queue-${item.word}-ant-${a.word}`;
+                                    const isExpanded = !!expandedTerms[termKey];
+                                    const hasExamples = a.examples && a.examples.length > 0;
+
+                                    return (
+                                      <div
+                                        key={aIdx}
+                                        className={`rounded-2xl border transition-all overflow-hidden ${
+                                          isExpanded
+                                            ? "bg-rose-50/40 dark:bg-zinc-900 border-rose-400 dark:border-rose-500/60 shadow-md shadow-rose-500/5 ring-1 ring-rose-500/20"
+                                            : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-rose-400 dark:hover:border-rose-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                        }`}
+                                      >
+                                        {/* Antonym Header */}
+                                        <div
+                                          onClick={(e) => toggleTermExpanded(termKey, e)}
+                                          className="p-3.5 cursor-pointer flex items-start justify-between gap-2 select-none"
+                                        >
+                                          <div className="flex-1 min-w-0">
+                                            <div className="flex items-center gap-2 flex-wrap">
+                                              <span className="font-mono text-sm font-bold text-rose-700 dark:text-rose-300">
+                                                {a.word}
+                                              </span>
+                                              {a.phonetic && (
+                                                <span className="text-[10px] font-mono text-rose-700 dark:text-rose-400/90 bg-rose-100/70 dark:bg-rose-950/60 border border-rose-200 dark:border-rose-800/50 px-1.5 py-0.2 rounded">
+                                                  {a.phonetic}
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => handleSpeak(a.word, e)}
+                                                title="Phát âm"
+                                                className="text-slate-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400 p-0.5 rounded transition-colors"
+                                              >
+                                                <Volume2 className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                            {a.meaning_vn && (
+                                              <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">
+                                                {a.meaning_vn}
+                                              </p>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 shrink-0 text-slate-400 dark:text-zinc-400">
+                                            {hasExamples ? (
+                                              <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/90 text-rose-800 dark:text-rose-400 border border-rose-200 dark:border-rose-800/60 font-medium">
+                                                {a.examples!.length} câu ví dụ
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-400">
+                                                Chi tiết
+                                              </span>
+                                            )}
+                                            <div className="p-1 rounded text-slate-400 group-hover:text-slate-700 dark:text-zinc-400 dark:group-hover:text-white transition-colors">
+                                              {isExpanded ? (
+                                                <ChevronUp className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                                              ) : (
+                                                <ChevronDown className="w-4 h-4 text-slate-400 dark:text-zinc-400" />
+                                              )}
+                                            </div>
+                                          </div>
+                                        </div>
+
+                                        {/* Antonym Body */}
+                                        {isExpanded && (
+                                          <div className="px-3.5 pb-3.5 pt-1 border-t border-slate-200 dark:border-zinc-800/80 space-y-3 animate-in slide-in-from-top-2 duration-150">
+                                            {hasExamples ? (
+                                              <div className="space-y-3 pt-2">
+                                                {a.examples!.map((ex, exIdx) => (
+                                                  <div
+                                                    key={exIdx}
+                                                    className="p-3 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800/90 space-y-2.5 text-xs shadow-sm"
+                                                  >
+                                                    <div className="flex items-start justify-between gap-2">
+                                                      <div className="flex items-start gap-2">
+                                                        <span className="font-mono text-rose-600 dark:text-rose-400 font-bold text-[11px] shrink-0 mt-0.5">
+                                                          #{exIdx + 1}
+                                                        </span>
+                                                        <p className="text-xs font-semibold text-slate-900 dark:text-white leading-relaxed">
+                                                          "{ex.sentence_en}"
+                                                        </p>
+                                                      </div>
+                                                      <button
+                                                        type="button"
+                                                        onClick={(e) => handleSpeak(ex.sentence_en, e)}
+                                                        title="Nghe câu"
+                                                        className="text-slate-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400 p-0.5 rounded shrink-0"
+                                                      >
+                                                        <Volume2 className="w-3.5 h-3.5" />
+                                                      </button>
+                                                    </div>
+
+                                                    {ex.meaning_vn && (
+                                                      <div className="p-2 rounded-lg bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900/40 text-[11px] text-cyan-900 dark:text-cyan-200 leading-relaxed">
+                                                        <span className="font-bold text-cyan-700 dark:text-cyan-400 block mb-0.5">
+                                                          📖 Ý nghĩa của câu:
+                                                        </span>
+                                                        {ex.meaning_vn}
+                                                      </div>
+                                                    )}
+
+                                                    {ex.structure && (
+                                                      <div className="p-2 rounded-lg bg-rose-50 dark:bg-rose-950/20 border border-rose-200 dark:border-rose-900/40 text-[11px] text-rose-900 dark:text-rose-200 font-mono leading-relaxed">
+                                                        <span className="font-bold text-rose-700 dark:text-rose-400 block mb-0.5 font-sans">
+                                                          🧩 Cấu trúc câu:
+                                                        </span>
+                                                        {ex.structure}
+                                                      </div>
+                                                    )}
+
+                                                    {ex.why_used && (
+                                                      <div className="p-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 text-[11px] text-amber-900 dark:text-amber-200 leading-relaxed">
+                                                        <span className="font-bold text-amber-700 dark:text-amber-400 block mb-0.5">
+                                                          💡 Giải thích lý do dùng cấu trúc:
+                                                        </span>
+                                                        {ex.why_used}
+                                                      </div>
+                                                    )}
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            ) : (
+                                              <div className="py-2.5 text-[11px] text-slate-500 dark:text-zinc-500 italic text-center">
+                                                Từ này đã được tự động lưu vào thư viện từ vựng.
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 5. Code Snippet with Terminal Styling */}
+                            {enrichedData.code_snippet && (
+                              <div className="space-y-2.5">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Terminal className="w-4 h-4" />
+                                    Đoạn mã ngữ cảnh (Code Snippet):
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleCopyCode(enrichedData.code_snippet!)}
+                                    className="text-[11px] font-mono text-slate-600 hover:text-cyan-600 dark:text-zinc-400 dark:hover:text-cyan-300 flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 transition-colors shadow-sm"
+                                  >
+                                    {copiedSnippet ? (
+                                      <>
+                                        <CheckCircle className="w-3 h-3 text-emerald-600 dark:text-emerald-400" />
+                                        <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Đã sao chép</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Copy className="w-3 h-3" />
+                                        <span>Sao chép mã</span>
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                                <div className="rounded-2xl border border-slate-300 dark:border-zinc-800 bg-[#0d1117] overflow-hidden shadow-xl">
+                                  <div className="bg-zinc-900/90 px-4 py-2 border-b border-zinc-800 flex items-center justify-between select-none">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500/80" />
+                                      <span className="w-2.5 h-2.5 rounded-full bg-amber-500/80" />
+                                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-500/80" />
+                                      <span className="ml-2 text-[10px] font-mono text-zinc-500">example.ts</span>
+                                    </div>
+                                    <span className="text-[10px] font-mono text-zinc-500">Developer Context</span>
+                                  </div>
+                                  <pre className="p-4 text-xs font-mono text-zinc-200 overflow-x-auto leading-relaxed selection:bg-cyan-500/30 whitespace-pre">
+                                    <code>{enrichedData.code_snippet}</code>
+                                  </pre>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* 6. Context Examples with Grammar & Syntax Analysis */}
+                            {enrichedData.examples && enrichedData.examples.length > 0 && (
+                              <div className="space-y-3">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider flex items-center gap-1.5">
+                                    <Code2 className="w-4 h-4" />
+                                    Ví dụ & Phân tích cú pháp:
+                                  </span>
+                                  <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-500">
+                                    {enrichedData.examples.length} câu ví dụ
+                                  </span>
+                                </div>
+
+                                <div className="space-y-3.5">
+                                  {enrichedData.examples.map((ex, exIdx) => (
+                                    <div
+                                      key={exIdx}
+                                      className="rounded-2xl bg-slate-50 dark:bg-zinc-950 p-4 border border-slate-200 dark:border-zinc-800/90 space-y-3 shadow-sm"
+                                    >
+                                      <div className="flex items-start justify-between gap-2">
+                                        <div className="flex items-start gap-2">
+                                          <span className="font-mono text-cyan-600 dark:text-cyan-400 font-bold text-xs shrink-0 mt-0.5">
+                                            #{exIdx + 1}
+                                          </span>
+                                          <p className="text-sm font-semibold text-slate-900 dark:text-white leading-relaxed">
+                                            {ex.sentence_en}
+                                          </p>
+                                        </div>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleSpeak(ex.sentence_en)}
+                                          title="Nghe cả câu"
+                                          className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 p-1 rounded hover:bg-slate-200 dark:hover:bg-zinc-900 transition-colors shrink-0"
+                                        >
+                                          <Volume2 className="w-3.5 h-3.5" />
+                                        </button>
+                                      </div>
+
+                                      {ex.sentence_vn && (
+                                        <div className="p-2.5 rounded-xl bg-cyan-50 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-900/50 text-xs text-cyan-950 dark:text-cyan-200 leading-relaxed">
+                                          <span className="font-semibold text-cyan-700 dark:text-cyan-400">Dịch nghĩa: </span>
+                                          {ex.sentence_vn}
+                                        </div>
+                                      )}
+
+                                      {ex.grammar_analysis && (
+                                        <div className="space-y-1.5 pt-1 border-t border-slate-200 dark:border-zinc-900">
+                                          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-bold block">
+                                            Phân tích cú pháp (Grammar / Syntax):
+                                          </span>
+                                          <div className="p-3 rounded-xl bg-white dark:bg-zinc-900/90 border border-slate-200 dark:border-zinc-800 text-xs font-mono text-slate-800 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap shadow-inner">
+                                            {ex.grammar_analysis}
+                                          </div>
+                                        </div>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
-
-                      {item.result && (
-                        <p className="text-xs text-slate-700 dark:text-zinc-300">
-                          <span className="text-cyan-700 dark:text-cyan-400 font-medium">Nghĩa: </span>
-                          {item.result.meaning_vn}
-                        </p>
-                      )}
-
-                      {item.error && <p className="text-xs text-rose-400">{item.error}</p>}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -2058,6 +2854,14 @@ export default function MainDashboard({ onOpenQuickInputPreview }: MainDashboard
             </div>
           </div>
         </div>
+      )}
+
+      {/* FOCUS REVIEW POP-UP MODAL (PREVIEW OR IN-APP MODE) */}
+      {showReviewModalPreview && (
+        <FocusReviewModal
+          onClose={() => setShowReviewModalPreview(false)}
+          isPreview={true}
+        />
       )}
     </div>
   );

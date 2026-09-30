@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "tauri-app",
+  "productName": "MyEnglish",
   "version": "0.1.0",
   "identifier": "com.myenglish.app",
   "build": {
@@ -37,6 +37,20 @@
         "resizable": false,
         "shadow": true,
         "skipTaskbar": true
+      },
+      {
+        "label": "review-popup",
+        "title": "MyEnglish Focus Review",
+        "width": 1920,
+        "height": 1080,
+        "visible": false,
+        "center": true,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": true,
+        "shadow": false,
+        "skipTaskbar": true
       }
     ],
     "security": {
@@ -46,6 +60,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -53,5 +68,13 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ]
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDIxMjE1MURGNUE3OEY0NzAKUldSdzlIaGEzMUVoSVUxSGxic3pZMDEyNzRpajJqQ0JSYkZPbHdJSHFVS2hhMGViOGl0RHlhUUMK",
+      "endpoints": [
+        "https://github.com/dev-truonglx/MyEnglish/releases/latest/download/latest.json"
+      ]
+    }
   }
 }

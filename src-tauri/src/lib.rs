@@ -1,14 +1,78 @@
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+#[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
 
-static PENDING_REVIEW_NAV: AtomicBool = AtomicBool::new(false);
+static LAST_NOTIFICATION_TIME: AtomicU64 = AtomicU64::new(0);
+
+#[cfg(target_os = "macos")]
+fn ensure_macos_app_registered() {
+    let current_exe = match std::env::current_exe() {
+        Ok(path) => path,
+        Err(_) => return,
+    };
+
+    let parent = match current_exe.parent() {
+        Some(p) => p,
+        None => return,
+    };
+
+    let app_bundle_path = parent.join("MyEnglish.app");
+    let contents_dir = app_bundle_path.join("Contents");
+    let macos_dir = contents_dir.join("MacOS");
+    let resources_dir = contents_dir.join("Resources");
+
+    let _ = std::fs::create_dir_all(&macos_dir);
+    let _ = std::fs::create_dir_all(&resources_dir);
+
+    let bundle_bin = macos_dir.join("tauri-app");
+    if !bundle_bin.exists() {
+        #[cfg(unix)]
+        let _ = std::os::unix::fs::symlink(&current_exe, &bundle_bin);
+    }
+
+    let plist_path = contents_dir.join("Info.plist");
+    if !plist_path.exists() {
+        let plist_content = r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.myenglish.app</string>
+    <key>CFBundleName</key>
+    <string>MyEnglish</string>
+    <key>CFBundleDisplayName</key>
+    <string>MyEnglish</string>
+    <key>CFBundleExecutable</key>
+    <string>tauri-app</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+</dict>
+</plist>
+"#;
+        let _ = std::fs::write(&plist_path, plist_content);
+    }
+
+    if let Some(path_str) = app_bundle_path.to_str() {
+        let _ = std::process::Command::new("/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister")
+            .arg("-f")
+            .arg(path_str)
+            .output();
+    }
+}
 
 #[tauri::command]
 fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Result<bool, String> {
-    PENDING_REVIEW_NAV.store(true, Ordering::SeqCst);
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    LAST_NOTIFICATION_TIME.store(now, Ordering::SeqCst);
 
     // Emit event to frontend for in-app toast banner and state tracking
     let _ = app.emit("desktop-notification-received", serde_json::json!({
@@ -17,22 +81,42 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
         "target": "review"
     }));
 
-    // 1. Try Tauri notification plugin builder
-    let _ = app.notification().builder()
-        .title(&title)
-        .body(&body)
-        .show();
-
-    // 2. On macOS, use native mac_notification_sys with app bundle identifier so clicking activates MyEnglish
     #[cfg(target_os = "macos")]
     {
-        let bundle = mac_notification_sys::get_bundle_identifier_or_default("com.myenglish.app");
-        let _ = mac_notification_sys::set_application(&bundle);
-        let _ = mac_notification_sys::Notification::new()
+        let app_handle = app.clone();
+        let title_c = title.clone();
+        let body_c = body.clone();
+
+        std::thread::spawn(move || {
+            let mut notif = mac_notification_sys::Notification::new();
+            notif.title(&title_c)
+                .message(&body_c)
+                .sound("Glass")
+                .main_button(mac_notification_sys::MainButton::SingleAction("Ôn tập ngay"))
+                .wait_for_click(true);
+
+            match notif.send() {
+                Ok(mac_notification_sys::NotificationResponse::Click)
+                | Ok(mac_notification_sys::NotificationResponse::ActionButton(_)) => {
+                    LAST_NOTIFICATION_TIME.store(0, Ordering::SeqCst);
+                    if let Some(window) = app_handle.get_webview_window("main") {
+                        let _ = window.show();
+                        let _ = window.unminimize();
+                        let _ = window.set_focus();
+                        let _ = window.emit("open-review-tab", serde_json::json!({ "auto_start": false }));
+                    }
+                }
+                _ => {}
+            }
+        });
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = app.notification().builder()
             .title(&title)
-            .message(&body)
-            .sound("Glass")
-            .send();
+            .body(&body)
+            .show();
     }
 
     Ok(true)
@@ -44,7 +128,7 @@ fn trigger_review_navigation(app: AppHandle) -> Result<(), String> {
         let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
-        let _ = window.emit("open-review-tab", ());
+        let _ = window.emit("open-review-tab", serde_json::json!({ "auto_start": false }));
     }
     Ok(())
 }
@@ -70,6 +154,15 @@ fn toggle_quick_input(app: AppHandle) -> Result<bool, String> {
             window.hide().map_err(|e| e.to_string())?;
             Ok(false)
         } else {
+            if let Some(monitor) = get_monitor_at_cursor(&window) {
+                let m_pos = monitor.position();
+                let m_size = monitor.size();
+                if let Ok(w_size) = window.outer_size() {
+                    let x = m_pos.x + ((m_size.width as i32 - w_size.width as i32) / 2);
+                    let y = m_pos.y + ((m_size.height as i32 - w_size.height as i32) / 3);
+                    let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+                }
+            }
             let clipboard = get_clipboard_text();
             let _ = window.emit("quick-input-opened", serde_json::json!({ "clipboard": clipboard }));
             window.show().map_err(|e| e.to_string())?;
@@ -94,6 +187,121 @@ fn show_main_window(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("main") {
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+mod macos_cursor {
+    use std::ffi::c_void;
+
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGEventCreate(source: *const c_void) -> *mut c_void;
+        fn CGEventGetLocation(event: *mut c_void) -> CGPoint;
+        fn CFRelease(cf: *mut c_void);
+    }
+
+    #[repr(C)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct CGPoint {
+        pub x: f64,
+        pub y: f64,
+    }
+
+    pub fn get_global_cursor_pos() -> Option<CGPoint> {
+        unsafe {
+            let event = CGEventCreate(std::ptr::null());
+            if event.is_null() {
+                return None;
+            }
+            let pt = CGEventGetLocation(event);
+            CFRelease(event);
+            Some(pt)
+        }
+    }
+}
+
+fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
+    let monitors = window.available_monitors().ok()?;
+
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(cursor) = macos_cursor::get_global_cursor_pos() {
+            for m in &monitors {
+                let scale = m.scale_factor();
+                let pos = m.position();
+                let size = m.size();
+                let left = pos.x as f64 / scale;
+                let top = pos.y as f64 / scale;
+                let right = left + (size.width as f64 / scale);
+                let bottom = top + (size.height as f64 / scale);
+
+                if cursor.x >= left && cursor.x < right && cursor.y >= top && cursor.y < bottom {
+                    return Some(m.clone());
+                }
+            }
+        }
+    }
+
+    // Fallback for non-macOS or if CoreGraphics call failed:
+    if let Ok(cursor_pos) = window.cursor_position() {
+        for m in &monitors {
+            let m_pos = m.position();
+            let m_size = m.size();
+            let x = cursor_pos.x as i32;
+            let y = cursor_pos.y as i32;
+            if x >= m_pos.x
+                && x < m_pos.x + m_size.width as i32
+                && y >= m_pos.y
+                && y < m_pos.y + m_size.height as i32
+            {
+                return Some(m.clone());
+            }
+        }
+    }
+
+    window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten())
+}
+
+#[tauri::command]
+fn show_review_popup(app: AppHandle) -> Result<bool, String> {
+    if let Some(window) = app.get_webview_window("review-popup") {
+        if let Some(monitor) = get_monitor_at_cursor(&window) {
+            let size = monitor.size();
+            let pos = monitor.position();
+            let _ = window.set_position(tauri::Position::Physical(*pos));
+            let _ = window.set_size(tauri::Size::Physical(*size));
+        }
+        window.show().map_err(|e| e.to_string())?;
+
+        // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
+        if let Some(monitor) = get_monitor_at_cursor(&window) {
+            let size = monitor.size();
+            let pos = monitor.position();
+            let _ = window.set_position(tauri::Position::Physical(*pos));
+            let _ = window.set_size(tauri::Size::Physical(*size));
+            eprintln!(
+                "[ReviewPopup] monitor pos: {:?}, size: {:?}, current win pos: {:?}, win size: {:?}",
+                pos,
+                size,
+                window.outer_position().ok(),
+                window.inner_size().ok()
+            );
+        }
+
+        window.set_focus().map_err(|e| e.to_string())?;
+        let _ = window.emit("review-popup-opened", serde_json::json!({}));
+        Ok(true)
+    } else {
+        Err("Review popup window not found".to_string())
+    }
+}
+
+#[tauri::command]
+fn hide_review_popup(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("review-popup") {
+        window.hide().map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -319,6 +527,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -338,6 +548,12 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                ensure_macos_app_registered();
+                let bundle = mac_notification_sys::get_bundle_identifier_or_default("MyEnglish");
+                let _ = mac_notification_sys::set_application(&bundle);
+            }
             let shortcut = Shortcut::from_str("CmdOrCtrl+Shift+E")?;
             app.global_shortcut().register(shortcut)?;
             Ok(())
@@ -351,7 +567,9 @@ pub fn run() {
             get_clipboard_text,
             check_cli_status,
             send_desktop_notification,
-            trigger_review_navigation
+            trigger_review_navigation,
+            show_review_popup,
+            hide_review_popup
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -359,12 +577,17 @@ pub fn run() {
     app.run(|app_handle, event| {
         match event {
             tauri::RunEvent::Reopen { .. } => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                let last = LAST_NOTIFICATION_TIME.swap(0, Ordering::SeqCst);
                 if let Some(window) = app_handle.get_webview_window("main") {
                     let _ = window.show();
                     let _ = window.unminimize();
                     let _ = window.set_focus();
-                    if PENDING_REVIEW_NAV.swap(false, Ordering::SeqCst) {
-                        let _ = window.emit("open-review-tab", ());
+                    if now.saturating_sub(last) < 120 {
+                        let _ = window.emit("open-review-tab", serde_json::json!({ "auto_start": false }));
                     }
                 }
             }
@@ -373,9 +596,16 @@ pub fn run() {
                 event: tauri::WindowEvent::Focused(true),
                 ..
             } => {
-                if label == "main" && PENDING_REVIEW_NAV.swap(false, Ordering::SeqCst) {
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.emit("open-review-tab", ());
+                if label == "main" {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs();
+                    let last = LAST_NOTIFICATION_TIME.swap(0, Ordering::SeqCst);
+                    if now.saturating_sub(last) < 120 {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            let _ = window.emit("open-review-tab", serde_json::json!({ "auto_start": false }));
+                        }
                     }
                 }
             }

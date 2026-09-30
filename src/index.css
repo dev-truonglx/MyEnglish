@@ -102,6 +102,13 @@
     width: 100%;
     min-height: 100%;
   }
+
+  html.transparent-window,
+  html.transparent-window body,
+  body.transparent-window {
+    background: transparent !important;
+    background-color: transparent !important;
+  }
 }
 
 /* =========================================================
@@ -151,4 +158,21 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 /* Code monospace font */
 pre code {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/* Shake animation for incorrect inputs */
+@keyframes shake {
+  0%, 100% {
+    transform: translateX(0);
+  }
+  20%, 60% {
+    transform: translateX(-6px);
+  }
+  40%, 80% {
+    transform: translateX(6px);
+  }
+}
+
+.animate-shake {
+  animation: shake 0.35s ease-in-out;
 }

@@ -155,10 +155,18 @@ export async function triggerDesktopNotification(title: string, body: string): P
 /**
  * Trigger an OS notification if reviews are due
  */
-export async function checkAndNotifyDueReviews(): Promise<number> {
+export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Promise<number> {
   try {
     const dueWords = await getDueWords();
-    if (dueWords.length === 0) return 0;
+    if (dueWords.length === 0) {
+      if (sendIfZero) {
+        await triggerDesktopNotification(
+          "MyEnglish • Ôn tập từ vựng",
+          "Hiện tại không có từ vựng nào quá hạn. Nhấp để vào màn hình ôn tập luyện tập thêm!"
+        );
+      }
+      return 0;
+    }
 
     await triggerDesktopNotification(
       "MyEnglish • Ôn tập từ vựng!",
@@ -178,8 +186,8 @@ export async function checkAndNotifyDueReviews(): Promise<number> {
 export async function sendTestNotification(): Promise<{ success: boolean; message: string }> {
   try {
     const sent = await triggerDesktopNotification(
-      "MyEnglish • Kiểm tra thông báo",
-      "Hệ thống thông báo nhắc nhở ôn tập Spaced Repetition (SM-2) đang hoạt động hoàn hảo! 🚀"
+      "MyEnglish • Nhắc nhở ôn tập",
+      "Đã đến giờ ôn tập từ vựng Spaced Repetition (SM-2)! Nhấp vào thông báo để mở màn hình ôn tập ngay 🚀"
     );
 
     if (sent) {
@@ -255,22 +263,43 @@ export async function markWordDueImmediately(wordId?: string): Promise<string | 
   return targetWord || targetId;
 }
 
+import {
+  getReminderSettings,
+  isSnoozed,
+  triggerReviewPopup,
+} from "./reminderSettings";
+
 /**
  * Background worker manager that periodically inspects due reviews
+ * and triggers either full-screen focus pop-up quiz or system notifications
  */
 class SRSBackgroundWorker {
   private timerId: number | null = null;
-  private lastNotificationCount = 0;
+  private lastTriggerTime = 0;
 
-  public start(intervalMinutes: number = 30) {
-    if (this.timerId) return;
+  public start(defaultIntervalMinutes?: number) {
+    if (this.timerId) {
+      this.stop();
+    }
 
-    // Initial check
-    this.tick();
+    const settings = getReminderSettings();
+    const intervalMinutes = defaultIntervalMinutes ?? (settings.enabled ? settings.intervalMinutes : 0);
 
-    // Periodic interval
-    const ms = intervalMinutes * 60 * 1000;
-    this.timerId = window.setInterval(() => this.tick(), ms);
+    // Initial check after 3 seconds to let database initialize
+    setTimeout(() => this.tick(), 3000);
+
+    if (intervalMinutes > 0) {
+      const ms = intervalMinutes * 60 * 1000;
+      this.timerId = window.setInterval(() => this.tick(), ms);
+    }
+  }
+
+  public restart() {
+    this.stop();
+    const settings = getReminderSettings();
+    if (settings.enabled && settings.intervalMinutes > 0) {
+      this.start(settings.intervalMinutes);
+    }
   }
 
   public stop() {
@@ -280,14 +309,31 @@ class SRSBackgroundWorker {
     }
   }
 
-  private async tick() {
+  public async tick(forceTrigger: boolean = false) {
     try {
-      const dueCount = await getDueWords().then((w) => w.length);
-      // Only notify if there are due words and count increased or was not notified yet
-      if (dueCount > 0 && dueCount !== this.lastNotificationCount) {
-        this.lastNotificationCount = dueCount;
-        await checkAndNotifyDueReviews();
+      const settings = getReminderSettings();
+      if (!forceTrigger) {
+        if (!settings.enabled || settings.intervalMinutes === 0) return;
+        if (isSnoozed()) return;
+
+        // Prevent rapid re-triggering within 3 minutes unless forced
+        const now = Date.now();
+        if (now - this.lastTriggerTime < 3 * 60 * 1000) return;
       }
+
+      const dueWords = await getDueWords();
+
+      if (settings.triggerCondition === "due_only") {
+        if (dueWords.length === 0 && !forceTrigger) return;
+      } else {
+        const all = await getAllWords();
+        if (all.length === 0 && !forceTrigger) return;
+      }
+
+      this.lastTriggerTime = Date.now();
+
+      // Trigger the interactive full-screen Focus Review Modal
+      await triggerReviewPopup();
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
     }
