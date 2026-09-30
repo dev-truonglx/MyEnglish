@@ -218,7 +218,7 @@ export default function MainDashboard({
         if (isCancelled) fn();
         else unlistenReviewFn = fn;
       })
-      .catch(() => {});
+      .catch(() => { });
 
     listen<{ title: string; body: string; target?: string }>("desktop-notification-received", (event) => {
       if (isCancelled) return;
@@ -231,7 +231,7 @@ export default function MainDashboard({
         if (isCancelled) fn();
         else unlistenNotifFn = fn;
       })
-      .catch(() => {});
+      .catch(() => { });
 
     const handleOpenPreview = () => {
       if (onOpenReviewPopupPreview) {
@@ -276,6 +276,7 @@ export default function MainDashboard({
     }
     setReviewSet(target);
     setIsReviewing(true);
+    setActiveTab("review");
   };
 
   const handleOpenReview = (autoStartFlashcard = false) => {
@@ -660,10 +661,10 @@ export default function MainDashboard({
                       {updateStatus === "downloaded"
                         ? "Đã cập nhật xong!"
                         : updateStatus === "downloading"
-                        ? `Đang tải... ${downloadProgress}%`
-                        : updateStatus === "error"
-                        ? (errorMessage || "Lỗi cập nhật")
-                        : `Đã có bản cập nhật mới: v${newVersion}`}
+                          ? `Đang tải... ${downloadProgress}%`
+                          : updateStatus === "error"
+                            ? (errorMessage || "Lỗi cập nhật")
+                            : `Đã có bản cập nhật mới: v${newVersion}`}
                     </span>
                   </div>
                   <button
@@ -719,11 +720,10 @@ export default function MainDashboard({
           <nav className="space-y-1">
             <button
               onClick={() => setActiveTab("library")}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "library"
-                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "library"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <BookOpen className="w-4 h-4" />
@@ -736,11 +736,10 @@ export default function MainDashboard({
 
             <button
               onClick={() => setActiveTab("capture")}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "capture"
-                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "capture"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Sparkles className="w-4 h-4" />
@@ -753,11 +752,10 @@ export default function MainDashboard({
 
             <button
               onClick={() => setActiveTab("review")}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "review"
-                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "review"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Flame className="w-4 h-4 text-orange-400" />
@@ -772,11 +770,10 @@ export default function MainDashboard({
 
             <button
               onClick={() => setActiveTab("analytics")}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "analytics"
-                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "analytics"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <BarChart3 className="w-4 h-4 text-emerald-400" />
@@ -786,11 +783,10 @@ export default function MainDashboard({
 
             <button
               onClick={() => setActiveTab("guide")}
-              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                activeTab === "guide"
-                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "guide"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
             >
               <div className="flex items-center gap-2.5">
                 <Terminal className="w-4 h-4 text-cyan-500" />
@@ -824,9 +820,8 @@ export default function MainDashboard({
               </div>
               <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
                 <div
-                  className={`h-full transition-all duration-300 rounded-full ${
-                    streakStats.goalReached ? "bg-emerald-500 shadow-sm shadow-emerald-500/50" : "bg-cyan-500"
-                  }`}
+                  className={`h-full transition-all duration-300 rounded-full ${streakStats.goalReached ? "bg-emerald-500 shadow-sm shadow-emerald-500/50" : "bg-cyan-500"
+                    }`}
                   style={{ width: `${streakStats.goalPercentage}%` }}
                 />
               </div>
@@ -864,28 +859,16 @@ export default function MainDashboard({
 
           {/* Theme Selector */}
           <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-            <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-zinc-300">
-              {currentTheme === "dark" ? (
-                <Moon className="w-3.5 h-3.5 text-cyan-400" />
-              ) : currentTheme === "light" ? (
-                <Sun className="w-3.5 h-3.5 text-amber-500" />
-              ) : (
-                <Laptop className="w-3.5 h-3.5 text-indigo-400" />
-              )}
-              <span className="text-[11px]">Giao diện</span>
-            </div>
-
             {/* Segmented Control */}
             <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800/80">
               <button
                 type="button"
                 onClick={() => handleThemeChange("light")}
                 title="Giao diện sáng (Light)"
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
-                  currentTheme === "light"
-                    ? "bg-white text-amber-700 border border-slate-200 shadow-sm"
-                    : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "light"
+                  ? "bg-white text-amber-700 border border-slate-200 shadow-sm"
+                  : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
+                  }`}
               >
                 <Sun className="w-3 h-3" />
                 <span>Sáng</span>
@@ -895,11 +878,10 @@ export default function MainDashboard({
                 type="button"
                 onClick={() => handleThemeChange("dark")}
                 title="Giao diện tối (Dark)"
-                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${
-                  currentTheme === "dark"
-                    ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                    : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "dark"
+                  ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
+                  : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
+                  }`}
               >
                 <Moon className="w-3 h-3" />
                 <span>Tối</span>
@@ -909,11 +891,10 @@ export default function MainDashboard({
                 type="button"
                 onClick={() => handleThemeChange("system")}
                 title="Theo hệ thống (System)"
-                className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium transition-all ${
-                  currentTheme === "system"
-                    ? "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm"
-                    : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
+                className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "system"
+                  ? "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm"
+                  : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
+                  }`}
               >
                 <Laptop className="w-3 h-3" />
                 <span>Hệ thống</span>
@@ -981,22 +962,20 @@ export default function MainDashboard({
                 <button
                   onClick={() => setViewMode("gallery")}
                   title="Card Gallery View"
-                  className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === "gallery"
-                      ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
-                      : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
-                  }`}
+                  className={`p-1.5 rounded-md transition-colors ${viewMode === "gallery"
+                    ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
+                    : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
+                    }`}
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setViewMode("table")}
                   title="Data Grid Table View"
-                  className={`p-1.5 rounded-md transition-colors ${
-                    viewMode === "table"
-                      ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
-                      : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
-                  }`}
+                  className={`p-1.5 rounded-md transition-colors ${viewMode === "table"
+                    ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
+                    : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
+                    }`}
                 >
                   <List className="w-3.5 h-3.5" />
                 </button>
@@ -1007,21 +986,19 @@ export default function MainDashboard({
             <div className="flex items-center gap-1 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-300 dark:border-zinc-800">
               <button
                 onClick={() => setFilterMode("all")}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                  filterMode === "all"
-                    ? "bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-transparent font-medium"
-                    : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-                }`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "all"
+                  ? "bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-transparent font-medium"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                  }`}
               >
                 All
               </button>
               <button
                 onClick={() => setFilterMode("due")}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${
-                  filterMode === "due"
-                    ? "bg-white dark:bg-zinc-800 text-orange-600 dark:text-orange-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
-                    : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-                }`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "due"
+                  ? "bg-white dark:bg-zinc-800 text-orange-600 dark:text-orange-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                  }`}
               >
                 Due
                 {dueCount > 0 && (
@@ -1030,11 +1007,10 @@ export default function MainDashboard({
               </button>
               <button
                 onClick={() => setFilterMode("mastered")}
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                  filterMode === "mastered"
-                    ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
-                    : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-                }`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "mastered"
+                  ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                  }`}
               >
                 Mastered
               </button>
@@ -1087,11 +1063,10 @@ export default function MainDashboard({
               {/* All Topics */}
               <button
                 onClick={() => setSelectedTopic("all")}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${
-                  selectedTopic === "all"
-                    ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
-                    : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
-                }`}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${selectedTopic === "all"
+                  ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
+                  : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
+                  }`}
               >
                 <span>Tất cả</span>
                 <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-zinc-800/80 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700/50">
@@ -1107,11 +1082,10 @@ export default function MainDashboard({
                   <button
                     key={top}
                     onClick={() => setSelectedTopic(isSelected ? "all" : top)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${
-                      isSelected
-                        ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
-                        : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
-                    }`}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${isSelected
+                      ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
+                      : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
+                      }`}
                   >
                     <Tag className="w-3 h-3 opacity-70" />
                     <span>{top}</span>
@@ -1152,11 +1126,10 @@ export default function MainDashboard({
                       <div
                         key={item.id}
                         onClick={() => setSelectedWord(item)}
-                        className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${
-                          isSelected
-                            ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
-                            : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
-                        }`}
+                        className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${isSelected
+                          ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
+                          : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
+                          }`}
                       >
                         <div className="space-y-3">
                           {/* Word header & actions */}
@@ -1255,8 +1228,8 @@ export default function MainDashboard({
                     );
                   })}
                 </div>
-            )
-          ) : (
+              )
+            ) : (
               /* EMPTY STATE */
               <div className="text-center py-20 max-w-md mx-auto space-y-4">
                 <div className="w-14 h-14 rounded-2xl bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 flex items-center justify-center mx-auto text-slate-400 dark:text-zinc-500 shadow-inner">
@@ -1484,13 +1457,12 @@ export default function MainDashboard({
                             )}
 
                             <span
-                              className={`text-xs font-mono px-2.5 py-0.5 rounded-full border ${
-                                item.status === "analyzing"
-                                  ? "bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 animate-pulse"
-                                  : item.status === "completed"
+                              className={`text-xs font-mono px-2.5 py-0.5 rounded-full border ${item.status === "analyzing"
+                                ? "bg-amber-100 dark:bg-amber-950/60 border-amber-300 dark:border-amber-700 text-amber-800 dark:text-amber-300 animate-pulse"
+                                : item.status === "completed"
                                   ? "bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300"
                                   : "bg-rose-100 dark:bg-rose-950/60 border-rose-300 dark:border-rose-700 text-rose-800 dark:text-rose-300"
-                              }`}
+                                }`}
                             >
                               {item.status === "analyzing" && "Analyzing with Gemini..."}
                               {item.status === "completed" && "Saved to Library ✓"}
@@ -1577,11 +1549,10 @@ export default function MainDashboard({
                                     return (
                                       <div
                                         key={sIdx}
-                                        className={`rounded-2xl border transition-all overflow-hidden ${
-                                          isExpanded
-                                            ? "bg-emerald-50/40 dark:bg-zinc-900 border-emerald-400 dark:border-emerald-500/60 shadow-md shadow-emerald-500/5 ring-1 ring-emerald-500/20"
-                                            : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
-                                        }`}
+                                        className={`rounded-2xl border transition-all overflow-hidden ${isExpanded
+                                          ? "bg-emerald-50/40 dark:bg-zinc-900 border-emerald-400 dark:border-emerald-500/60 shadow-md shadow-emerald-500/5 ring-1 ring-emerald-500/20"
+                                          : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                          }`}
                                       >
                                         {/* Synonym Header */}
                                         <div
@@ -1728,11 +1699,10 @@ export default function MainDashboard({
                                     return (
                                       <div
                                         key={aIdx}
-                                        className={`rounded-2xl border transition-all overflow-hidden ${
-                                          isExpanded
-                                            ? "bg-rose-50/40 dark:bg-zinc-900 border-rose-400 dark:border-rose-500/60 shadow-md shadow-rose-500/5 ring-1 ring-rose-500/20"
-                                            : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-rose-400 dark:hover:border-rose-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
-                                        }`}
+                                        className={`rounded-2xl border transition-all overflow-hidden ${isExpanded
+                                          ? "bg-rose-50/40 dark:bg-zinc-900 border-rose-400 dark:border-rose-500/60 shadow-md shadow-rose-500/5 ring-1 ring-rose-500/20"
+                                          : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-rose-400 dark:hover:border-rose-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                          }`}
                                       >
                                         {/* Antonym Header */}
                                         <div
@@ -2098,9 +2068,8 @@ export default function MainDashboard({
                             ) : null}
                             <button
                               onClick={() => handleStartReview(false, top)}
-                              className={`${
-                                dueInTopic > 0 ? "" : "flex-1"
-                              } py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700/60 text-xs font-medium transition-colors flex items-center justify-center gap-1 shadow-sm`}
+                              className={`${dueInTopic > 0 ? "" : "flex-1"
+                                } py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700/60 text-xs font-medium transition-colors flex items-center justify-center gap-1 shadow-sm`}
                             >
                               <span>Luyện tất cả ({topicWords.length})</span>
                             </button>
@@ -2397,11 +2366,10 @@ export default function MainDashboard({
                           return (
                             <div
                               key={idx}
-                              className={`rounded-2xl border transition-all overflow-hidden ${
-                                isExpanded
-                                  ? "bg-emerald-50/40 dark:bg-zinc-900 border-emerald-400 dark:border-emerald-500/60 shadow-md shadow-emerald-500/5 ring-1 ring-emerald-500/20"
-                                  : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
-                              }`}
+                              className={`rounded-2xl border transition-all overflow-hidden ${isExpanded
+                                ? "bg-emerald-50/40 dark:bg-zinc-900 border-emerald-400 dark:border-emerald-500/60 shadow-md shadow-emerald-500/5 ring-1 ring-emerald-500/20"
+                                : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-emerald-400 dark:hover:border-emerald-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                }`}
                             >
                               {/* Accordion Header */}
                               <div
@@ -2548,11 +2516,10 @@ export default function MainDashboard({
                           return (
                             <div
                               key={idx}
-                              className={`rounded-2xl border transition-all overflow-hidden ${
-                                isExpanded
-                                  ? "bg-rose-50/40 dark:bg-zinc-900 border-rose-400 dark:border-rose-500/60 shadow-md shadow-rose-500/5 ring-1 ring-rose-500/20"
-                                  : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-rose-400 dark:hover:border-rose-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
-                              }`}
+                              className={`rounded-2xl border transition-all overflow-hidden ${isExpanded
+                                ? "bg-rose-50/40 dark:bg-zinc-900 border-rose-400 dark:border-rose-500/60 shadow-md shadow-rose-500/5 ring-1 ring-rose-500/20"
+                                : "bg-slate-50 dark:bg-zinc-900/80 border-slate-200 dark:border-zinc-800 hover:border-rose-400 dark:hover:border-rose-500/40 hover:bg-slate-50/90 dark:hover:bg-zinc-900"
+                                }`}
                             >
                               {/* Accordion Header */}
                               <div
@@ -2797,10 +2764,10 @@ export default function MainDashboard({
                   {selectedWord.srs.state === 2
                     ? "Đã thuộc"
                     : selectedWord.srs.state === 1
-                    ? "Đang học"
-                    : selectedWord.srs.state === 3
-                    ? "Cần củng cố"
-                    : "Từ mới"}
+                      ? "Đang học"
+                      : selectedWord.srs.state === 3
+                        ? "Cần củng cố"
+                        : "Từ mới"}
                 </span>
               </div>
               <div className="grid grid-cols-3 gap-2 text-center text-xs">

@@ -525,12 +525,7 @@ class SRSBackgroundWorker {
   public async start() {
     this.stop();
 
-    // Set lastTriggerTime to Date.now() on startup so the user is not ambushed
-    // with a popup immediately after launching the app. The popup will only trigger
-    // after the configured interval (e.g. 15m, 30m) has elapsed.
-    this.setLastTriggerTime(Date.now());
-
-    // 1. Listen to native Rust background heartbeat (fires every 30s, even in background/tray)
+    // Lắng nghe heartbeat từ Rust (bắn mỗi 30s)
     try {
       this.unlistenHeartbeat = await listen("srs-heartbeat", () => {
         this.tick();

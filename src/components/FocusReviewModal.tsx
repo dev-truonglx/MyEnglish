@@ -260,8 +260,20 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
       // Target count: 3, 5, or 10 words (default 3)
       const targetCount = Math.max(3, currentSettings.wordsPerSession || 3);
-      const shuffled = [...candidates].sort(() => 0.5 - Math.random());
-      let selected = shuffled.slice(0, targetCount);
+      
+      let selected: WordDetail[] = [];
+      // If we are prioritizing due words, sort by oldest next_review_date first
+      if (candidates === dueWords || (candidates.length > 0 && new Date(candidates[0].srs?.next_review_date) <= new Date())) {
+        const sortedDue = [...candidates].sort(
+          (a, b) => new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime()
+        );
+        // Take top overdue, then shuffle so they aren't totally predictable
+        selected = sortedDue.slice(0, targetCount).sort(() => 0.5 - Math.random());
+      } else {
+        // Fallback or random words (allWords)
+        const shuffled = [...candidates].sort(() => 0.5 - Math.random());
+        selected = shuffled.slice(0, targetCount);
+      }
 
       // If candidates had fewer than targetCount words, supplement from allWords to meet targetCount
       if (selected.length < targetCount && allWords.length > selected.length) {
@@ -436,6 +448,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       } else {
         await recordReview(currentWord.id, Rating.Again);
         setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${currentWord.word}"`);
+        
+        // Cải tiến: Đẩy từ trả lời sai vào cuối hàng đợi để buộc người dùng phải học lại trong phiên này
+        setQueue((prev) => [...prev, currentWord]);
       }
     } catch (err) {
       console.warn("Failed to record review from popup:", err);
@@ -468,6 +483,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       } else {
         await recordReview(currentWord.id, Rating.Again);
         setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${currentWord.word}"`);
+        
+        // Cải tiến: Đẩy từ trả lời sai vào cuối hàng đợi
+        setQueue((prev) => [...prev, currentWord]);
       }
     } catch (err) {
       console.warn("Failed to record typing review:", err);
