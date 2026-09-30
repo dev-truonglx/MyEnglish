@@ -15,11 +15,14 @@ import type { WordDetail } from "@/types/database";
 import {
   getWordStatsSummary,
   getLeechWords,
+  getLeechSettings,
+  saveLeechSettings,
   getXPState,
   getReviewAnalytics,
   type WordStatsSummary,
   type XPState,
   type ReviewAnalyticsData,
+  type LeechSettings,
 } from "@/services/smartReview";
 import { getAchievements } from "@/services/achievements";
 import { calculateStreakAndGoal } from "@/services/streak";
@@ -36,13 +39,20 @@ export default function AnalyticsView({
   words,
   onStartReviewWord,
 }: AnalyticsViewProps) {
-  const [xpState] = useState<XPState>(getXPState);
+  const [xpState, setXpState] = useState<XPState>(getXPState);
+  const [leechSettings, setLeechSettings] = useState<LeechSettings>(getLeechSettings);
   const [reviewAnalytics, setReviewAnalytics] = useState<ReviewAnalyticsData | null>(null);
   const [activeMnemonicWordId, setActiveMnemonicWordId] = useState<string | null>(null);
   const [mnemonicText, setMnemonicText] = useState<string | null>(null);
 
+  useEffect(() => {
+    const onXPUpdate = () => setXpState(getXPState());
+    window.addEventListener("myenglish-xp-updated", onXPUpdate);
+    return () => window.removeEventListener("myenglish-xp-updated", onXPUpdate);
+  }, []);
+
   const stats: WordStatsSummary = useMemo(() => getWordStatsSummary(words), [words]);
-  const leechWords = useMemo(() => getLeechWords(words), [words]);
+  const leechWords = useMemo(() => getLeechWords(words, leechSettings), [words, leechSettings]);
   const streakStats = useMemo(() => calculateStreakAndGoal(words), [words]);
 
   // Compute Topic Mastery
@@ -382,7 +392,7 @@ export default function AnalyticsView({
 
       {/* Leech Center Section */}
       <div className="p-6 rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/20 dark:bg-rose-950/10 shadow-sm space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-2.5">
             <div className="w-8 h-8 rounded-xl bg-rose-500/20 flex items-center justify-center text-rose-500">
               <Bug className="w-4 h-4" />
@@ -392,13 +402,35 @@ export default function AnalyticsView({
                 Trung Tâm Khắc Phục Từ Khó (Leech Words)
               </h3>
               <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Những từ bị quên từ 4 lần trở lên, cần mẹo ghi nhớ hoặc chuyển đổi phương pháp học.
+                Những từ bị quên từ {leechSettings.threshold} lần trở lên, cần mẹo ghi nhớ hoặc chuyển đổi phương pháp học.
               </p>
             </div>
           </div>
-          <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
-            {leechWords.length} từ
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">Ngưỡng:</span>
+            <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
+              {[2, 3, 4, 5].map((thresh) => (
+                <button
+                  key={thresh}
+                  onClick={() => {
+                    saveLeechSettings({ threshold: thresh });
+                    setLeechSettings(getLeechSettings());
+                  }}
+                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
+                    leechSettings.threshold === thresh
+                      ? "bg-rose-500 text-white shadow-xs"
+                      : "text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                  }`}
+                  title={`Coi từ là Leech khi quên từ ${thresh} lần trở lên`}
+                >
+                  {thresh} lần
+                </button>
+              ))}
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
+              {leechWords.length} từ
+            </span>
+          </div>
         </div>
 
         {leechWords.length === 0 ? (

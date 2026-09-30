@@ -187,7 +187,8 @@ export function calculateSM2(
   quality: number,
   currentRepetitions: number,
   currentInterval: number,
-  currentEaseFactor: number = 2.5
+  currentEaseFactor: number = 2.5,
+  currentLapses: number = 0
 ): SM2Result {
   const q = Math.max(0, Math.min(5, Math.round(quality)));
   let nextRepetitions = currentRepetitions;
@@ -220,7 +221,7 @@ export function calculateSM2(
     elapsed_days: 0,
     scheduled_days: nextInterval,
     reps: nextRepetitions,
-    lapses: q < 3 ? 1 : 0,
+    lapses: q < 3 ? currentLapses + 1 : currentLapses,
     state: nextRepetitions > 0 ? 2 : 0,
     easeFactor: nextEaseFactor,
     interval: nextInterval,
@@ -287,6 +288,17 @@ export async function recordReview(
   const result = scheduler.next(card, now, fsrsRating);
 
   const updatedCard = result.card;
+
+  // Ensure lapses properly counts every failed review attempt on studied cards
+  if (fsrsRating === Rating.Again && updatedCard.lapses === (current.lapses ?? 0)) {
+    // If ts-fsrs did not increment lapses because the card was already in Relearning or Learning state,
+    // but the card has already been studied before (reps > 0 or state === State.Relearning),
+    // increment lapses so chronic difficulty (Leech) is accurately identified.
+    if ((current.reps ?? 0) > 0 || current.state === State.Relearning) {
+      updatedCard.lapses = (current.lapses ?? 0) + 1;
+    }
+  }
+
   const nextReviewDateStr = updatedCard.due.toISOString();
   const lastReviewStr = now.toISOString();
 
