@@ -73,6 +73,16 @@ export default function App() {
               setTimeout(() => setWindowLabel("main"), 1200);
             }
           }}
+          onOpenDashboard={() => {
+            if (!("__TAURI_INTERNALS__" in window)) {
+              setWindowLabel("main");
+            }
+          }}
+          onDismiss={() => {
+            if (!("__TAURI_INTERNALS__" in window)) {
+              setWindowLabel("main");
+            }
+          }}
         />
       </div>
     );

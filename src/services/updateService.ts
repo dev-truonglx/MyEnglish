@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { check, Update, DownloadEvent } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
+import { invoke } from "@tauri-apps/api/core";
 
 export const GITHUB_REPO = "dev-truonglx/MyEnglish";
 
@@ -123,6 +124,9 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
 
     set({ status: "downloading", downloadProgress: 0, errorMessage: null });
     try {
+      try {
+        await invoke("prepare_update_exit");
+      } catch (_) {}
       let contentLength = 0;
       let downloaded = 0;
 
@@ -153,6 +157,8 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
 
   restartApp: async () => {
     try {
+      // Signal Rust to allow process exit (bypasses close-to-tray guard)
+      await invoke("prepare_update_exit");
       await relaunch();
     } catch (err) {
       console.error("Failed to relaunch application:", err);

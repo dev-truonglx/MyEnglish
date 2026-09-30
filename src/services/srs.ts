@@ -1,28 +1,187 @@
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 import { invoke } from "@tauri-apps/api/core";
+import {
+  fsrs,
+  generatorParameters,
+  createEmptyCard,
+  Rating,
+  State,
+  type Card,
+} from "ts-fsrs";
 import { getDatabase, getAllWords } from "./db";
-import type { WordDetail, SRSReview } from "@/types/database";
+import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
 
-export interface SM2Result {
+export { Rating, State };
+
+export interface FSRSResult {
+  stability: number;
+  difficulty: number;
+  elapsed_days: number;
+  scheduled_days: number;
+  reps: number;
+  lapses: number;
+  state: number;
+  lastReview?: string;
+  nextReviewDate: string;
+  // Backward compatibility fields with SM-2
   easeFactor: number;
   interval: number;
   repetitions: number;
-  nextReviewDate: string;
+}
+
+export type SM2Result = FSRSResult;
+
+const FSRS_RETENTION_KEY = "myenglish_fsrs_request_retention";
+const FSRS_MAX_INTERVAL_KEY = "myenglish_fsrs_max_interval";
+
+export interface FSRSSettings {
+  requestRetention: number; // e.g. 0.9 (90%)
+  maximumInterval: number; // e.g. 365 (days)
 }
 
 /**
- * Pure SuperMemo-2 (SM-2) algorithm implementation.
- *
- * @param quality Grade from 0 to 5:
- *   5 - Perfect response ("Easy")
- *   4 - Correct response with hesitation ("Good")
- *   3 - Correct response with serious difficulty ("Hard")
- *   2 - Incorrect response ("Again")
- *   1 - Incorrect response; remembered correct one
- *   0 - Complete blackout
- * @param currentRepetitions Number of consecutive successful reviews
- * @param currentInterval Current interval in days
- * @param currentEaseFactor Current ease factor (default 2.5)
+ * Retrieve user's configured FSRS parameters from storage
+ */
+export function getFSRSSettings(): FSRSSettings {
+  try {
+    const savedRetention = localStorage.getItem(FSRS_RETENTION_KEY);
+    const savedMaxInterval = localStorage.getItem(FSRS_MAX_INTERVAL_KEY);
+    return {
+      requestRetention: savedRetention ? parseFloat(savedRetention) : 0.9,
+      maximumInterval: savedMaxInterval ? parseInt(savedMaxInterval, 10) : 365,
+    };
+  } catch {
+    return { requestRetention: 0.9, maximumInterval: 365 };
+  }
+}
+
+/**
+ * Update user's FSRS parameters
+ */
+export function saveFSRSSettings(settings: Partial<FSRSSettings>): void {
+  try {
+    if (settings.requestRetention !== undefined) {
+      localStorage.setItem(FSRS_RETENTION_KEY, settings.requestRetention.toString());
+    }
+    if (settings.maximumInterval !== undefined) {
+      localStorage.setItem(FSRS_MAX_INTERVAL_KEY, settings.maximumInterval.toString());
+    }
+  } catch {}
+}
+
+/**
+ * Instantiate configured FSRS scheduler instance
+ */
+export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
+  const current = getFSRSSettings();
+  const request_retention = customSettings?.requestRetention ?? current.requestRetention;
+  const maximum_interval = customSettings?.maximumInterval ?? current.maximumInterval;
+
+  const params = generatorParameters({
+    request_retention,
+    maximum_interval,
+    enable_fuzz: false,
+    enable_short_term: true,
+  });
+
+  return fsrs(params);
+}
+
+/**
+ * Convert SQLite SRSReview row into a ts-fsrs Card object
+ */
+export function srsRowToCard(row?: Partial<SRSReview>): Card {
+  const empty = createEmptyCard();
+  if (!row) return empty;
+
+  const dueDate = row.next_review_date ? new Date(row.next_review_date) : empty.due;
+  const isLegacy =
+    (row.stability === undefined || row.stability === 0) &&
+    row.repetitions !== undefined &&
+    row.repetitions > 0;
+
+  return {
+    due: dueDate,
+    stability:
+      row.stability && row.stability > 0
+        ? row.stability
+        : isLegacy
+        ? Math.max(1, row.interval || 1)
+        : 0,
+    difficulty:
+      row.difficulty && row.difficulty > 0
+        ? row.difficulty
+        : isLegacy
+        ? 5.0
+        : 0,
+    elapsed_days: row.elapsed_days ?? 0,
+    scheduled_days: row.scheduled_days ?? row.interval ?? 0,
+    reps: row.reps ?? row.repetitions ?? 0,
+    lapses: row.lapses ?? 0,
+    state: (row.state !== undefined && row.state !== null
+      ? row.state
+      : isLegacy
+      ? State.Review
+      : State.New) as State,
+    last_review: row.last_review ? new Date(row.last_review) : undefined,
+    learning_steps: empty.learning_steps ?? 0,
+  };
+}
+
+/**
+ * Format interval into human readable short representation (1m, 10m, 2h, 3d, 1mo, 1y)
+ */
+export function formatIntervalPreview(due: Date, now: Date = new Date()): string {
+  const diffMs = due.getTime() - now.getTime();
+  if (diffMs <= 60 * 1000) return "1m";
+  const mins = Math.round(diffMs / (60 * 1000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(diffMs / (60 * 60 * 1000));
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(diffMs / (24 * 60 * 60 * 1000));
+  if (days < 30) return `${days}d`;
+  const months = Math.round(days / 30);
+  if (months < 12) return `${months}mo`;
+  return `${(days / 365).toFixed(1)}y`;
+}
+
+export interface IntervalPreviews {
+  [Rating.Again]: string;
+  [Rating.Hard]: string;
+  [Rating.Good]: string;
+  [Rating.Easy]: string;
+}
+
+/**
+ * Calculate expected next interval for all 4 grading choices
+ */
+export function getNextIntervalPreviews(
+  srsRow?: Partial<SRSReview>,
+  now: Date = new Date()
+): IntervalPreviews {
+  try {
+    const scheduler = getFSRSScheduler();
+    const card = srsRowToCard(srsRow);
+    const repeatResult = scheduler.repeat(card, now);
+    return {
+      [Rating.Again]: formatIntervalPreview(repeatResult[Rating.Again].card.due, now),
+      [Rating.Hard]: formatIntervalPreview(repeatResult[Rating.Hard].card.due, now),
+      [Rating.Good]: formatIntervalPreview(repeatResult[Rating.Good].card.due, now),
+      [Rating.Easy]: formatIntervalPreview(repeatResult[Rating.Easy].card.due, now),
+    };
+  } catch (err) {
+    console.warn("Failed to calculate FSRS interval previews:", err);
+    return {
+      [Rating.Again]: "1m",
+      [Rating.Hard]: "1d",
+      [Rating.Good]: "3d",
+      [Rating.Easy]: "7d",
+    };
+  }
+}
+
+/**
+ * Pure SuperMemo-2 (SM-2) algorithm fallback for legacy tests / comparisons.
  */
 export function calculateSM2(
   quality: number,
@@ -35,7 +194,6 @@ export function calculateSM2(
   let nextInterval = currentInterval;
 
   if (q >= 3) {
-    // Successful recall
     if (currentRepetitions === 0) {
       nextInterval = 1;
     } else if (currentRepetitions === 1) {
@@ -45,23 +203,25 @@ export function calculateSM2(
     }
     nextRepetitions = currentRepetitions + 1;
   } else {
-    // Failed recall: reset repetitions and schedule for immediate review
     nextRepetitions = 0;
     nextInterval = 1;
   }
 
-  // Update Ease Factor: EF' = EF + (0.1 - (5 - q) * (0.08 + (5 - q) * 0.02))
   const delta = 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02);
   let nextEaseFactor = currentEaseFactor + delta;
-  if (nextEaseFactor < 1.3) {
-    nextEaseFactor = 1.3;
-  }
+  if (nextEaseFactor < 1.3) nextEaseFactor = 1.3;
   nextEaseFactor = Number(nextEaseFactor.toFixed(2));
 
-  // Compute next review timestamp
   const nextDate = new Date(Date.now() + nextInterval * 24 * 60 * 60 * 1000);
 
   return {
+    stability: nextInterval,
+    difficulty: 5.0,
+    elapsed_days: 0,
+    scheduled_days: nextInterval,
+    reps: nextRepetitions,
+    lapses: q < 3 ? 1 : 0,
+    state: nextRepetitions > 0 ? 2 : 0,
     easeFactor: nextEaseFactor,
     interval: nextInterval,
     repetitions: nextRepetitions,
@@ -79,10 +239,14 @@ export async function getDueWords(): Promise<WordDetail[]> {
 }
 
 /**
- * Record a user review session for a word, updating its SRS metadata in SQLite
+ * Record a user review session for a word, updating its SRS metadata in SQLite using FSRS.
  */
-export async function recordReview(wordId: string, quality: number): Promise<SM2Result> {
+export async function recordReview(
+  wordId: string,
+  ratingOrQuality: Rating | number
+): Promise<FSRSResult> {
   const db = await getDatabase();
+  const now = new Date();
 
   // 1. Fetch existing SRS data
   const srsRows = await db.select<SRSReview[]>(
@@ -94,31 +258,91 @@ export async function recordReview(wordId: string, quality: number): Promise<SM2
     ease_factor: 2.5,
     interval: 0,
     repetitions: 0,
-    next_review_date: new Date().toISOString(),
+    next_review_date: now.toISOString(),
+    stability: 0,
+    difficulty: 0,
+    elapsed_days: 0,
+    scheduled_days: 0,
+    reps: 0,
+    lapses: 0,
+    state: 0 as FSRSState,
+    last_review: null,
   };
 
-  // 2. Compute new SM-2 values
-  const sm2 = calculateSM2(
-    quality,
-    current.repetitions,
-    current.interval,
-    current.ease_factor
-  );
+  // 2. Normalize input to FSRS Rating
+  let fsrsRating: Rating;
+  if (ratingOrQuality === 5 || ratingOrQuality === Rating.Easy) {
+    fsrsRating = Rating.Easy;
+  } else if (ratingOrQuality === Rating.Good) {
+    fsrsRating = Rating.Good;
+  } else if (ratingOrQuality === Rating.Hard) {
+    fsrsRating = Rating.Hard;
+  } else {
+    fsrsRating = Rating.Again;
+  }
 
-  // 3. Persist back into SQLite
+  // 3. Compute new FSRS values
+  const scheduler = getFSRSScheduler();
+  const card = srsRowToCard(current);
+  const result = scheduler.next(card, now, fsrsRating);
+
+  const updatedCard = result.card;
+  const nextReviewDateStr = updatedCard.due.toISOString();
+  const lastReviewStr = now.toISOString();
+
+  // 4. Persist back into SQLite (updating both FSRS & legacy compatibility fields)
   await db.execute(
-    `INSERT INTO srs_reviews (word_id, ease_factor, interval, repetitions, next_review_date)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO srs_reviews (
+       word_id, ease_factor, interval, repetitions, next_review_date,
+       stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
      ON CONFLICT(word_id) DO UPDATE SET
        ease_factor = excluded.ease_factor,
        interval = excluded.interval,
        repetitions = excluded.repetitions,
-       next_review_date = excluded.next_review_date;`,
-    [wordId, sm2.easeFactor, sm2.interval, sm2.repetitions, sm2.nextReviewDate]
+       next_review_date = excluded.next_review_date,
+       stability = excluded.stability,
+       difficulty = excluded.difficulty,
+       elapsed_days = excluded.elapsed_days,
+       scheduled_days = excluded.scheduled_days,
+       reps = excluded.reps,
+       lapses = excluded.lapses,
+       state = excluded.state,
+       last_review = excluded.last_review;`,
+    [
+      wordId,
+      2.5, // ease_factor legacy default
+      updatedCard.scheduled_days, // interval
+      updatedCard.reps, // repetitions
+      nextReviewDateStr,
+      Number(updatedCard.stability.toFixed(4)),
+      Number(updatedCard.difficulty.toFixed(4)),
+      updatedCard.elapsed_days,
+      updatedCard.scheduled_days,
+      updatedCard.reps,
+      updatedCard.lapses,
+      updatedCard.state,
+      lastReviewStr,
+    ]
   );
 
-  return sm2;
+  return {
+    stability: Number(updatedCard.stability.toFixed(4)),
+    difficulty: Number(updatedCard.difficulty.toFixed(4)),
+    elapsed_days: updatedCard.elapsed_days,
+    scheduled_days: updatedCard.scheduled_days,
+    reps: updatedCard.reps,
+    lapses: updatedCard.lapses,
+    state: updatedCard.state,
+    lastReview: lastReviewStr,
+    nextReviewDate: nextReviewDateStr,
+    interval: updatedCard.scheduled_days,
+    repetitions: updatedCard.reps,
+    easeFactor: 2.5,
+  };
 }
+
 
 /**
  * Reliable system notification sender.
@@ -187,7 +411,7 @@ export async function sendTestNotification(): Promise<{ success: boolean; messag
   try {
     const sent = await triggerDesktopNotification(
       "MyEnglish • Nhắc nhở ôn tập",
-      "Đã đến giờ ôn tập từ vựng Spaced Repetition (SM-2)! Nhấp vào thông báo để mở màn hình ôn tập ngay 🚀"
+      "Đã đến giờ ôn tập từ vựng Spaced Repetition (FSRS)! Nhấp vào thông báo để mở màn hình ôn tập ngay 🚀"
     );
 
     if (sent) {
@@ -263,43 +487,64 @@ export async function markWordDueImmediately(wordId?: string): Promise<string | 
   return targetWord || targetId;
 }
 
+import { listen } from "@tauri-apps/api/event";
 import {
   getReminderSettings,
   isSnoozed,
   triggerReviewPopup,
 } from "./reminderSettings";
 
+const SRS_LAST_TRIGGER_KEY = "myenglish_srs_last_trigger_ms";
+
 /**
  * Background worker manager that periodically inspects due reviews
- * and triggers either full-screen focus pop-up quiz or system notifications
+ * and triggers the interactive full-screen Focus Review Modal.
+ * Listens to native Rust background heartbeat (every 30s) to bypass
+ * browser timer throttling when minimized or closed to tray.
  */
 class SRSBackgroundWorker {
   private timerId: number | null = null;
-  private lastTriggerTime = 0;
+  private unlistenHeartbeat: (() => void) | null = null;
+  private isTicking = false;
 
-  public start(defaultIntervalMinutes?: number) {
-    if (this.timerId) {
-      this.stop();
-    }
-
-    const settings = getReminderSettings();
-    const intervalMinutes = defaultIntervalMinutes ?? (settings.enabled ? settings.intervalMinutes : 0);
-
-    // Initial check after 3 seconds to let database initialize
-    setTimeout(() => this.tick(), 3000);
-
-    if (intervalMinutes > 0) {
-      const ms = intervalMinutes * 60 * 1000;
-      this.timerId = window.setInterval(() => this.tick(), ms);
+  private getLastTriggerTime(): number {
+    try {
+      const stored = localStorage.getItem(SRS_LAST_TRIGGER_KEY);
+      return stored ? parseInt(stored, 10) : 0;
+    } catch {
+      return 0;
     }
   }
 
-  public restart() {
+  private setLastTriggerTime(time: number): void {
+    try {
+      localStorage.setItem(SRS_LAST_TRIGGER_KEY, time.toString());
+    } catch {}
+  }
+
+  public async start() {
     this.stop();
-    const settings = getReminderSettings();
-    if (settings.enabled && settings.intervalMinutes > 0) {
-      this.start(settings.intervalMinutes);
+
+    // Set lastTriggerTime to Date.now() on startup so the user is not ambushed
+    // with a popup immediately after launching the app. The popup will only trigger
+    // after the configured interval (e.g. 15m, 30m) has elapsed.
+    this.setLastTriggerTime(Date.now());
+
+    // 1. Listen to native Rust background heartbeat (fires every 30s, even in background/tray)
+    try {
+      this.unlistenHeartbeat = await listen("srs-heartbeat", () => {
+        this.tick();
+      });
+    } catch (err) {
+      console.warn("Could not attach srs-heartbeat listener:", err);
     }
+
+    // 2. Also keep a fallback local timer ticking every 30 seconds
+    this.timerId = window.setInterval(() => this.tick(), 30000);
+  }
+
+  public restart() {
+    this.start();
   }
 
   public stop() {
@@ -307,18 +552,30 @@ class SRSBackgroundWorker {
       window.clearInterval(this.timerId);
       this.timerId = null;
     }
+    if (this.unlistenHeartbeat) {
+      this.unlistenHeartbeat();
+      this.unlistenHeartbeat = null;
+    }
   }
 
   public async tick(forceTrigger: boolean = false) {
+    if (this.isTicking && !forceTrigger) return;
+    this.isTicking = true;
+
     try {
       const settings = getReminderSettings();
       if (!forceTrigger) {
         if (!settings.enabled || settings.intervalMinutes === 0) return;
         if (isSnoozed()) return;
 
-        // Prevent rapid re-triggering within 3 minutes unless forced
+        const intervalMs = settings.intervalMinutes * 60 * 1000;
         const now = Date.now();
-        if (now - this.lastTriggerTime < 3 * 60 * 1000) return;
+        const lastTrigger = this.getLastTriggerTime();
+
+        // Check if full interval has elapsed since last popup
+        if (lastTrigger > 0 && now - lastTrigger < intervalMs) {
+          return;
+        }
       }
 
       const dueWords = await getDueWords();
@@ -330,12 +587,15 @@ class SRSBackgroundWorker {
         if (all.length === 0 && !forceTrigger) return;
       }
 
-      this.lastTriggerTime = Date.now();
+      // Record trigger timestamp
+      this.setLastTriggerTime(Date.now());
 
       // Trigger the interactive full-screen Focus Review Modal
       await triggerReviewPopup();
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
+    } finally {
+      this.isTicking = false;
     }
   }
 }

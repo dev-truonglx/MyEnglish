@@ -17,7 +17,13 @@ import {
   Award,
   TrendingUp,
 } from "lucide-react";
-import { recordReview, type SM2Result } from "@/services/srs";
+import {
+  recordReview,
+  getNextIntervalPreviews,
+  Rating,
+  type FSRSResult,
+  type IntervalPreviews,
+} from "@/services/srs";
 import { recordDailyActivity } from "@/services/streak";
 import { parseTerms, type WordDetail } from "@/types/database";
 
@@ -55,7 +61,13 @@ export default function FlashcardReview({
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [sessionCompleted, setSessionCompleted] = useState(false);
-  const [lastResult, setLastResult] = useState<SM2Result | null>(null);
+  const [lastResult, setLastResult] = useState<FSRSResult | null>(null);
+  const [intervalPreviews, setIntervalPreviews] = useState<IntervalPreviews>({
+    [Rating.Again]: "1m",
+    [Rating.Hard]: "1d",
+    [Rating.Good]: "3d",
+    [Rating.Easy]: "7d",
+  });
 
   // Cloze & Spelling Interactive State
   const [userInput, setUserInput] = useState("");
@@ -107,7 +119,10 @@ export default function FlashcardReview({
 
   useEffect(() => {
     resetCardState();
-  }, [currentIndex]);
+    if (currentWord) {
+      setIntervalPreviews(getNextIntervalPreviews(currentWord.srs));
+    }
+  }, [currentIndex, currentWord]);
 
   const handleSpeak = (text: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
@@ -127,15 +142,15 @@ export default function FlashcardReview({
     }
   }, [currentIndex, mode]);
 
-  const handleGrade = async (quality: number) => {
+  const handleGrade = async (rating: Rating) => {
     if (!currentWord || isAdvancing) return;
     setIsAdvancing(true);
 
     // Track statistics if in flip mode
     if (mode === "flip") {
-      if (quality === 5) {
+      if (rating === Rating.Easy) {
         setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
-      } else if (quality >= 3) {
+      } else if (rating === Rating.Good || rating === Rating.Hard) {
         setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
       } else {
         setSessionStats((prev) => ({ ...prev, revealedCount: prev.revealedCount + 1 }));
@@ -143,7 +158,7 @@ export default function FlashcardReview({
     }
 
     try {
-      const result = await recordReview(currentWord.id, quality);
+      const result = await recordReview(currentWord.id, rating);
       recordDailyActivity(1);
       setLastResult(result);
       setReviewCount((prev) => prev + 1);
@@ -187,22 +202,22 @@ export default function FlashcardReview({
       });
       handleSpeak(currentWord.word);
 
-      // Evaluate SM-2 quality based on wrong attempts and hint usage
-      let quality = 5;
+      // Evaluate FSRS rating based on wrong attempts and hint usage
+      let rating: Rating = Rating.Easy;
       if (wrongAttempts === 0 && !showHint) {
-        quality = 5; // Easy / Perfect recall
+        rating = Rating.Easy; // Easy / Perfect recall
         setSessionStats((prev) => ({
           ...prev,
           firstTryCorrect: prev.firstTryCorrect + 1,
         }));
       } else if (wrongAttempts === 1 && !showHint) {
-        quality = 4; // Good (1 retry)
+        rating = Rating.Good; // Good (1 retry)
         setSessionStats((prev) => ({
           ...prev,
           retryCorrect: prev.retryCorrect + 1,
         }));
       } else {
-        quality = 3; // Hard (2+ retries or used hint)
+        rating = Rating.Hard; // Hard (2+ retries or used hint)
         setSessionStats((prev) => ({
           ...prev,
           retryCorrect: prev.retryCorrect + 1,
@@ -211,7 +226,7 @@ export default function FlashcardReview({
 
       // Smooth auto-transition to next word
       setTimeout(() => {
-        handleGrade(quality);
+        handleGrade(rating);
       }, 700);
     } else {
       // ---------------- INCORRECT ----------------
@@ -254,8 +269,8 @@ export default function FlashcardReview({
       ...prev,
       skippedCount: prev.skippedCount + 1,
     }));
-    // Skipped word gets quality 1 (Again: resets repetitions in SM-2)
-    handleGrade(1);
+    // User skipped word gets Rating.Again in FSRS
+    handleGrade(Rating.Again);
   };
 
   // User explicitly asks to see result and detailed grammar/example
@@ -294,11 +309,11 @@ export default function FlashcardReview({
         setIsFlipped((prev) => !prev);
       } else if (isFlipped || hasCheckedAnswer) {
         // Grading hotkeys: 1 (Again), 2 (Hard), 3 (Good), 4 (Easy), Enter (Advance with Again)
-        if (e.key === "1") handleGrade(1);
-        else if (e.key === "2") handleGrade(3);
-        else if (e.key === "3") handleGrade(4);
-        else if (e.key === "4") handleGrade(5);
-        else if (e.key === "Enter") handleGrade(1);
+        if (e.key === "1") handleGrade(Rating.Again);
+        else if (e.key === "2") handleGrade(Rating.Hard);
+        else if (e.key === "3") handleGrade(Rating.Good);
+        else if (e.key === "4") handleGrade(Rating.Easy);
+        else if (e.key === "Enter") handleGrade(Rating.Again);
       }
     };
 
@@ -333,7 +348,7 @@ export default function FlashcardReview({
 
     if (masteryPercent < 50) {
       evaluationTitle = "Cần củng cố thêm từ vựng 📚";
-      evaluationDesc = "Nhiều từ cần xem lại hoặc thử lại. Hệ thống SM-2 sẽ lên lịch lặp lại sớm để giúp bạn ghi nhớ sâu.";
+      evaluationDesc = "Nhiều từ cần xem lại hoặc thử lại. Hệ thống FSRS sẽ tối ưu lịch lặp lại sớm để giúp bạn ghi nhớ sâu.";
       evaluationBadge = "bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300";
     } else if (masteryPercent < 80) {
       evaluationTitle = "Khá tốt! Phản xạ từ vựng ổn định 🎯";
@@ -410,17 +425,21 @@ export default function FlashcardReview({
         )}
 
         {lastResult && (
-          <div className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 grid grid-cols-3 gap-2">
+          <div className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
-              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Ease Factor</div>
-              <div className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">{lastResult.easeFactor}</div>
+              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Độ bền (S)</div>
+              <div className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">{lastResult.stability}d</div>
             </div>
             <div>
-              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Next Interval</div>
+              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Độ khó (D)</div>
+              <div className="text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">{lastResult.difficulty}/10</div>
+            </div>
+            <div>
+              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Chu kỳ tới</div>
               <div className="text-sm font-bold text-slate-900 dark:text-white font-mono">{lastResult.interval}d</div>
             </div>
             <div>
-              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Reps</div>
+              <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Số lần ôn</div>
               <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">{lastResult.repetitions}</div>
             </div>
           </div>
@@ -555,7 +574,9 @@ export default function FlashcardReview({
               {currentWord.topic || "General Tech"}
             </span>
             <span className="text-[10px] font-mono text-slate-500 dark:text-zinc-400 bg-slate-100 dark:bg-zinc-800/80 px-2 py-0.5 rounded border border-slate-200 dark:border-zinc-700/50">
-              EF: {currentWord.srs.ease_factor} • {currentWord.srs.interval}d
+              {currentWord.srs.stability && currentWord.srs.stability > 0
+                ? `FSRS: S=${currentWord.srs.stability}d • D=${currentWord.srs.difficulty || 5}`
+                : `FSRS: Mới (New)`}
             </span>
           </div>
 
@@ -1043,9 +1064,9 @@ export default function FlashcardReview({
       <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
         {(mode === "flip" ? isFlipped : hasCheckedAnswer) ? (
           <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150">
-            {/* Again: Quality 1 */}
+            {/* Again: Rating.Again (1) */}
             <button
-              onClick={() => handleGrade(1)}
+              onClick={() => handleGrade(Rating.Again)}
               disabled={isAdvancing}
               className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
                 !isCorrect && mode !== "flip"
@@ -1053,23 +1074,33 @@ export default function FlashcardReview({
                   : "border-rose-200 dark:border-rose-800/80 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-medium"
               }`}
             >
-              <span className="font-bold">Again</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold">Again</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-rose-200/70 dark:bg-rose-800/60 text-rose-900 dark:text-rose-100 font-mono font-bold">
+                  {intervalPreviews[Rating.Again]}
+                </span>
+              </div>
               <span className="text-[10px] text-rose-600 dark:text-rose-400/80 font-mono">Quên (1 ↵)</span>
             </button>
 
-            {/* Hard: Quality 3 */}
+            {/* Hard: Rating.Hard (2) */}
             <button
-              onClick={() => handleGrade(3)}
+              onClick={() => handleGrade(Rating.Hard)}
               disabled={isAdvancing}
               className="p-2 md:p-3 rounded-2xl border border-amber-200 dark:border-amber-800/80 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
             >
-              <span className="font-bold">Hard</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold">Hard</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-amber-200/70 dark:bg-amber-800/60 text-amber-900 dark:text-amber-100 font-mono font-bold">
+                  {intervalPreviews[Rating.Hard]}
+                </span>
+              </div>
               <span className="text-[10px] text-amber-700 dark:text-amber-400/80 font-mono">Khó (2)</span>
             </button>
 
-            {/* Good: Quality 4 */}
+            {/* Good: Rating.Good (3) */}
             <button
-              onClick={() => handleGrade(4)}
+              onClick={() => handleGrade(Rating.Good)}
               disabled={isAdvancing}
               className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
                 isCorrect
@@ -1077,17 +1108,27 @@ export default function FlashcardReview({
                   : "border-blue-200 dark:border-blue-800/80 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 font-medium"
               }`}
             >
-              <span className="font-bold">Good</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold">Good</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-blue-200/70 dark:bg-blue-800/60 text-blue-900 dark:text-blue-100 font-mono font-bold">
+                  {intervalPreviews[Rating.Good]}
+                </span>
+              </div>
               <span className="text-[10px] text-blue-700 dark:text-blue-400/80 font-mono">Tốt (3)</span>
             </button>
 
-            {/* Easy: Quality 5 */}
+            {/* Easy: Rating.Easy (4) */}
             <button
-              onClick={() => handleGrade(5)}
+              onClick={() => handleGrade(Rating.Easy)}
               disabled={isAdvancing}
               className="p-2 md:p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
             >
-              <span className="font-bold">Easy</span>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold">Easy</span>
+                <span className="text-[9px] px-1.5 py-0.2 rounded-md bg-emerald-200/70 dark:bg-emerald-800/60 text-emerald-900 dark:text-emerald-100 font-mono font-bold">
+                  {intervalPreviews[Rating.Easy]}
+                </span>
+              </div>
               <span className="text-[10px] text-emerald-700 dark:text-emerald-400/80 font-mono">Dễ (4)</span>
             </button>
           </div>

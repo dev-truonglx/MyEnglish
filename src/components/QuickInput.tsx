@@ -5,23 +5,29 @@ import { Sparkles, CornerDownLeft, X, Terminal, ArrowUpRight, Clipboard } from "
 
 interface QuickInputProps {
   onSubmitted?: (word: string) => void;
+  onOpenDashboard?: () => void;
+  onDismiss?: () => void;
   isStandalone?: boolean;
 }
 
 /**
  * Validates and cleans candidate word from clipboard.
  * Accepts English words and technical terms (e.g. idempotent, debounce, event loop, thread-safe).
- * Strips surrounding quotes, backticks, and trailing punctuation.
+ * Strips surrounding quotes, backticks, trailing punctuation, zero-width characters.
  */
 function sanitizeCandidateWord(raw: string): string | null {
   if (!raw) return null;
-  let text = raw.trim();
+  // Clean zero-width chars and invisible marks
+  let text = raw.replace(/[\u200B-\u200D\uFEFF\u00AD]/g, "").trim();
 
   // Strip surrounding quotes and backticks: "word", 'word', `word`, “word”
   text = text.replace(/^["'`“‘]+|["'`”’]+$/g, "").trim();
 
   // Strip trailing punctuation: .,;:?!
   text = text.replace(/[.,;:?!]+$/, "").trim();
+
+  // Normalize internal whitespace
+  text = text.replace(/\s+/g, " ").trim();
 
   // Length check: 2 to 45 chars
   if (text.length < 2 || text.length > 45) return null;
@@ -43,31 +49,40 @@ function sanitizeCandidateWord(raw: string): string | null {
   // Reject code blocks / code operators
   if (/[{}()\[\]=<>;*&$%#@^]/.test(text)) return null;
 
-  // Only allow English letters, spaces, hyphens, and apostrophes
-  if (!/^[a-zA-Z\s\-']+$/.test(text)) return null;
+  // Only allow English letters, spaces, hyphens, and apostrophes (standard & curly)
+  if (!/^[a-zA-Z\s\-'\u2019]+$/.test(text)) return null;
 
   return text;
 }
 
-export default function QuickInput({ onSubmitted, isStandalone = true }: QuickInputProps) {
+export default function QuickInput({
+  onSubmitted,
+  onOpenDashboard,
+  onDismiss,
+  isStandalone = true,
+}: QuickInputProps) {
   const [word, setWord] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [fromClipboard, setFromClipboard] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const isMac =
+    typeof navigator !== "undefined" &&
+    /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
   /**
-   * Reads clipboard text natively via Tauri (pbpaste on macOS) or fallback,
+   * Reads clipboard text natively via Tauri (pbpaste on macOS, arboard on Windows/Linux) or fallback,
    * then automatically applies and selects valid candidate words.
    */
   const checkAndApplyClipboard = async (customText?: string) => {
-    let clipText = customText;
+    let clipText = customText && customText.trim().length > 0 ? customText : undefined;
 
     if (clipText === undefined) {
-      // 1. Try native Tauri command (pbpaste on macOS - 100% reliable)
+      // 1. Try native Tauri command (pbpaste on macOS, arboard on Windows/Linux)
       try {
         const nativeText = await invoke<string>("get_clipboard_text");
-        if (nativeText && typeof nativeText === "string") {
+        if (nativeText && typeof nativeText === "string" && nativeText.trim().length > 0) {
           clipText = nativeText;
         }
       } catch {
@@ -80,7 +95,12 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
       }
     }
 
-    if (!clipText) return;
+    if (!clipText) {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+      return;
+    }
 
     const candidate = sanitizeCandidateWord(clipText);
     if (candidate) {
@@ -91,6 +111,33 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
         inputRef.current?.focus();
         inputRef.current?.select();
       }, 50);
+    } else {
+      setTimeout(() => {
+        inputRef.current?.focus();
+      }, 50);
+    }
+  };
+
+  const handleDismiss = async () => {
+    try {
+      await invoke("hide_quick_input");
+    } catch {
+      setFeedback("Closed");
+    }
+    if (onDismiss) {
+      onDismiss();
+    }
+  };
+
+  const handleOpenDashboard = async () => {
+    try {
+      await invoke("show_main_window");
+      await invoke("hide_quick_input");
+    } catch {
+      setFeedback("Dashboard opened");
+    }
+    if (onOpenDashboard) {
+      onOpenDashboard();
     }
   };
 
@@ -104,7 +151,7 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
     // 1. Initial check when mounted
     checkAndApplyClipboard();
 
-    // 2. Listen to Tauri backend event "quick-input-opened" (emitted on ⌘⇧E or toggle_quick_input)
+    // 2. Listen to Tauri backend event "quick-input-opened" (emitted on Ctrl+Shift+E / ⌘⇧E or toggle_quick_input)
     listen<{ clipboard?: string }>("quick-input-opened", (event) => {
       if (isCancelled) return;
       const clip = event.payload?.clipboard;
@@ -120,32 +167,28 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
     const onFocus = () => {
       if (!isCancelled) {
         checkAndApplyClipboard();
+        inputRef.current?.focus();
       }
     };
     window.addEventListener("focus", onFocus);
+
+    // 4. Global ESC key listener so pressing Esc exits even when input is not focused
+    const onGlobalKeyDown = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        handleDismiss();
+      }
+    };
+    window.addEventListener("keydown", onGlobalKeyDown, true);
 
     return () => {
       isCancelled = true;
       if (unlistenFn) unlistenFn();
       window.removeEventListener("focus", onFocus);
+      window.removeEventListener("keydown", onGlobalKeyDown, true);
     };
   }, []);
-
-  const handleDismiss = async () => {
-    try {
-      await invoke("hide_quick_input");
-    } catch {
-      setFeedback("Closed");
-    }
-  };
-
-  const handleOpenDashboard = async () => {
-    try {
-      await invoke("show_main_window");
-    } catch {
-      setFeedback("Dashboard opened");
-    }
-  };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Escape") {
@@ -187,7 +230,7 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
         isStandalone ? "h-screen bg-transparent p-2" : "py-2"
       }`}
     >
-      <div className="w-full max-w-[620px] rounded-2xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl border border-slate-300 dark:border-slate-700/80 shadow-2xl shadow-slate-300/40 dark:shadow-cyan-950/40 p-2.5 transition-all">
+      <div className="w-full max-w-[620px] rounded-2xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl p-2.5 transition-all">
         <form onSubmit={handleSubmit} className="relative flex items-center gap-2.5">
           {/* Logo / Sparkle Badge */}
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20 shrink-0">
@@ -272,7 +315,7 @@ export default function QuickInput({ onSubmitted, isStandalone = true }: QuickIn
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
               <kbd className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 font-mono text-[10px] text-slate-700 dark:text-slate-300">
-                ⌘⇧E
+                {isMac ? "⌘⇧E" : "Ctrl+Shift+E"}
               </kbd>
               Phím tắt
             </span>

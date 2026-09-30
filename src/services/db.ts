@@ -54,7 +54,7 @@ export async function initSchema(db: Database): Promise<void> {
     );
   `);
 
-  // 3. Spaced Repetition (SRS) table
+  // 3. Spaced Repetition (SRS) table - Supports FSRS & Legacy SM-2
   await db.execute(`
     CREATE TABLE IF NOT EXISTS srs_reviews (
       word_id TEXT PRIMARY KEY,
@@ -62,6 +62,14 @@ export async function initSchema(db: Database): Promise<void> {
       interval INTEGER DEFAULT 0,
       repetitions INTEGER DEFAULT 0,
       next_review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      stability REAL DEFAULT 0,
+      difficulty REAL DEFAULT 0,
+      elapsed_days INTEGER DEFAULT 0,
+      scheduled_days INTEGER DEFAULT 0,
+      reps INTEGER DEFAULT 0,
+      lapses INTEGER DEFAULT 0,
+      state INTEGER DEFAULT 0,
+      last_review TIMESTAMP,
       FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
     );
   `);
@@ -85,6 +93,48 @@ export async function initSchema(db: Database): Promise<void> {
   try {
     await db.execute(`ALTER TABLE examples ADD COLUMN sentence_vn TEXT;`);
   } catch {}
+
+  // FSRS safe migrations for existing databases
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN stability REAL DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN difficulty REAL DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN elapsed_days INTEGER DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN scheduled_days INTEGER DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN reps INTEGER DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN lapses INTEGER DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN state INTEGER DEFAULT 0;`);
+  } catch {}
+  try {
+    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN last_review TIMESTAMP;`);
+  } catch {}
+
+  // Migrate legacy SM-2 rows to initial FSRS state if they haven't been migrated yet
+  try {
+    await db.execute(`
+      UPDATE srs_reviews
+      SET
+        stability = CASE WHEN interval > 0 THEN CAST(interval AS REAL) ELSE 1.0 END,
+        difficulty = 5.0,
+        reps = repetitions,
+        scheduled_days = interval,
+        state = 2
+      WHERE (stability IS NULL OR stability = 0) AND repetitions > 0;
+    `);
+  } catch (e) {
+    console.warn("FSRS legacy data migration notice:", e);
+  }
 
   // Safe deduplication of any existing duplicates
   try {
@@ -271,10 +321,10 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
       );
     }
 
-    // Insert initial SRS review record for new word
+    // Insert initial SRS review record for new word (FSRS compatible)
     await db.execute(
-      `INSERT INTO srs_reviews (word_id, ease_factor, interval, repetitions, next_review_date)
-       VALUES ($1, 2.5, 0, 0, $2)
+      `INSERT INTO srs_reviews (word_id, ease_factor, interval, repetitions, next_review_date, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state)
+       VALUES ($1, 2.5, 0, 0, $2, 0, 0, 0, 0, 0, 0, 0)
        ON CONFLICT(word_id) DO NOTHING`,
       [wordId, now]
     );
@@ -324,6 +374,14 @@ export async function getAllWords(): Promise<WordDetail[]> {
       interval: 0,
       repetitions: 0,
       next_review_date: word.created_at,
+      stability: 0,
+      difficulty: 0,
+      elapsed_days: 0,
+      scheduled_days: 0,
+      reps: 0,
+      lapses: 0,
+      state: 0,
+      last_review: null,
     };
 
     results.push({

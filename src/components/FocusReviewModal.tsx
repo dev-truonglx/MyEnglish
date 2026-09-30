@@ -12,7 +12,7 @@ import {
   HelpCircle,
 } from "lucide-react";
 import { getAllWords } from "@/services/db";
-import { getDueWords, recordReview } from "@/services/srs";
+import { getDueWords, recordReview, Rating } from "@/services/srs";
 import { recordDailyActivity } from "@/services/streak";
 import {
   getReminderSettings,
@@ -258,9 +258,20 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         candidates = allWords;
       }
 
-      // Shuffle candidates and pick wordsPerSession
+      // Target count: 3, 5, or 10 words (default 3)
+      const targetCount = Math.max(3, currentSettings.wordsPerSession || 3);
       const shuffled = [...candidates].sort(() => 0.5 - Math.random());
-      const selected = shuffled.slice(0, Math.max(1, currentSettings.wordsPerSession || 1));
+      let selected = shuffled.slice(0, targetCount);
+
+      // If candidates had fewer than targetCount words, supplement from allWords to meet targetCount
+      if (selected.length < targetCount && allWords.length > selected.length) {
+        const selectedIds = new Set(selected.map((w) => w.id));
+        const extraCandidates = allWords
+          .filter((w) => !selectedIds.has(w.id))
+          .sort(() => 0.5 - Math.random());
+        const needed = targetCount - selected.length;
+        selected = [...selected, ...extraCandidates.slice(0, needed)];
+      }
 
       setQueue(selected);
       setCurrentIndex(0);
@@ -413,7 +424,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     try {
       if (correct) {
-        await recordReview(currentWord.id, 4);
+        await recordReview(currentWord.id, Rating.Good);
         recordDailyActivity(1);
         setFeedbackMsg("Chính xác! Đã tích lũy mục tiêu hằng ngày 🎉");
 
@@ -423,7 +434,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           advanceNextWord();
         }, 3500);
       } else {
-        await recordReview(currentWord.id, 1);
+        await recordReview(currentWord.id, Rating.Again);
         setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${currentWord.word}"`);
       }
     } catch (err) {
@@ -445,7 +456,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     try {
       if (correct) {
-        await recordReview(currentWord.id, 4);
+        await recordReview(currentWord.id, Rating.Good);
         recordDailyActivity(1);
         setFeedbackMsg("Tuyệt vời! Bạn đã gõ chính xác 🚀");
 
@@ -455,7 +466,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           advanceNextWord();
         }, 3500);
       } else {
-        await recordReview(currentWord.id, 1);
+        await recordReview(currentWord.id, Rating.Again);
         setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${currentWord.word}"`);
       }
     } catch (err) {
@@ -559,11 +570,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     <div
       className={`fixed inset-0 w-screen h-screen z-50 flex items-center justify-center p-4 sm:p-6 select-none transition-colors duration-200 ${blurClass}`}
       style={overlayStyle}
-      onClick={(e) => {
-        // Strict requirement: Never close popup on overlay click.
-        // User must click Close (X) or Snooze button (or press Esc/S).
-        e.stopPropagation();
-      }}
+      onClick={handleClose}
     >
       <div
         className="w-full max-w-xl bg-white/95 dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl backdrop-blur-xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"

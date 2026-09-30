@@ -20,4 +20,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libayatana-appindicator3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Debian's NSIS package omits Windows-specific Include/Win/*.nsh headers that
+# Tauri's installer.nsi requires. Copy pre-downloaded files from the repo.
+COPY nsis-includes/Win/ /usr/share/nsis/Include/Win/
+
 WORKDIR /app

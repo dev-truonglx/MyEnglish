@@ -6,12 +6,14 @@ export type QuizMode = "multiple_choice" | "typing" | "flashcard";
 export type SnoozeDuration = 5 | 10 | 15 | 30; // in minutes
 export type BlurOverlayLevel = "light" | "medium" | "heavy";
 
+export type WordsPerSession = 3 | 5 | 10;
+
 export interface ReminderSettings {
   enabled: boolean;
   intervalMinutes: ReminderInterval;
   snoozeMinutes: SnoozeDuration;
   triggerCondition: ReminderTrigger;
-  quizMode: QuizMode;
+  quizMode?: QuizMode;
   wordsPerSession: number;
   blurOverlay: BlurOverlayLevel;
   autoPlayAudio: boolean; // strictly false by user requirement
@@ -25,8 +27,8 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   intervalMinutes: 30, // Default 30 minutes
   snoozeMinutes: 10,   // Default 10 minutes snooze
   triggerCondition: "due_only", // Default only when words are due
-  quizMode: "multiple_choice",  // 4 choices with keys 1-4
-  wordsPerSession: 1,  // 1 word for quick non-intrusive review
+  quizMode: "multiple_choice",  // Legacy fallback
+  wordsPerSession: 3,  // Default 3 words per popup
   blurOverlay: "medium", // Backdrop blur
   autoPlayAudio: false, // DO NOT play audio when displayed
   snoozedUntil: null,
@@ -40,9 +42,14 @@ export function getReminderSettings(): ReminderSettings {
     const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!raw) return { ...DEFAULT_REMINDER_SETTINGS };
     const parsed = JSON.parse(raw);
+    const wordsPerSession =
+      typeof parsed.wordsPerSession === "number" && [3, 5, 10].includes(parsed.wordsPerSession)
+        ? parsed.wordsPerSession
+        : 3;
     return {
       ...DEFAULT_REMINDER_SETTINGS,
       ...parsed,
+      wordsPerSession,
       autoPlayAudio: false, // enforce no sound on display
     };
   } catch {

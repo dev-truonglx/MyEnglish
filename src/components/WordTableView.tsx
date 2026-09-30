@@ -106,7 +106,7 @@ export default function WordTableView({
                 className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors text-center"
               >
                 <div className="flex items-center justify-center gap-1.5">
-                  <span>Ease Factor</span>
+                  <span>Độ bền (S)</span>
                   <ArrowUpDown className="w-3 h-3" />
                 </div>
               </th>
@@ -180,9 +180,9 @@ export default function WordTableView({
                     </span>
                   </td>
 
-                  {/* Ease Factor */}
+                  {/* Stability / Ease Factor */}
                   <td className="py-3 px-4 text-center font-mono text-slate-700 dark:text-zinc-300">
-                    {item.srs.ease_factor}
+                    {item.srs.stability && item.srs.stability > 0 ? `${item.srs.stability}d` : `${item.srs.interval}d`}
                   </td>
 
                   {/* Interval */}

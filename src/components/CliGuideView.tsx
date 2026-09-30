@@ -24,6 +24,8 @@ import {
   sendTestNotification,
   markWordDueImmediately,
   srsWorker,
+  getFSRSSettings,
+  saveFSRSSettings,
 } from "@/services/srs";
 import {
   getReminderSettings,
@@ -33,7 +35,6 @@ import {
   getSnoozeRemainingMinutes,
   type ReminderSettings,
   type ReminderInterval,
-  type QuizMode,
   type SnoozeDuration,
   type BlurOverlayLevel,
 } from "@/services/reminderSettings";
@@ -57,6 +58,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
   // Notification & Pop-up state
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
+  const [fsrsSettings, setFsrsSettings] = useState(() => getFSRSSettings());
   const [testingNotif, setTestingNotif] = useState(false);
   const [testingDueWord, setTestingDueWord] = useState(false);
   const [testingPopup, setTestingPopup] = useState(false);
@@ -69,18 +71,24 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [apiKey, setApiKey] = useState("");
   const [apiKeySaved, setApiKeySaved] = useState(false);
 
+  // Custom CLI Path state
+  const [customCliPath, setCustomCliPath] = useState("");
+  const [customCliSaved, setCustomCliSaved] = useState(false);
+
   // Active guide subtab
   const [activeGuideTab, setActiveGuideTab] = useState<"cli" | "notification" | "apikey">("cli");
 
-  const checkCli = async () => {
+  const checkCli = async (pathToTest?: string) => {
     setCheckingCli(true);
     try {
-      const res = await invoke<CliStatus>("check_cli_status");
+      const storedPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+      const pathParam = pathToTest !== undefined ? (pathToTest.trim() || undefined) : storedPath;
+      const res = await invoke<CliStatus>("check_cli_status", { customPath: pathParam });
       setCliStatus(res);
     } catch (err) {
       setCliStatus({
         installed: false,
-        path: "~/.gemini/bin/agy",
+        path: pathToTest || customCliPath || "~/.gemini/antigravity-cli",
         error: String(err),
       });
     } finally {
@@ -89,7 +97,17 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   };
 
   useEffect(() => {
-    checkCli();
+    try {
+      const savedPath = localStorage.getItem("myenglish_custom_cli_path");
+      if (savedPath) {
+        setCustomCliPath(savedPath);
+        checkCli(savedPath);
+      } else {
+        checkCli();
+      }
+    } catch {
+      checkCli();
+    }
 
     try {
       const savedKey = localStorage.getItem("myenglish_gemini_api_key");
@@ -189,6 +207,25 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     } catch {}
   };
 
+  const handleSaveCustomPath = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = customCliPath.trim();
+    if (trimmed) {
+      localStorage.setItem("myenglish_custom_cli_path", trimmed);
+    } else {
+      localStorage.removeItem("myenglish_custom_cli_path");
+    }
+    setCustomCliSaved(true);
+    setTimeout(() => setCustomCliSaved(false), 2000);
+    checkCli(trimmed || undefined);
+  };
+
+  const handleResetCustomPath = () => {
+    setCustomCliPath("");
+    localStorage.removeItem("myenglish_custom_cli_path");
+    checkCli(undefined);
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-4xl mx-auto w-full space-y-6">
 
@@ -243,7 +280,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
               Đường dẫn nhị phân:{" "}
               <span className="text-slate-800 dark:text-zinc-200 font-bold">
-                {cliStatus?.path || "~/.gemini/bin/agy"}
+                {cliStatus?.path || "~/.gemini/antigravity-cli"}
               </span>
             </p>
             {cliStatus?.details && (
@@ -260,13 +297,60 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         </div>
 
         <button
-          onClick={checkCli}
+          onClick={() => checkCli()}
           disabled={checkingCli}
           className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${checkingCli ? "animate-spin" : ""}`} />
           <span>Kiểm tra lại kết nối</span>
         </button>
+      </div>
+
+      {/* Custom CLI Path Configuration (Especially for Windows or custom install paths) */}
+      <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+            <span className="text-xs font-bold text-slate-900 dark:text-white">
+              Đường dẫn CLI tùy chỉnh (Tự động nhận diện hoặc chỉ định thủ công)
+            </span>
+          </div>
+          {customCliPath && (
+            <button
+              type="button"
+              onClick={handleResetCustomPath}
+              className="text-[11px] text-slate-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 transition-colors"
+            >
+              Đặt lại mặc định
+            </button>
+          )}
+        </div>
+        <form onSubmit={handleSaveCustomPath} className="flex flex-col sm:flex-row items-center gap-2">
+          <input
+            type="text"
+            value={customCliPath}
+            onChange={(e) => setCustomCliPath(e.target.value)}
+            placeholder="Ví dụ: C:\Users\longn\.gemini\antigravity-cli (hoặc C:\Users\longn\.gemini\antigravity-cli\agy.exe)"
+            className="flex-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+          />
+          <button
+            type="submit"
+            disabled={checkingCli}
+            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs transition-colors shrink-0 shadow-sm flex items-center justify-center gap-1.5"
+          >
+            {customCliSaved ? (
+              <>
+                <Check className="w-3.5 h-3.5 text-emerald-300" />
+                <span>Đã lưu!</span>
+              </>
+            ) : (
+              <span>Lưu & Kiểm tra</span>
+            )}
+          </button>
+        </form>
+        <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+          Hệ thống tự động tìm trong <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\antigravity-cli</code>, <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\bin</code>, và biến môi trường PATH. Nếu bạn cài đặt ở đường dẫn riêng, hãy dán đường dẫn thư mục hoặc file <code className="font-mono text-cyan-600 dark:text-cyan-400">agy.exe</code> vào ô trên.
+        </p>
       </div>
 
       {/* Navigation Subtabs */}
@@ -611,65 +695,45 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 </div>
               </div>
 
-              {/* Field 4: Preferred Quiz Mode */}
+              {/* Field 4: Words per Session */}
               <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                  Dạng câu hỏi trên Pop-up:
-                </span>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {[
-                    { mode: "multiple_choice" as QuizMode, label: "Trắc nghiệm 1-4" },
-                    { mode: "typing" as QuizMode, label: "Gõ từ vựng" },
-                    { mode: "flashcard" as QuizMode, label: "Lật thẻ SM-2" },
-                  ].map((item) => {
-                    const isSelected = reminderSettings.quizMode === item.mode;
-                    return (
-                      <button
-                        key={item.mode}
-                        onClick={() => handleUpdateReminder({ quizMode: item.mode })}
-                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
-                          isSelected
-                            ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-indigo-500"
-                        }`}
-                      >
-                        {item.label}
-                      </button>
-                    );
-                  })}
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    Số lượng từ mỗi lần Pop-up:
+                  </span>
+                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
+                    {reminderSettings.wordsPerSession} từ / phiên
+                  </span>
                 </div>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
-                  Trắc nghiệm 1-4 cho phép bạn trả lời cực nhanh chỉ bằng 1 ngón tay mà không cần chạm chuột.
-                </p>
-              </div>
-
-              {/* Field 5: Words per Session & Fullscreen Blur Overlay */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                  Số lượng từ mỗi lần Pop-up:
-                </span>
                 <div className="grid grid-cols-3 gap-2">
                   {[
-                    { count: 1, label: "1 từ (Micro ~ 5s)" },
-                    { count: 3, label: "3 từ (Mini ~ 15s)" },
-                    { count: 5, label: "5 từ (Deep)" },
+                    { count: 3, label: "3 từ", desc: "~15s nhanh" },
+                    { count: 5, label: "5 từ", desc: "~30s chuẩn" },
+                    { count: 10, label: "10 từ", desc: "~1p sâu" },
                   ].map((item) => {
                     const isSelected = reminderSettings.wordsPerSession === item.count;
                     return (
                       <button
                         key={item.count}
                         onClick={() => handleUpdateReminder({ wordsPerSession: item.count })}
-                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center flex flex-col items-center gap-0.5 ${
                           isSelected
                             ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
                             : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
                         }`}
                       >
-                        {item.label}
+                        <span className="font-bold">{item.label}</span>
+                        <span className={`text-[10px] ${isSelected ? "text-cyan-100" : "text-slate-400 dark:text-zinc-500"}`}>
+                          {item.desc}
+                        </span>
                       </button>
                     );
                   })}
                 </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Các câu hỏi trong phiên pop-up được tự động phân bổ ngẫu nhiên giữa trắc nghiệm 1-4 và gõ từ vựng.
+                </p>
               </div>
 
               {/* Field 6: Fullscreen Overlay Blur Level & Audio Policy */}
@@ -802,21 +866,63 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             )}
           </div>
 
-          {/* SECTION 3: SM-2 ALGORITHM EXPLANATION */}
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-3 shadow-sm">
-            <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
-              <Zap className="w-4 h-4" />
-              <span>Cơ chế hoạt động của Thuật toán Spaced Repetition (SM-2)</span>
+          {/* SECTION 3: FSRS ALGORITHM EXPLANATION & CONFIGURATION */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
+                <Zap className="w-4 h-4 text-amber-500" />
+                <span>Thuật toán Spaced Repetition Thế Hệ Mới: FSRS (DSR Model)</span>
+              </div>
+              <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-mono font-bold">
+                FSRS v5 Active
+              </span>
             </div>
+
+            {/* Retention Control Widget */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">
+                    Mục tiêu ghi nhớ (Desired Retention)
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Xác suất bạn muốn nhớ được từ khi đến ngày hẹn ôn tập. Mặc định 90% (tối ưu nhất).
+                  </p>
+                </div>
+                <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+                  {Math.round(fsrsSettings.requestRetention * 100)}%
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-2 pt-1">
+                {[0.8, 0.85, 0.9, 0.95].map((val) => (
+                  <button
+                    key={val}
+                    onClick={() => {
+                      saveFSRSSettings({ requestRetention: val });
+                      setFsrsSettings((prev) => ({ ...prev, requestRetention: val }));
+                      setNotifFeedback(`Đã cập nhật mục tiêu ghi nhớ FSRS thành ${Math.round(val * 100)}%!`);
+                    }}
+                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                      fsrsSettings.requestRetention === val
+                        ? "bg-cyan-600 text-white shadow-sm font-bold"
+                        : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
+                    }`}
+                  >
+                    {Math.round(val * 100)}%{val === 0.9 ? " (Chuẩn)" : ""}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div className="text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">
               <p>
-                <strong>1. Phân bổ chu kỳ giãn cách (SM-2):</strong> Mỗi lần bạn hoàn thành 1 câu hỏi trên Pop-up hoặc lật flashcard, thuật toán sẽ tự động tính toán thời điểm ôn tập tiếp theo (<code>next_review_date</code>): từ quên ôn lại ngay trong ngày, từ nhớ tốt sau 1 ngày, 3 ngày, 6 ngày, 14 ngày...
+                <strong>1. Khắc phục hoàn toàn "Ease Hell" của SM-2:</strong> FSRS không dùng hệ số cố định mà mô hình hóa trí nhớ theo 3 biến số <strong>DSR (Độ khó - Độ bền - Khả năng nhớ lại)</strong>. Khi bạn bấm quên một từ, thuật toán sẽ tự cân bằng lại chứ không phạt kẹt từ ở chu kỳ ngắn vĩnh viễn.
               </p>
               <p>
-                <strong>2. Tiến trình quét ngầm (SRS Background Worker):</strong> Khi ứng dụng MyEnglish đang mở (hoặc thu nhỏ ở thanh Dock), tiến trình ngầm sẽ tự động quét cơ sở dữ liệu SQLite định kỳ theo số phút bạn cấu hình ở trên (mặc định 30 phút).
+                <strong>2. Giảm 20% – 30% số lượt ôn tập:</strong> Khoảng cách ôn được tính toán toán học chính xác theo đường cong quên Ebbinghaus hiện đại, giúp bạn nhớ lâu hơn nhưng tốn ít thời gian lặp lại hơn.
               </p>
               <p>
-                <strong>3. Hiển thị Pop-up thông minh:</strong> Khi đến lịch hẹn, nếu có từ cần ôn tập và bạn không đang ở trạng thái Hoãn (Snooze), màn hình sẽ mờ lại và Pop-up xuất hiện ngay giữa màn hình để bạn ôn luyện nhanh 5 giây.
+                <strong>3. Tiến trình quét ngầm thông minh:</strong> Khi ứng dụng MyEnglish đang mở (hoặc thu nhỏ ở Dock/Tray), tiến trình ngầm sẽ tự động quét cơ sở dữ liệu định kỳ theo số phút bạn cấu hình ở trên để nhắc bạn ôn tập kịp thời.
               </p>
             </div>
           </div>

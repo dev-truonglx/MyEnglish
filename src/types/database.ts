@@ -35,12 +35,25 @@ export interface WordExample {
   grammar_analysis: string;
 }
 
+export type FSRSState = 0 | 1 | 2 | 3; // 0: New, 1: Learning, 2: Review, 3: Relearning
+
 export interface SRSReview {
   word_id: string;
+  // Legacy SM-2 compatibility fields
   ease_factor: number; // default 2.5
   interval: number; // in days, default 0
   repetitions: number; // default 0
   next_review_date: string; // ISO timestamp
+
+  // FSRS (DSR) Modern Fields
+  stability?: number; // Days until R drops to requested retention (default 0)
+  difficulty?: number; // Inherent difficulty 1 - 10 (default 0)
+  elapsed_days?: number; // Days since last review (default 0)
+  scheduled_days?: number; // Next interval in days (default 0)
+  reps?: number; // Total repetition count
+  lapses?: number; // Number of times forgotten
+  state?: FSRSState; // 0: New, 1: Learning, 2: Review, 3: Relearning
+  last_review?: string | null; // ISO timestamp of last review
 }
 
 export interface WordDetail extends Word {

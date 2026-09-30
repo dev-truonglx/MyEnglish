@@ -166,7 +166,7 @@ export default function MainDashboard({
 
   useEffect(() => {
     refreshWords();
-    srsWorker.start(15); // Check reviews every 15 minutes in the background
+    srsWorker.start(); // Check reviews dynamically in background according to user settings
 
     // Subscribe to AI pipeline updates
     const unsubscribePipeline = pipeline.subscribe((queue) => {
@@ -2135,7 +2135,7 @@ export default function MainDashboard({
                         </div>
                         <div className="text-right">
                           <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 block font-semibold">
-                            EF: {w.srs.ease_factor}
+                            {w.srs.stability && w.srs.stability > 0 ? `S: ${w.srs.stability}d` : `Mới`}
                           </span>
                           <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
                             {w.srs.interval === 0 ? "Initial review" : `${w.srs.interval}d interval`}
@@ -2787,23 +2787,44 @@ export default function MainDashboard({
               </div>
             )}
 
-            {/* SRS Review Metadata */}
-            <div className="rounded-xl bg-slate-50 dark:bg-zinc-950 p-3.5 border border-slate-200 dark:border-zinc-800 space-y-2 shadow-sm">
-              <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 uppercase tracking-wider block">
-                Memory Health (SM-2)
-              </span>
+            {/* SRS Review Metadata (FSRS) */}
+            <div className="rounded-xl bg-slate-50 dark:bg-zinc-950 p-3.5 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
+                  Trí nhớ (FSRS)
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/40 text-cyan-800 dark:text-cyan-300 font-mono font-medium">
+                  {selectedWord.srs.state === 2
+                    ? "Đã thuộc"
+                    : selectedWord.srs.state === 1
+                    ? "Đang học"
+                    : selectedWord.srs.state === 3
+                    ? "Cần củng cố"
+                    : "Từ mới"}
+                </span>
+              </div>
               <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
-                  <div className="font-bold text-slate-900 dark:text-white font-mono">{selectedWord.srs.ease_factor}</div>
-                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Ease Factor</div>
+                <div className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
+                  <div className="font-bold text-slate-900 dark:text-white font-mono">
+                    {selectedWord.srs.stability && selectedWord.srs.stability > 0
+                      ? `${selectedWord.srs.stability}d`
+                      : `${selectedWord.srs.interval}d`}
+                  </div>
+                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Độ bền (S)</div>
                 </div>
-                <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
-                  <div className="font-bold text-slate-900 dark:text-white font-mono">{selectedWord.srs.interval}d</div>
-                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Interval</div>
+                <div className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
+                  <div className="font-bold text-slate-900 dark:text-white font-mono">
+                    {selectedWord.srs.difficulty && selectedWord.srs.difficulty > 0
+                      ? `${selectedWord.srs.difficulty}/10`
+                      : "5.0/10"}
+                  </div>
+                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Độ khó (D)</div>
                 </div>
-                <div className="p-2 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
-                  <div className="font-bold text-slate-900 dark:text-white font-mono">{selectedWord.srs.repetitions}</div>
-                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Repetitions</div>
+                <div className="p-2 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm">
+                  <div className="font-bold text-slate-900 dark:text-white font-mono">
+                    {selectedWord.srs.repetitions}
+                  </div>
+                  <div className="text-[10px] text-slate-400 dark:text-zinc-500">Số lần ôn</div>
                 </div>
               </div>
             </div>

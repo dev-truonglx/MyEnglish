@@ -1,5 +1,5 @@
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
@@ -7,6 +7,22 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 
 static LAST_NOTIFICATION_TIME: AtomicU64 = AtomicU64::new(0);
+/// Set to true before calling relaunch() so CloseRequested lets the process die.
+static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+
+fn create_hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(target_os = "windows")]
+    {
+        // 0x08000000 = CREATE_NO_WINDOW: suppresses Windows console/cmd window creation
+        cmd.creation_flags(0x08000000);
+    }
+    cmd
+}
 
 #[cfg(target_os = "macos")]
 fn ensure_macos_app_registered() {
@@ -139,10 +155,26 @@ fn get_clipboard_text() -> String {
     {
         if let Ok(output) = std::process::Command::new("/usr/bin/pbpaste").output() {
             if output.status.success() {
-                return String::from_utf8_lossy(&output.stdout).to_string();
+                let text = String::from_utf8_lossy(&output.stdout).to_string();
+                if !text.is_empty() {
+                    return text;
+                }
             }
         }
     }
+
+    // Cross-platform clipboard via arboard (supports Windows, Linux, macOS fallback)
+    for _ in 0..3 {
+        if let Ok(mut clipboard) = arboard::Clipboard::new() {
+            if let Ok(text) = clipboard.get_text() {
+                if !text.is_empty() {
+                    return text;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+
     String::new()
 }
 
@@ -154,6 +186,11 @@ fn toggle_quick_input(app: AppHandle) -> Result<bool, String> {
             window.hide().map_err(|e| e.to_string())?;
             Ok(false)
         } else {
+            if let Some(rp) = app.get_webview_window("review-popup") {
+                if rp.is_visible().unwrap_or(false) {
+                    let _ = rp.hide();
+                }
+            }
             if let Some(monitor) = get_monitor_at_cursor(&window) {
                 let m_pos = monitor.position();
                 let m_size = monitor.size();
@@ -165,6 +202,8 @@ fn toggle_quick_input(app: AppHandle) -> Result<bool, String> {
             }
             let clipboard = get_clipboard_text();
             let _ = window.emit("quick-input-opened", serde_json::json!({ "clipboard": clipboard }));
+            let _ = window.set_always_on_top(true);
+            let _ = window.unminimize();
             window.show().map_err(|e| e.to_string())?;
             window.set_focus().map_err(|e| e.to_string())?;
             Ok(true)
@@ -184,7 +223,11 @@ fn hide_quick_input(app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 fn show_main_window(app: AppHandle) -> Result<(), String> {
+    if let Some(qi) = app.get_webview_window("quick-input") {
+        let _ = qi.hide();
+    }
     if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
         window.set_focus().map_err(|e| e.to_string())?;
     }
@@ -267,12 +310,22 @@ fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor
 #[tauri::command]
 fn show_review_popup(app: AppHandle) -> Result<bool, String> {
     if let Some(window) = app.get_webview_window("review-popup") {
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.set_always_on_top(true);
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+            return Ok(true);
+        }
+
         if let Some(monitor) = get_monitor_at_cursor(&window) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
             let _ = window.set_size(tauri::Size::Physical(*size));
         }
+
+        let _ = window.set_always_on_top(true);
+        let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
 
         // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
@@ -290,7 +343,8 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
             );
         }
 
-        window.set_focus().map_err(|e| e.to_string())?;
+        let _ = window.set_focus();
+
         let _ = window.emit("review-popup-opened", serde_json::json!({}));
         Ok(true)
     } else {
@@ -319,6 +373,13 @@ fn clean_json_string(s: &str) -> String {
     text.to_string()
 }
 
+/// Called by the frontend BEFORE invoking relaunch() during an update.
+/// Sets ALLOW_EXIT so the CloseRequested handler doesn't swallow the quit.
+#[tauri::command]
+fn prepare_update_exit() {
+    ALLOW_EXIT.store(true, Ordering::SeqCst);
+}
+
 #[derive(serde::Serialize)]
 pub struct CliStatusResult {
     pub installed: bool,
@@ -327,30 +388,158 @@ pub struct CliStatusResult {
     pub error: Option<String>,
 }
 
-#[tauri::command]
-fn check_cli_status() -> CliStatusResult {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let gemini_bin = format!("{}/.gemini/bin/gemini", home);
-    let agy_bin = format!("{}/.gemini/bin/agy", home);
+fn resolve_cli_candidate(path: &std::path::Path) -> Option<String> {
+    if path.is_file() {
+        return Some(path.to_string_lossy().to_string());
+    }
+    if path.is_dir() {
+        let exe_names = [
+            "agy.exe",
+            "agy",
+            "gemini.exe",
+            "gemini",
+            "antigravity.exe",
+            "antigravity",
+            "bin/agy.exe",
+            "bin/agy",
+            "bin/gemini.exe",
+            "bin/gemini",
+        ];
+        for name in exe_names {
+            let candidate = path.join(name);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().to_string());
+            }
+        }
+    }
+    None
+}
 
-    let (bin_path, exists) = if std::path::Path::new(&gemini_bin).exists() {
-        (gemini_bin, true)
-    } else if std::path::Path::new(&agy_bin).exists() {
-        (agy_bin, true)
-    } else {
-        ("gemini".to_string(), false)
-    };
+/// Resolve the agy/gemini binary path cross-platform.
+/// Checks user custom path first, then extensive default directories on Windows/macOS/Linux
+/// (including .gemini/antigravity-cli, .gemini/bin, etc.), and finally performs a system PATH lookup.
+fn get_cli_bin_path(custom_path: Option<&str>) -> (String, bool) {
+    if let Some(cp) = custom_path {
+        let trimmed = cp.trim();
+        if !trimmed.is_empty() {
+            let p = std::path::Path::new(trimmed);
+            if let Some(resolved) = resolve_cli_candidate(p) {
+                return (resolved, true);
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_default();
+    #[cfg(not(target_os = "windows"))]
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .unwrap_or_default();
+
+    let home_path = std::path::Path::new(&home);
+
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+
+    // Check .gemini/antigravity-cli (common on Windows)
+    candidates.push(home_path.join(".gemini").join("antigravity-cli"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli").join("agy.exe"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli").join("agy"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli").join("bin").join("agy.exe"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli").join("bin").join("agy"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli").join("antigravity.exe"));
+    candidates.push(home_path.join(".gemini").join("antigravity-cli.exe"));
+
+    // Check .gemini/bin
+    candidates.push(home_path.join(".gemini").join("bin").join("agy.exe"));
+    candidates.push(home_path.join(".gemini").join("bin").join("agy"));
+    candidates.push(home_path.join(".gemini").join("bin").join("gemini.exe"));
+    candidates.push(home_path.join(".gemini").join("bin").join("gemini"));
+
+    // Check .antigravity
+    candidates.push(home_path.join(".antigravity").join("bin").join("agy.exe"));
+    candidates.push(home_path.join(".antigravity").join("bin").join("agy"));
+
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(local_app_data) = std::env::var("LOCALAPPDATA") {
+            let lp = std::path::Path::new(&local_app_data);
+            candidates.push(lp.join("Programs").join("antigravity").join("agy.exe"));
+            candidates.push(lp.join("antigravity-cli").join("agy.exe"));
+            candidates.push(lp.join("antigravity").join("agy.exe"));
+        }
+        if let Ok(app_data) = std::env::var("APPDATA") {
+            let ap = std::path::Path::new(&app_data);
+            candidates.push(ap.join("npm").join("agy.cmd"));
+            candidates.push(ap.join("npm").join("agy.exe"));
+        }
+    }
+
+    for cand in &candidates {
+        if let Some(resolved) = resolve_cli_candidate(cand) {
+            return (resolved, true);
+        }
+    }
+
+    // Fallback: search system PATH using where (Windows) or which (Unix)
+    #[cfg(target_os = "windows")]
+    {
+        for cmd_name in &["agy.exe", "agy", "gemini.exe", "gemini"] {
+            if let Ok(output) = create_hidden_command("where").arg(cmd_name).output() {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    if let Some(first_line) = stdout.lines().next() {
+                        let trimmed = first_line.trim();
+                        if !trimmed.is_empty() && std::path::Path::new(trimmed).exists() {
+                            return (trimmed.to_string(), true);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        for cmd_name in &["agy", "gemini"] {
+            if let Ok(output) = create_hidden_command("which").arg(cmd_name).output() {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    let trimmed = stdout.trim();
+                    if !trimmed.is_empty() && std::path::Path::new(trimmed).exists() {
+                        return (trimmed.to_string(), true);
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let fallback = home_path.join(".gemini").join("antigravity-cli").join("agy.exe");
+        (fallback.to_string_lossy().to_string(), false)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let fallback = home_path.join(".gemini").join("bin").join("agy");
+        (fallback.to_string_lossy().to_string(), false)
+    }
+}
+
+#[tauri::command]
+fn check_cli_status(custom_path: Option<String>) -> CliStatusResult {
+    let (bin_path, exists) = get_cli_bin_path(custom_path.as_deref());
 
     if !exists {
         return CliStatusResult {
             installed: false,
             path: bin_path,
             details: None,
-            error: Some("Không tìm thấy binary agy hoặc gemini trong ~/.gemini/bin/".to_string()),
+            error: Some("Không tìm thấy binary agy. Hãy kiểm tra hoặc dán đường dẫn cài đặt vào ô cấu hình tùy chỉnh bên dưới.".to_string()),
         };
     }
 
-    match std::process::Command::new(&bin_path).arg("--help").output() {
+    match create_hidden_command(&bin_path).arg("--help").output() {
         Ok(out) => {
             if out.status.success() {
                 CliStatusResult {
@@ -379,98 +568,57 @@ fn check_cli_status() -> CliStatusResult {
 }
 
 #[tauri::command]
-async fn enrich_word_with_gemini(word: String) -> Result<serde_json::Value, String> {
+async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
     let clean_word = word.trim().to_lowercase();
     if clean_word.is_empty() {
         return Err("Word cannot be empty".to_string());
     }
 
     tauri::async_runtime::spawn_blocking(move || {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let gemini_bin = format!("{}/.gemini/bin/gemini", home);
-        let agy_bin = format!("{}/.gemini/bin/agy", home);
-
-        let bin_path = if std::path::Path::new(&gemini_bin).exists() {
-            gemini_bin
-        } else if std::path::Path::new(&agy_bin).exists() {
-            agy_bin
-        } else {
-            "gemini".to_string()
-        };
+        let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
 
         let prompt = format!(
-            "You are an expert English linguist and developer educator. \
-            Analyze the English vocabulary word: '{clean_word}'. \
-            Output strictly valid JSON with no markdown formatting or backticks, matching this exact schema: \
+            "Analyze the English tech vocabulary: '{clean_word}'. \
+            Return strictly valid JSON with no markdown formatting or backticks, matching this exact schema: \
             {{\
-              \"phonetic\": \"IPA pronunciation e.g. /kənˈkɜːr.ən.si/\",\
-              \"part_of_speech\": \"noun, verb, adjective, or adverb\",\
-              \"topic\": \"Primary category: System Design, Database & Storage, Concurrency & Async, Networking & APIs, Security & Auth, DevOps & Cloud, Frontend & UI, Backend & Microservices, Data Structures & Algorithms, Architecture & Patterns, Testing & QA, General Tech, or Everyday Life\",\
-              \"meaning_vn\": \"Clear, comprehensive Vietnamese explanation in both software engineering and general daily life context\",\
-              \"collocations\": [\
-                \"common tech phrase 1 using '{clean_word}'\",\
-                \"common tech phrase 2 using '{clean_word}'\",\
-                \"common tech phrase 3 using '{clean_word}'\"\
+              \"phonetic\": \"/IPA/\",\
+              \"part_of_speech\": \"noun|verb|adjective|adverb\",\
+              \"topic\": \"Category (e.g. System Design, DevOps, Frontend, Database, Concurrency, Security, General Tech, Everyday Life)\",\
+              \"meaning_vn\": \"Concise, clear Vietnamese meaning in tech & daily context\",\
+              \"collocations\": [\"phrase 1\", \"phrase 2\", \"phrase 3\"],\
+              \"code_snippet\": \"// 2-4 lines realistic code illustrating '{clean_word}'\",\
+              \"examples\": [\
+                {{\
+                  \"sentence_en\": \"Software engineering sentence with '{clean_word}'\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
+                  \"grammar_analysis\": \"Cấu trúc & giải thích ngắn gọn\"\
+                }},\
+                {{\
+                  \"sentence_en\": \"Everyday life sentence with '{clean_word}'\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
+                  \"grammar_analysis\": \"Cấu trúc & giải thích ngắn gọn\"\
+                }}\
               ],\
-              \"code_snippet\": \"// Realistic 3-5 line code snippet (TypeScript/Go/Python) illustrating practical usage of '{clean_word}'\",\
               \"synonyms\": [\
                 {{\
                   \"word\": \"synonym1\",\
-                  \"phonetic\": \"IPA for synonym1\",\
-                  \"meaning_vn\": \"Vietnamese meaning of synonym1\",\
-                  \"examples\": [\
-                    {{\
-                      \"sentence_en\": \"Software engineering sentence using synonym1\",\
-                      \"meaning_vn\": \"Ý nghĩa của câu bằng tiếng Việt\",\
-                      \"structure\": \"Cấu trúc câu chi tiết (ví dụ: S + V (transitive) + O + Relative Clause...)\",\
-                      \"why_used\": \"Giải thích vì sao lại dùng cấu trúc câu này trong ngữ cảnh này\"\
-                    }},\
-                    {{\
-                      \"sentence_en\": \"Everyday real-life sentence using synonym1\",\
-                      \"meaning_vn\": \"Ý nghĩa của câu bằng tiếng Việt\",\
-                      \"structure\": \"Cấu trúc câu chi tiết\",\
-                      \"why_used\": \"Giải thích vì sao lại dùng cấu trúc câu này trong ngữ cảnh này\"\
-                    }}\
-                  ]\
+                  \"phonetic\": \"/IPA/\",\
+                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
+                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
                 }}\
               ],\
               \"antonyms\": [\
                 {{\
                   \"word\": \"antonym1\",\
-                  \"phonetic\": \"IPA for antonym1\",\
-                  \"meaning_vn\": \"Vietnamese meaning of antonym1\",\
-                  \"examples\": [\
-                    {{\
-                      \"sentence_en\": \"Software engineering sentence using antonym1\",\
-                      \"meaning_vn\": \"Ý nghĩa của câu bằng tiếng Việt\",\
-                      \"structure\": \"Cấu trúc câu chi tiết\",\
-                      \"why_used\": \"Giải thích vì sao lại dùng cấu trúc câu này trong ngữ cảnh này\"\
-                    }},\
-                    {{\
-                      \"sentence_en\": \"Everyday real-life sentence using antonym1\",\
-                      \"meaning_vn\": \"Ý nghĩa của câu bằng tiếng Việt\",\
-                      \"structure\": \"Cấu trúc câu chi tiết\",\
-                      \"why_used\": \"Giải thích vì sao lại dùng cấu trúc câu này trong ngữ cảnh này\"\
-                    }}\
-                  ]\
-                }}\
-              ],\
-              \"examples\": [\
-                {{\
-                  \"sentence_en\": \"Software engineering sentence using '{clean_word}'\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"Cấu trúc câu: ... | Giải thích lý do dùng: ...\"\
-                }},\
-                {{\
-                  \"sentence_en\": \"Everyday life sentence using '{clean_word}'\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"Cấu trúc câu: ... | Giải thích lý do dùng: ...\"\
+                  \"phonetic\": \"/IPA/\",\
+                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
+                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
                 }}\
               ]\
             }}"
         );
 
-        let output = std::process::Command::new(&bin_path)
+        let output = create_hidden_command(&bin_path)
             .arg("--dangerously-skip-permissions")
             .arg("-p")
             .arg(&prompt)
@@ -537,8 +685,25 @@ pub fn run() {
                             if window.is_visible().unwrap_or(false) {
                                 let _ = window.hide();
                             } else {
+                                // If review popup is active, hide it so quick-input is unobstructed
+                                if let Some(rp) = app.get_webview_window("review-popup") {
+                                    if rp.is_visible().unwrap_or(false) {
+                                        let _ = rp.hide();
+                                    }
+                                }
+                                if let Some(monitor) = get_monitor_at_cursor(&window) {
+                                    let m_pos = monitor.position();
+                                    let m_size = monitor.size();
+                                    if let Ok(w_size) = window.outer_size() {
+                                        let x = m_pos.x + ((m_size.width as i32 - w_size.width as i32) / 2);
+                                        let y = m_pos.y + ((m_size.height as i32 - w_size.height as i32) / 3);
+                                        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+                                    }
+                                }
                                 let clipboard = get_clipboard_text();
                                 let _ = window.emit("quick-input-opened", serde_json::json!({ "clipboard": clipboard }));
+                                let _ = window.set_always_on_top(true);
+                                let _ = window.unminimize();
                                 let _ = window.show();
                                 let _ = window.set_focus();
                             }
@@ -554,8 +719,85 @@ pub fn run() {
                 let bundle = mac_notification_sys::get_bundle_identifier_or_default("MyEnglish");
                 let _ = mac_notification_sys::set_application(&bundle);
             }
-            let shortcut = Shortcut::from_str("CmdOrCtrl+Shift+E")?;
-            app.global_shortcut().register(shortcut)?;
+            if let Ok(shortcut) = Shortcut::from_str("CmdOrCtrl+Shift+E") {
+                if let Err(e) = app.global_shortcut().register(shortcut) {
+                    eprintln!("[GlobalShortcut] Warning: Failed to register CmdOrCtrl+Shift+E: {:?}", e);
+                }
+            }
+
+            // ── System tray icon (all platforms) ─────────────────────────────
+            // macOS: appears in menu bar (top). Windows/Linux: system tray.
+            // Note: tauri.conf.json must NOT have a "trayIcon" section, otherwise
+            // Tauri creates a second icon automatically alongside this one.
+            {
+                use tauri::menu::{MenuBuilder, MenuItemBuilder};
+                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+
+                let show_item = MenuItemBuilder::with_id("show", "Mở Dashboard").build(app)?;
+                let quit_item = MenuItemBuilder::with_id("quit", "Thoát MyEnglish").build(app)?;
+                let tray_menu = MenuBuilder::new(app)
+                    .item(&show_item)
+                    .separator()
+                    .item(&quit_item)
+                    .build()?;
+
+                let _tray = TrayIconBuilder::new()
+                    .icon(app.default_window_icon().cloned().unwrap())
+                    .menu(&tray_menu)
+                    .tooltip("MyEnglish")
+                    .on_menu_event(|app, event| match event.id().as_ref() {
+                        "show" => {
+                            if let Some(rp) = app.get_webview_window("review-popup") {
+                                if rp.is_visible().unwrap_or(false) {
+                                    let _ = rp.hide();
+                                }
+                            }
+                            if let Some(w) = app.get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                        "quit" => {
+                            app.exit(0);
+                        }
+                        _ => {}
+                    })
+                    .on_tray_icon_event(|tray, event| {
+                        if let TrayIconEvent::Click {
+                            button: MouseButton::Left,
+                            button_state: MouseButtonState::Up,
+                            ..
+                        } = event
+                        {
+                            let app = tray.app_handle();
+                            if let Some(rp) = app.get_webview_window("review-popup") {
+                                if rp.is_visible().unwrap_or(false) {
+                                    let _ = rp.hide();
+                                }
+                            }
+                            if let Some(w) = app.get_webview_window("main") {
+                                if w.is_visible().unwrap_or(false) {
+                                    let _ = w.hide();
+                                } else {
+                                    let _ = w.show();
+                                    let _ = w.unminimize();
+                                    let _ = w.set_focus();
+                                }
+                            }
+                        }
+                    })
+                    .build(app)?;
+            }
+
+            // Spawn background timer heartbeat so reviews can trigger reliably
+            // even when windows are minimized, inactive, or hidden in tray
+            let bg_app = app.handle().clone();
+            std::thread::spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(30));
+                let _ = bg_app.emit("srs-heartbeat", serde_json::json!({}));
+            });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -569,13 +811,15 @@ pub fn run() {
             send_desktop_notification,
             trigger_review_navigation,
             show_review_popup,
-            hide_review_popup
+            hide_review_popup,
+            prepare_update_exit
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| {
         match event {
+            #[cfg(target_os = "macos")]
             tauri::RunEvent::Reopen { .. } => {
                 let now = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
@@ -588,6 +832,20 @@ pub fn run() {
                     let _ = window.set_focus();
                     if now.saturating_sub(last) < 120 {
                         let _ = window.emit("open-review-tab", serde_json::json!({ "auto_start": false }));
+                    }
+                }
+            }
+            tauri::RunEvent::WindowEvent {
+                label,
+                event: tauri::WindowEvent::CloseRequested { api, .. },
+                ..
+            } => {
+                // If an update is in progress, allow the process to die normally.
+                // Otherwise hide to tray so the app keeps running in background.
+                if label == "main" && !ALLOW_EXIT.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    if let Some(w) = app_handle.get_webview_window("main") {
+                        let _ = w.hide();
                     }
                 }
             }
