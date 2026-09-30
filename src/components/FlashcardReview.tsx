@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import {
   Volume2,
   CheckCircle2,
@@ -16,6 +16,10 @@ import {
   SkipForward,
   Award,
   TrendingUp,
+  Zap,
+  Bug,
+  Sparkles,
+  Headphones,
 } from "lucide-react";
 import {
   recordReview,
@@ -26,6 +30,25 @@ import {
 } from "@/services/srs";
 import { recordDailyActivity } from "@/services/streak";
 import { parseTerms, type WordDetail } from "@/types/database";
+import {
+  getRetrievabilityInfo,
+  isLeech,
+  calculateXPReward,
+  awardXP,
+  saveReviewLog,
+  getXPState,
+  selectExerciseType,
+  type ExerciseType,
+  type XPReward,
+  type XPState,
+} from "@/services/smartReview";
+import { checkAndUnlockAchievements } from "@/services/achievements";
+import { triggerConfetti } from "@/utils/confetti";
+import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
+import SentenceBuilderExercise from "./exercises/SentenceBuilderExercise";
+import ContextMatchExercise from "./exercises/ContextMatchExercise";
+import ListeningDictationExercise from "./exercises/ListeningDictationExercise";
+import ReverseClozeExercise from "./exercises/ReverseClozeExercise";
 
 interface FlashcardReviewProps {
   wordsToReview: WordDetail[];
@@ -33,7 +56,16 @@ interface FlashcardReviewProps {
   onExit: () => void;
 }
 
-type StudyMode = "flip" | "cloze" | "spelling";
+export type StudyMode =
+  | "mixed"
+  | "flip"
+  | "cloze"
+  | "spelling"
+  | "multiple_choice"
+  | "sentence_builder"
+  | "context_match"
+  | "listening"
+  | "reverse_cloze";
 
 interface SessionStats {
   firstTryCorrect: number;
@@ -41,6 +73,8 @@ interface SessionStats {
   revealedCount: number;
   skippedCount: number;
   totalWrongAttempts: number;
+  totalXPEarned: number;
+  leechesSlain: number;
 }
 
 export default function FlashcardReview({
@@ -52,10 +86,13 @@ export default function FlashcardReview({
   const [mode, setMode] = useState<StudyMode>(() => {
     try {
       const saved = localStorage.getItem("myenglish_flashcard_mode");
-      if (saved === "cloze" || saved === "spelling" || saved === "flip") return saved;
+      if (saved) return saved as StudyMode;
     } catch {}
-    return "flip";
+    return "mixed";
   });
+
+  const [fallbackMode, setFallbackMode] = useState<ExerciseType | null>(null);
+  const [consecutiveCorrect, setConsecutiveCorrect] = useState(0);
 
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
@@ -89,10 +126,26 @@ export default function FlashcardReview({
     revealedCount: 0,
     skippedCount: 0,
     totalWrongAttempts: 0,
+    totalXPEarned: 0,
+    leechesSlain: 0,
   });
+
+  // Phase 1: Response Time Tracking
+  const cardStartTime = useRef<number>(Date.now());
+  const [lastXPReward, setLastXPReward] = useState<XPReward | null>(null);
+  const [showXPPopup, setShowXPPopup] = useState(false);
+  const [xpState, setXpState] = useState<XPState>(getXPState);
 
   const inputRef = useRef<HTMLInputElement>(null);
   const currentWord = wordsToReview[currentIndex];
+
+  // Adaptive exercise type calculation
+  const effectiveExerciseType: ExerciseType = useMemo(() => {
+    if (fallbackMode) return fallbackMode;
+    if (mode !== "mixed") return mode as ExerciseType;
+    if (!currentWord) return "flip";
+    return selectExerciseType(currentWord);
+  }, [mode, currentWord, fallbackMode]);
 
   const handleModeChange = (newMode: StudyMode) => {
     setMode(newMode);
@@ -112,6 +165,10 @@ export default function FlashcardReview({
     setIsShaking(false);
     setFeedbackMessage(null);
     setIsAdvancing(false);
+    setLastXPReward(null);
+    setShowXPPopup(false);
+    setFallbackMode(null);
+    cardStartTime.current = Date.now(); // Reset response timer
     setTimeout(() => {
       inputRef.current?.focus();
     }, 100);
@@ -124,38 +181,73 @@ export default function FlashcardReview({
     }
   }, [currentIndex, currentWord]);
 
-  const handleSpeak = (text: string, e?: React.MouseEvent) => {
-    if (e) e.stopPropagation();
+  const handleSpeak = (text: string, eOrRate?: React.MouseEvent | number) => {
+    let rate = 0.9;
+    if (typeof eOrRate === "number") {
+      rate = eOrRate;
+    } else if (eOrRate) {
+      eOrRate.stopPropagation();
+    }
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = "en-US";
-      utterance.rate = 0.9;
+      utterance.rate = rate;
       window.speechSynthesis.speak(utterance);
     }
   };
 
-  // Auto-speak on card switch in Spelling mode to test audio recall
+  // Auto-speak on card switch in Spelling or Listening mode to test audio recall
   useEffect(() => {
-    if (mode === "spelling" && currentWord) {
+    if ((effectiveExerciseType === "spelling" || effectiveExerciseType === "listening") && currentWord) {
       handleSpeak(currentWord.word);
     }
-  }, [currentIndex, mode]);
+  }, [currentIndex, effectiveExerciseType]);
 
-  const handleGrade = async (rating: Rating) => {
+  const handleGrade = async (rating: Rating, overrideExerciseType?: ExerciseType) => {
     if (!currentWord || isAdvancing) return;
     setIsAdvancing(true);
 
-    // Track statistics if in flip mode
-    if (mode === "flip") {
-      if (rating === Rating.Easy) {
-        setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
-      } else if (rating === Rating.Good || rating === Rating.Hard) {
-        setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
-      } else {
-        setSessionStats((prev) => ({ ...prev, revealedCount: prev.revealedCount + 1 }));
-      }
+    const activeExType = overrideExerciseType || effectiveExerciseType;
+    const responseTimeMs = Date.now() - cardStartTime.current;
+    const wordIsLeech = isLeech(currentWord.srs);
+    const isFirstTry = wrongAttempts === 0 && !showHint;
+
+    // Track statistics
+    if (rating === Rating.Easy) {
+      setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
+      setConsecutiveCorrect((prev) => prev + 1);
+    } else if (rating === Rating.Good || rating === Rating.Hard) {
+      setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
+      setConsecutiveCorrect((prev) => prev + 1);
+    } else {
+      setSessionStats((prev) => ({ ...prev, revealedCount: prev.revealedCount + 1 }));
+      setConsecutiveCorrect(0);
     }
+
+    // Calculate & award XP
+    const xpReward = calculateXPReward(rating, activeExType, wrongAttempts, responseTimeMs, wordIsLeech, isFirstTry);
+    if (xpReward.totalXP > 0) {
+      awardXP(xpReward.totalXP);
+      setLastXPReward(xpReward);
+      setShowXPPopup(true);
+      setTimeout(() => setShowXPPopup(false), 1500);
+      setSessionStats((prev) => ({
+        ...prev,
+        totalXPEarned: prev.totalXPEarned + xpReward.totalXP,
+        leechesSlain: prev.leechesSlain + (wordIsLeech && (rating === Rating.Good || rating === Rating.Easy) ? 1 : 0),
+      }));
+    }
+
+    // Check gamification achievements
+    checkAndUnlockAchievements({
+      totalWords: wordsToReview.length,
+      consecutiveCorrect: rating >= Rating.Good ? consecutiveCorrect + 1 : 0,
+      sessionReviewCount: reviewCount + 1,
+      leechesSlain: sessionStats.leechesSlain + (wordIsLeech && rating >= Rating.Good ? 1 : 0),
+      responseTimeMs,
+      isCorrect: rating >= Rating.Good,
+    });
 
     try {
       const result = await recordReview(currentWord.id, rating);
@@ -163,9 +255,25 @@ export default function FlashcardReview({
       setLastResult(result);
       setReviewCount((prev) => prev + 1);
 
+      // Save review log with response time and exercise type
+      saveReviewLog({
+        wordId: currentWord.id,
+        exerciseType: activeExType,
+        responseTimeMs,
+        isCorrect: rating >= Rating.Good,
+        wrongAttempts,
+        rating,
+        xpEarned: xpReward.totalXP,
+        timestamp: new Date().toISOString(),
+      }).catch((err) => console.warn("Review log save failed:", err));
+
+      // Update XP state for display
+      setXpState(getXPState());
+
       if (currentIndex + 1 < wordsToReview.length) {
         setCurrentIndex((prev) => prev + 1);
       } else {
+        triggerConfetti(3000);
         setSessionCompleted(true);
       }
     } catch (err) {
@@ -291,6 +399,16 @@ export default function FlashcardReview({
     const handleKeyDown = (e: KeyboardEvent) => {
       if (sessionCompleted || isAdvancing) return;
 
+      const isInteractiveExercise = [
+        "multiple_choice",
+        "sentence_builder",
+        "context_match",
+        "listening",
+        "reverse_cloze",
+      ].includes(effectiveExerciseType);
+
+      if (isInteractiveExercise) return;
+
       const isTyping =
         e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
 
@@ -304,7 +422,7 @@ export default function FlashcardReview({
       }
 
       // Flip card with Space if in flip mode
-      if (mode === "flip" && (e.key === " " || e.key === "Enter")) {
+      if (effectiveExerciseType === "flip" && (e.key === " " || e.key === "Enter")) {
         e.preventDefault();
         setIsFlipped((prev) => !prev);
       } else if (isFlipped || hasCheckedAnswer) {
@@ -324,7 +442,7 @@ export default function FlashcardReview({
     currentIndex,
     sessionCompleted,
     currentWord,
-    mode,
+    effectiveExerciseType,
     hasCheckedAnswer,
     userInput,
     isAdvancing,
@@ -424,6 +542,40 @@ export default function FlashcardReview({
           </div>
         )}
 
+        {/* XP Earned Summary */}
+        <div className="w-full p-4 rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/40 dark:to-yellow-950/40 text-left space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 font-mono text-amber-800 dark:text-amber-300">
+              <Zap className="w-4 h-4" />
+              XP Earned
+            </span>
+            <span className="text-lg font-extrabold font-mono text-amber-600 dark:text-amber-400">
+              +{sessionStats.totalXPEarned} XP
+            </span>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">
+              <span>{xpState.rankEmoji}</span>
+              <span className="font-semibold">Level {xpState.level}</span>
+              <span className="text-amber-500">({xpState.rank})</span>
+            </div>
+            <div className="flex-1 h-2 rounded-full bg-amber-200/50 dark:bg-amber-900/40 overflow-hidden">
+              <div
+                className="h-full bg-gradient-to-r from-amber-500 to-yellow-500 rounded-full transition-all duration-500"
+                style={{ width: `${xpState.progressPercent}%` }}
+              />
+            </div>
+            <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400">
+              {xpState.currentLevelXP}/{xpState.nextLevelXP}
+            </span>
+          </div>
+          {sessionStats.leechesSlain > 0 && (
+            <div className="text-xs font-medium text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
+              🗡️ Leech Slayer! Đã chinh phục <span className="font-bold">{sessionStats.leechesSlain}</span> từ khó
+            </div>
+          )}
+        </div>
+
         {lastResult && (
           <div className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
             <div>
@@ -496,10 +648,23 @@ export default function FlashcardReview({
         </button>
 
         {/* Study Mode Selector */}
-        <div className="flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm">
+        <div className="flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-x-auto max-w-full gap-1">
+          <button
+            onClick={() => handleModeChange("mixed")}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+              mode === "mixed"
+                ? "bg-white dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-slate-200 dark:border-amber-500/40 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+            }`}
+            title="Tự động chọn dạng bài tập tối ưu theo FSRS (Khuyên dùng)"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+            <span>Thích ứng</span>
+          </button>
+
           <button
             onClick={() => handleModeChange("flip")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
               mode === "flip"
                 ? "bg-white dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-slate-200 dark:border-cyan-500/40 shadow-sm"
                 : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -510,20 +675,31 @@ export default function FlashcardReview({
           </button>
 
           <button
+            onClick={() => handleModeChange("multiple_choice")}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+              mode === "multiple_choice"
+                ? "bg-white dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-slate-200 dark:border-blue-500/40 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+            }`}
+          >
+            <span>🎯 Trắc nghiệm</span>
+          </button>
+
+          <button
             onClick={() => handleModeChange("cloze")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
               mode === "cloze"
                 ? "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm"
                 : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
             }`}
           >
             <FileCode className="w-3.5 h-3.5" />
-            <span>Điền từ (Cloze)</span>
+            <span>Điền từ</span>
           </button>
 
           <button
             onClick={() => handleModeChange("spelling")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
               mode === "spelling"
                 ? "bg-white dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-slate-200 dark:border-emerald-500/40 shadow-sm"
                 : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -531,6 +707,29 @@ export default function FlashcardReview({
           >
             <Keyboard className="w-3.5 h-3.5" />
             <span>Luyện gõ</span>
+          </button>
+
+          <button
+            onClick={() => handleModeChange("sentence_builder")}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+              mode === "sentence_builder"
+                ? "bg-white dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-slate-200 dark:border-purple-500/40 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+            }`}
+          >
+            <span>🧩 Ghép câu</span>
+          </button>
+
+          <button
+            onClick={() => handleModeChange("listening")}
+            className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+              mode === "listening"
+                ? "bg-white dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-slate-200 dark:border-rose-500/40 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+            }`}
+          >
+            <Headphones className="w-3.5 h-3.5" />
+            <span>Luyện nghe</span>
           </button>
         </div>
 
@@ -550,9 +749,9 @@ export default function FlashcardReview({
 
       {/* FLASHCARD BODY CONTAINER - Rock solid vertical height */}
       <div
-        onClick={mode === "flip" ? () => setIsFlipped((prev) => !prev) : undefined}
+        onClick={effectiveExerciseType === "flip" ? () => setIsFlipped((prev) => !prev) : undefined}
         className={`w-full flex-1 my-auto min-h-[520px] h-[560px] md:h-[580px] max-h-[78vh] overflow-hidden rounded-3xl border bg-white dark:bg-zinc-950 p-5 md:p-6 shadow-xl dark:shadow-2xl flex flex-col justify-between transition-all relative ${
-          mode === "flip" ? "cursor-pointer hover:border-slate-400 dark:hover:border-zinc-700/80" : ""
+          effectiveExerciseType === "flip" ? "cursor-pointer hover:border-slate-400 dark:hover:border-zinc-700/80" : ""
         } ${
           hasCheckedAnswer
             ? isCorrect
@@ -578,15 +777,131 @@ export default function FlashcardReview({
                 ? `FSRS: S=${currentWord.srs.stability}d • D=${currentWord.srs.difficulty || 5}`
                 : `FSRS: Mới (New)`}
             </span>
+            {/* Leech Warning Badge */}
+            {isLeech(currentWord.srs) && (
+              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-700/60 flex items-center gap-1 animate-pulse">
+                <Bug className="w-2.5 h-2.5" />
+                Leech
+              </span>
+            )}
+            {/* Retrievability Mini Bar */}
+            {(() => {
+              const rInfo = getRetrievabilityInfo(currentWord.srs);
+              if (rInfo.level === "new") return null;
+              return (
+                <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border flex items-center gap-1.5 ${rInfo.bgColorClass} ${rInfo.textColorClass} border-current/20`}>
+                  <span className="font-semibold">{rInfo.percent}%</span>
+                  <span className={`w-8 h-1.5 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block`}>
+                    <span className={`block h-full ${rInfo.colorClass} rounded-full transition-all`} style={{ width: `${rInfo.percent}%` }} />
+                  </span>
+                  <span className="text-[9px]">{rInfo.label}</span>
+                </span>
+              );
+            })()}
           </div>
 
-          <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500 uppercase tracking-wider shrink-0">
-            {mode === "flip" ? "Standard Flip" : mode === "cloze" ? "Cloze Deletion" : "Spelling Recall"}
-          </span>
+          <div className="flex items-center gap-2">
+            {/* XP Floating Popup */}
+            {showXPPopup && lastXPReward && (
+              <span className="text-xs font-bold text-amber-500 dark:text-amber-400 animate-bounce font-mono flex items-center gap-1">
+                <Zap className="w-3 h-3" />
+                +{lastXPReward.totalXP} XP
+              </span>
+            )}
+            <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-500 uppercase tracking-wider shrink-0">
+              {effectiveExerciseType === "flip"
+                ? "Standard Flip"
+                : effectiveExerciseType === "cloze"
+                ? "Cloze Deletion"
+                : effectiveExerciseType === "spelling"
+                ? "Spelling Recall"
+                : effectiveExerciseType === "multiple_choice"
+                ? "Multiple Choice"
+                : effectiveExerciseType === "sentence_builder"
+                ? "Sentence Builder"
+                : effectiveExerciseType === "context_match"
+                ? "Context Match"
+                : effectiveExerciseType === "listening"
+                ? "Listening Dictation"
+                : "Reverse Cloze"}
+              {mode === "mixed" && " • FSRS"}
+            </span>
+          </div>
         </div>
 
+        {/* ----------------- MODE: MULTIPLE CHOICE ----------------- */}
+        {effectiveExerciseType === "multiple_choice" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <MultipleChoiceExercise
+              word={currentWord}
+              allWords={wordsToReview}
+              onComplete={(_isCorrect, _attempts, rating) => {
+                handleGrade(rating, "multiple_choice");
+              }}
+              onSpeak={(t) => handleSpeak(t)}
+            />
+          </div>
+        )}
+
+        {/* ----------------- MODE: SENTENCE BUILDER ----------------- */}
+        {effectiveExerciseType === "sentence_builder" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <SentenceBuilderExercise
+              word={currentWord}
+              onComplete={(_isCorrect, _attempts, rating) => {
+                handleGrade(rating, "sentence_builder");
+              }}
+              onSpeak={(t) => handleSpeak(t)}
+              onFallback={() => setFallbackMode("flip")}
+            />
+          </div>
+        )}
+
+        {/* ----------------- MODE: CONTEXT MATCH ----------------- */}
+        {effectiveExerciseType === "context_match" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <ContextMatchExercise
+              word={currentWord}
+              allWords={wordsToReview}
+              onComplete={(_isCorrect, _attempts, rating) => {
+                handleGrade(rating, "context_match");
+              }}
+              onSpeak={(t) => handleSpeak(t)}
+              onFallback={() => setFallbackMode("flip")}
+            />
+          </div>
+        )}
+
+        {/* ----------------- MODE: LISTENING DICTATION ----------------- */}
+        {effectiveExerciseType === "listening" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <ListeningDictationExercise
+              word={currentWord}
+              onComplete={(_isCorrect, _attempts, rating) => {
+                handleGrade(rating, "listening");
+              }}
+              onSpeak={(t, rate) => handleSpeak(t, rate)}
+            />
+          </div>
+        )}
+
+        {/* ----------------- MODE: REVERSE CLOZE ----------------- */}
+        {effectiveExerciseType === "reverse_cloze" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <ReverseClozeExercise
+              word={currentWord}
+              allWords={wordsToReview}
+              onComplete={(_isCorrect, _attempts, rating) => {
+                handleGrade(rating, "reverse_cloze");
+              }}
+              onSpeak={(t) => handleSpeak(t)}
+              onFallback={() => setFallbackMode("flip")}
+            />
+          </div>
+        )}
+
         {/* ----------------- MODE 1: STANDARD FLIP ----------------- */}
-        {mode === "flip" && (
+        {effectiveExerciseType === "flip" && (
           <div className="flex-1 min-h-0 flex flex-col justify-between">
             {!isFlipped ? (
               <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center space-y-4 py-8">
@@ -642,7 +957,7 @@ export default function FlashcardReview({
         )}
 
         {/* ----------------- MODE 2: CLOZE DELETION ----------------- */}
-        {mode === "cloze" && (
+        {effectiveExerciseType === "cloze" && (
           <div className="flex-1 min-h-0 flex flex-col justify-between">
             {!hasCheckedAnswer ? (
               <div className="flex-1 min-h-0 flex flex-col justify-between py-2 overflow-y-auto pr-1 scrollbar-thin">
@@ -852,7 +1167,7 @@ export default function FlashcardReview({
         )}
 
         {/* ----------------- MODE 3: SPELLING PRACTICE ----------------- */}
-        {mode === "spelling" && (
+        {effectiveExerciseType === "spelling" && (
           <div className="flex-1 min-h-0 flex flex-col justify-between">
             {!hasCheckedAnswer ? (
               <div className="flex-1 min-h-0 flex flex-col justify-between py-2 overflow-y-auto pr-1 scrollbar-thin">
@@ -1062,14 +1377,30 @@ export default function FlashcardReview({
 
       {/* BOTTOM ACTION BAR - Always present with fixed height (h-14) so card NEVER jumps */}
       <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
-        {(mode === "flip" ? isFlipped : hasCheckedAnswer) ? (
+        {["multiple_choice", "sentence_builder", "context_match", "listening", "reverse_cloze"].includes(
+          effectiveExerciseType
+        ) ? (
+          <div className="w-full flex items-center justify-between px-3">
+            <button
+              onClick={() => handleGrade(Rating.Again, effectiveExerciseType)}
+              disabled={isAdvancing}
+              className="text-xs text-slate-400 hover:text-rose-500 font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <SkipForward className="w-3.5 h-3.5" />
+              <span>Chưa nhớ từ này (Bỏ qua / Again)</span>
+            </button>
+            <div className="text-[11px] text-slate-400 dark:text-zinc-500 font-mono">
+              FSRS Thích ứng • {effectiveExerciseType}
+            </div>
+          </div>
+        ) : (effectiveExerciseType === "flip" ? isFlipped : hasCheckedAnswer) ? (
           <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150">
             {/* Again: Rating.Again (1) */}
             <button
               onClick={() => handleGrade(Rating.Again)}
               disabled={isAdvancing}
               className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
-                !isCorrect && mode !== "flip"
+                !isCorrect && effectiveExerciseType !== "flip"
                   ? "border-rose-400 dark:border-rose-500 bg-rose-100 dark:bg-rose-900/60 text-rose-900 dark:text-rose-200 ring-2 ring-rose-500/30 font-bold"
                   : "border-rose-200 dark:border-rose-800/80 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-medium"
               }`}
@@ -1132,7 +1463,7 @@ export default function FlashcardReview({
               <span className="text-[10px] text-emerald-700 dark:text-emerald-400/80 font-mono">Dễ (4)</span>
             </button>
           </div>
-        ) : mode === "flip" ? (
+        ) : effectiveExerciseType === "flip" ? (
           <button
             onClick={() => setIsFlipped(true)}
             className="w-full h-full rounded-2xl bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-slate-300 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
@@ -1142,7 +1473,7 @@ export default function FlashcardReview({
               Space
             </kbd>
           </button>
-        ) : mode === "cloze" ? (
+        ) : effectiveExerciseType === "cloze" ? (
           <button
             onClick={handleCheckAnswer}
             disabled={!userInput.trim() || isAdvancing}

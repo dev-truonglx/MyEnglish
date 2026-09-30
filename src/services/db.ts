@@ -1,5 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Word, WordExample, SRSReview, CreateWordInput, WordDetail } from "@/types/database";
+import { initReviewLogsTable } from "./smartReview";
+import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
 let dbInstance: Database | null = null;
@@ -16,10 +18,17 @@ export async function getDatabase(): Promise<Database> {
     return initPromise;
   }
   initPromise = (async () => {
-    const db = await Database.load(DB_PATH);
-    await initSchema(db);
-    dbInstance = db;
-    return db;
+    try {
+      const db = await Database.load(DB_PATH);
+      dbInstance = db;
+      await initSchema(db);
+      return db;
+    } catch (err) {
+      dbInstance = null;
+      initPromise = null;
+      console.error("Database initialization failed:", err);
+      throw err;
+    }
   })();
   return initPromise;
 }
@@ -164,6 +173,9 @@ export async function initSchema(db: Database): Promise<void> {
   } catch {}
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_examples_word_id ON examples(word_id);`);
   await db.execute(`CREATE INDEX IF NOT EXISTS idx_srs_reviews_next_date ON srs_reviews(next_review_date);`);
+
+  // Initialize review_logs table for response time & exercise type tracking
+  await initReviewLogsTable(db);
 }
 
 /**
@@ -222,10 +234,12 @@ export async function getDatabaseStatus(): Promise<{
  * Guarantees NO duplicate words in the database (Upsert behavior).
  */
 export async function insertEnrichedWord(input: CreateWordInput): Promise<string> {
-  const db = await getDatabase();
   const cleanWord = input.word.trim().toLowerCase();
-  const now = new Date().toISOString();
-  const topic = input.topic?.trim() || "General Tech";
+  logTerminal("DB", `Bắt đầu lưu vào SQLite: "${cleanWord}"...`);
+  try {
+    const db = await getDatabase();
+    const now = new Date().toISOString();
+    const topic = input.topic?.trim() || "General Tech";
 
   // 1. Check if word already exists in SQLite
   const existingList = await db.select<Word[]>(
@@ -348,7 +362,13 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     }
   }
 
-  return wordId;
+    logTerminal("DB", `Đã lưu thành công từ "${cleanWord}" vào SQLite (id: ${wordId}) ✓`);
+    return wordId;
+  } catch (err) {
+    logTerminal("DB ERROR", `Lỗi lưu từ "${cleanWord}" vào SQLite: ${err}`);
+    console.error(`Failed to insert word "${cleanWord}":`, err);
+    throw err;
+  }
 }
 
 /**

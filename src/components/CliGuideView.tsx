@@ -54,7 +54,7 @@ interface CliGuideViewProps {
 export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuideViewProps) {
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
   const [checkingCli, setCheckingCli] = useState(false);
-  const [copiedIndex, setCopiedIndex] = useState<number | null>(null);
+  const [copiedIndex, setCopiedIndex] = useState<string | number | null>(null);
 
   // Notification & Pop-up state
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
@@ -77,6 +77,12 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
   // Active guide subtab
   const [activeGuideTab, setActiveGuideTab] = useState<"cli" | "notification" | "apikey">("cli");
+  const [selectedOs, setSelectedOs] = useState<"macos" | "windows">(() => {
+    if (typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("win")) {
+      return "windows";
+    }
+    return "macos";
+  });
 
   const checkCli = async (pathToTest?: string) => {
     setCheckingCli(true);
@@ -154,7 +160,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     setNotifFeedback("Đã hủy trạng thái hoãn. Lịch nhắc học hoạt động bình thường.");
   };
 
-  const handleCopy = (text: string, index: number) => {
+  const handleCopy = (text: string, index: string | number) => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(text);
       setCopiedIndex(index);
@@ -395,6 +401,46 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       {/* TAB 1: CLI INSTALLATION & CONFIGURATION GUIDE */}
       {activeGuideTab === "cli" && (
         <div className="space-y-6 animate-in fade-in duration-150">
+          {/* OS Switcher Tabs */}
+          <div className="p-1.5 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700/60 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                onClick={() => setSelectedOs("macos")}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                  selectedOs === "macos"
+                    ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white border border-slate-200/80 dark:border-zinc-700 shadow-md"
+                    : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                }`}
+              >
+                <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                  <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.87-.93.04-2.02.63-2.67 1.38-.56.65-.98 1.7-0.85 2.76 1.04.08 2.07-.53 2.6-1.27z" />
+                </svg>
+                <span>Hướng dẫn macOS</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setSelectedOs("windows")}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                  selectedOs === "windows"
+                    ? "bg-white dark:bg-zinc-900 text-cyan-600 dark:text-cyan-400 border border-slate-200/80 dark:border-zinc-700 shadow-md"
+                    : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                }`}
+              >
+                <svg className="w-4 h-4 fill-current shrink-0" viewBox="0 0 24 24">
+                  <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.801" />
+                </svg>
+                <span>Hướng dẫn Windows (10 / 11)</span>
+              </button>
+            </div>
+
+            <div className="hidden sm:flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-200/60 dark:bg-zinc-700/50 text-[11px] font-mono text-slate-600 dark:text-zinc-300">
+              <span className="w-2 h-2 rounded-full bg-cyan-500 animate-pulse" />
+              <span>Đang chọn: {selectedOs === "macos" ? "macOS" : "Windows"}</span>
+            </div>
+          </div>
+
           {/* Account compatibility notice */}
           <div className="p-4 rounded-2xl bg-cyan-50/70 dark:bg-cyan-950/30 border border-cyan-200 dark:border-cyan-800/50 space-y-2">
             <div className="flex items-center gap-2 text-cyan-800 dark:text-cyan-300 font-bold text-xs uppercase tracking-wider font-mono">
@@ -413,129 +459,296 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </ul>
           </div>
 
-          {/* Installation Steps */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <span>Các bước cài đặt & kích hoạt CLI</span>
-            </h3>
-
-            {/* Step 1 */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+          {/* ============================================================== */}
+          {/* GUIDE FOR MACOS                                                */}
+          {/* ============================================================== */}
+          {selectedOs === "macos" && (
+            <div className="space-y-4 animate-in fade-in duration-200">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
-                    1
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span className="p-1 rounded-md bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                      <path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.81-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M15.97 6.37c.61-.75 1.04-1.8 0.92-2.87-.93.04-2.02.63-2.67 1.38-.56.65-.98 1.7-0.85 2.76 1.04.08 2.07-.53 2.6-1.27z" />
+                    </svg>
                   </span>
-                  Cấp quyền thực thi và đưa binary CLI vào thư mục người dùng
+                  <span>Quy trình cài đặt & Kết nối Antigravity CLI trên macOS</span>
+                </h3>
+                <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400">
+                  Binary: ~/.gemini/bin/agy
                 </span>
-                <button
-                  onClick={() => handleCopy("chmod +x ~/.gemini/bin/agy", 1)}
-                  className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
-                >
-                  {copiedIndex === 1 ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedIndex === 1 ? "Đã copy" : "Copy"}</span>
-                </button>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
-                <code>chmod +x ~/.gemini/bin/agy</code>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Lệnh này cấp quyền thực thi cho binary CLI Antigravity trên macOS.
-              </p>
-            </div>
 
-            {/* Step 2 */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
-                    2
+              {/* Step 1: Install */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      1
+                    </span>
+                    Tải & Cài đặt Antigravity CLI
                   </span>
-                  Đăng nhập tài khoản Google (Free hoặc Plus)
-                </span>
-                <button
-                  onClick={() => handleCopy("~/.gemini/bin/agy auth login", 2)}
-                  className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
-                >
-                  {copiedIndex === 2 ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedIndex === 2 ? "Đã copy" : "Copy"}</span>
-                </button>
+                  <button
+                    onClick={() => handleCopy("curl -fsSL https://antigravity.google/install.sh | bash", "mac-1")}
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "mac-1" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "mac-1" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>curl -fsSL https://antigravity.google/install.sh | bash</code>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400 space-y-1">
+                  <p>• Hoặc nếu máy bạn đã có Node.js / npm, có thể chạy lệnh: <code className="text-cyan-600 dark:text-cyan-400 font-mono">npm install -g @google/antigravity-cli</code></p>
+                  <p>• Script sẽ tự động tải binary và đặt vào thư mục người dùng: <code className="text-cyan-600 dark:text-cyan-400 font-mono">~/.gemini/bin/agy</code></p>
+                </div>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
-                <code>~/.gemini/bin/agy auth login</code>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Mở Terminal và chạy lệnh trên. Trình duyệt sẽ mở trang xác thực của Google để bạn đăng nhập tài khoản.
-              </p>
-            </div>
 
-            {/* Step 3 */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
-                    3
+              {/* Step 2: Permissions & PATH */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      2
+                    </span>
+                    Cấp quyền thực thi & Đưa vào biến môi trường PATH
                   </span>
-                  Kiểm tra thử lệnh sinh từ trực tiếp
-                </span>
-                <button
-                  onClick={() =>
-                    handleCopy('~/.gemini/bin/agy --dangerously-skip-permissions -p "Say hello"', 3)
-                  }
-                  className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
-                >
-                  {copiedIndex === 3 ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedIndex === 3 ? "Đã copy" : "Copy"}</span>
-                </button>
+                  <button
+                    onClick={() =>
+                      handleCopy("chmod +x ~/.gemini/bin/agy && echo 'export PATH=\"$HOME/.gemini/bin:$PATH\"' >> ~/.zshrc && source ~/.zshrc", "mac-2")
+                    }
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "mac-2" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "mac-2" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>chmod +x ~/.gemini/bin/agy &amp;&amp; echo 'export PATH="$HOME/.gemini/bin:$PATH"' &gt;&gt; ~/.zshrc &amp;&amp; source ~/.zshrc</code>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Lệnh này đảm bảo binary có quyền chạy trên macOS và bạn có thể gõ trực tiếp lệnh <code className="text-cyan-600 dark:text-cyan-400 font-mono">agy</code> trong mọi cửa sổ Terminal.
+                </p>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
-                <code>~/.gemini/bin/agy --dangerously-skip-permissions -p "Say hello"</code>
-              </div>
-              <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                Nếu lệnh in ra câu chào phản hồi từ Gemini, ứng dụng MyEnglish đã sẵn sàng sinh từ tự động 100%!
-              </p>
-            </div>
 
-            {/* Step 4 */}
-            <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <span className="w-5 h-5 rounded-full bg-slate-300 dark:bg-zinc-700 text-slate-700 dark:text-zinc-300 flex items-center justify-center text-[11px] font-mono">
-                    4
+              {/* Step 3: Auth */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      3
+                    </span>
+                    Đăng nhập tài khoản Google (Xác thực 1 lần duy nhất)
                   </span>
-                  Thêm vào PATH hệ thống (Để gõ lệnh ngắn gọn `agy`)
-                </span>
-                <button
-                  onClick={() =>
-                    handleCopy('echo \'export PATH="$HOME/.gemini/bin:$PATH"\' >> ~/.zshrc && source ~/.zshrc', 4)
-                  }
-                  className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
-                >
-                  {copiedIndex === 4 ? (
-                    <Check className="w-3.5 h-3.5 text-emerald-500" />
-                  ) : (
-                    <Copy className="w-3.5 h-3.5" />
-                  )}
-                  <span>{copiedIndex === 4 ? "Đã copy" : "Copy"}</span>
-                </button>
+                  <button
+                    onClick={() => handleCopy("~/.gemini/bin/agy auth login", "mac-3")}
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "mac-3" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "mac-3" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>~/.gemini/bin/agy auth login</code>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Mở Terminal và dán lệnh trên. Trình duyệt Safari/Chrome sẽ tự động mở trang xác thực của Google. Bạn chỉ cần chọn tài khoản Gmail và bấm <strong>Cho phép (Allow)</strong>.
+                </p>
               </div>
-              <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
-                <code>echo 'export PATH="$HOME/.gemini/bin:$PATH"' &gt;&gt; ~/.zshrc &amp;&amp; source ~/.zshrc</code>
+
+              {/* Step 4: Test & App Connection */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      4
+                    </span>
+                    Kiểm tra phản hồi & Kết nối với MyEnglish
+                  </span>
+                  <button
+                    onClick={() =>
+                      handleCopy('~/.gemini/bin/agy --dangerously-skip-permissions --model gemini-3.8-flash-low -p "Hello, world!"', "mac-4")
+                    }
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "mac-4" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "mac-4" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>~/.gemini/bin/agy --dangerously-skip-permissions --model gemini-3.8-flash-low -p "Hello, world!"</code>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400 space-y-1">
+                  <p>• Khi lệnh in ra câu chào phản hồi từ Gemini, CLI đã hoạt động hoàn toàn chính xác.</p>
+                  <p>• <strong>Trong app MyEnglish</strong>: Ứng dụng tự động phát hiện đường dẫn <code className="text-cyan-600 dark:text-cyan-400 font-mono">~/.gemini/bin/agy</code>. Bạn chỉ cần nhấn nút <strong>"Kiểm tra lại kết nối"</strong> ở banner trên để thấy trạng thái xanh lá.</p>
+                </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* ============================================================== */}
+          {/* GUIDE FOR WINDOWS (10 / 11)                                    */}
+          {/* ============================================================== */}
+          {selectedOs === "windows" && (
+            <div className="space-y-4 animate-in fade-in duration-200">
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <span className="p-1 rounded-md bg-cyan-600 text-white">
+                    <svg className="w-3.5 h-3.5 fill-current" viewBox="0 0 24 24">
+                      <path d="M0 3.449L9.75 2.1v9.451H0m10.949-9.602L24 0v11.4H10.949M0 12.6h9.75v9.451L0 20.699M10.949 12.6H24V24l-12.951-1.801" />
+                    </svg>
+                  </span>
+                  <span>Quy trình cài đặt & Kết nối Antigravity CLI trên Windows (10 / 11)</span>
+                </h3>
+                <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400">
+                  Binary: agy.exe
+                </span>
+              </div>
+
+              {/* Step 1: Install Windows */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      1
+                    </span>
+                    Cài đặt Antigravity CLI qua PowerShell (Khuyên dùng)
+                  </span>
+                  <button
+                    onClick={() => handleCopy("iwr -useb https://antigravity.google/install.ps1 | iex", "win-1")}
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "win-1" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "win-1" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>iwr -useb https://antigravity.google/install.ps1 | iex</code>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400 space-y-1">
+                  <p>• Nhấn phím <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border text-[10px]">Win</kbd> + <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border text-[10px]">X</kbd>, chọn <strong>Terminal</strong> hoặc <strong>PowerShell</strong> và dán lệnh trên.</p>
+                  <p>• Hoặc nếu máy bạn đã có Node.js: <code className="text-cyan-600 dark:text-cyan-400 font-mono">npm install -g @google/antigravity-cli</code></p>
+                  <p>• Thư mục cài đặt mặc định trên Windows: <code className="text-cyan-600 dark:text-cyan-400 font-mono">%USERPROFILE%\.gemini\antigravity-cli\agy.exe</code></p>
+                </div>
+              </div>
+
+              {/* Step 2: Auth Windows */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      2
+                    </span>
+                    Đăng nhập tài khoản Google (OAuth Web Login)
+                  </span>
+                  <button
+                    onClick={() => handleCopy("agy auth login", "win-2")}
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "win-2" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "win-2" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>agy auth login</code>
+                </div>
+                <div className="text-[11px] text-slate-500 dark:text-zinc-400 space-y-1">
+                  <p>• Nếu PowerShell báo chưa tìm thấy lệnh, hãy dùng đường dẫn đầy đủ: <code className="text-cyan-600 dark:text-cyan-400 font-mono">&amp; "$env:USERPROFILE\.gemini\antigravity-cli\agy.exe" auth login</code></p>
+                  <p>• Trình duyệt Edge/Chrome sẽ mở trang đăng nhập Google để bạn xác thực tài khoản Gmail (miễn phí hoặc Plus).</p>
+                </div>
+              </div>
+
+              {/* Step 3: Test Windows */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      3
+                    </span>
+                    Chạy thử nghiệm lệnh phân tích trên PowerShell
+                  </span>
+                  <button
+                    onClick={() =>
+                      handleCopy('agy --dangerously-skip-permissions --model gemini-3.8-flash-low -p "Hello, world!"', "win-3")
+                    }
+                    className="text-xs text-slate-500 hover:text-cyan-600 dark:text-zinc-400 flex items-center gap-1 font-mono"
+                  >
+                    {copiedIndex === "win-3" ? (
+                      <Check className="w-3.5 h-3.5 text-emerald-500" />
+                    ) : (
+                      <Copy className="w-3.5 h-3.5" />
+                    )}
+                    <span>{copiedIndex === "win-3" ? "Đã copy" : "Copy"}</span>
+                  </button>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-900 text-slate-100 font-mono text-xs overflow-x-auto select-all">
+                  <code>agy --dangerously-skip-permissions --model gemini-3.8-flash-low -p "Hello, world!"</code>
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Khi nhận được phản hồi câu chào từ Gemini, CLI đã hoạt động thành công trên máy Windows của bạn.
+                </p>
+              </div>
+
+              {/* Step 4: Configure App on Windows */}
+              <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-2.5 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <span className="w-5 h-5 rounded-full bg-cyan-600 text-white flex items-center justify-center text-[11px] font-mono">
+                      4
+                    </span>
+                    Cấu hình & Kết nối trong MyEnglish (Windows)
+                  </span>
+                </div>
+                <div className="text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">
+                  <p>
+                    Ứng dụng MyEnglish tự động quét các vị trí cài đặt phổ biến trên Windows:
+                  </p>
+                  <ul className="list-disc pl-5 space-y-1 font-mono text-[11px] text-cyan-700 dark:text-cyan-400">
+                    <li>%USERPROFILE%\.gemini\antigravity-cli\agy.exe</li>
+                    <li>%LOCALAPPDATA%\Programs\antigravity\agy.exe</li>
+                    <li>%APPDATA%\npm\agy.cmd (nếu cài qua npm)</li>
+                    <li>Biến môi trường PATH hệ thống (lệnh where agy.exe)</li>
+                  </ul>
+                  <div className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 space-y-1.5 text-[11px]">
+                    <p className="font-semibold text-slate-900 dark:text-white flex items-center gap-1.5">
+                      <Sliders className="w-3.5 h-3.5 text-cyan-600" />
+                      Nếu bạn cài đặt ở thư mục tùy chỉnh (Ví dụ ổ D:\tools\agy.exe):
+                    </p>
+                    <p className="text-slate-600 dark:text-zinc-400">
+                      Hãy dán đường dẫn file <code className="font-mono text-cyan-600 dark:text-cyan-400">agy.exe</code> vào ô <strong>"Đường dẫn CLI tùy chỉnh"</strong> ở trên và bấm <strong>"Lưu &amp; Kiểm tra"</strong>.
+                    </p>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    💡 <em>Lưu ý: Trên Windows, ứng dụng MyEnglish đã được tích hợp cờ <code className="font-mono text-slate-700 dark:text-zinc-300">CREATE_NO_WINDOW</code>, bảo đảm hoàn toàn không xuất hiện cửa sổ Command Prompt màu đen nhấp nháy khi bạn tra từ.</em>
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

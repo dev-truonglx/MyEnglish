@@ -64,10 +64,20 @@ export async function enrichWordWithGemini(word: string): Promise<GeminiEnrichme
 
   try {
     const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
-    const rawResult = await invoke<Record<string, unknown>>("enrich_word_with_gemini", {
-      word: cleanWord,
-      customPath,
-    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(
+        () => reject(new Error("Phân tích AI vượt quá thời gian chờ (40s). Vui lòng thử lại.")),
+        40000
+      )
+    );
+
+    const rawResult = await Promise.race([
+      invoke<Record<string, unknown>>("enrich_word_with_gemini", {
+        word: cleanWord,
+        customPath,
+      }),
+      timeoutPromise,
+    ]);
 
     if (!rawResult || typeof rawResult.meaning_vn !== "string") {
       throw new Error("Invalid response format from Gemini");

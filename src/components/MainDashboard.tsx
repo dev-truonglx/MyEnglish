@@ -44,8 +44,17 @@ import { parseTerms, parseCollocations, type WordDetail } from "@/types/database
 import { calculateStreakAndGoal } from "@/services/streak";
 import { getSavedTheme, setTheme, type ThemeMode } from "@/services/theme";
 import { CURRENT_VERSION, useUpdateStore } from "@/services/updateService";
+import {
+  getRetrievabilityInfo,
+  isLeech,
+  getLeechWords,
+  smartSortReviewQueue,
+  getXPState,
+  type XPState,
+} from "@/services/smartReview";
 import FlashcardReview from "./FlashcardReview";
-import Heatmap from "./Heatmap";
+import AnalyticsView from "./AnalyticsView";
+import LevelUpModal from "./LevelUpModal";
 import WordTableView from "./WordTableView";
 import CliGuideView from "./CliGuideView";
 import FocusReviewModal from "./FocusReviewModal";
@@ -64,7 +73,7 @@ export default function MainDashboard({
   const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterMode, setFilterMode] = useState<"all" | "due" | "mastered">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "due" | "mastered" | "leech">("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"gallery" | "table">("gallery");
   const [activeTab, setActiveTab] = useState<"library" | "capture" | "review" | "analytics" | "guide">("library");
@@ -80,6 +89,7 @@ export default function MainDashboard({
   const [activityVersion, setActivityVersion] = useState(0);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
+  const [xpState, setXpState] = useState<XPState>(getXPState);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const {
@@ -113,8 +123,13 @@ export default function MainDashboard({
 
   useEffect(() => {
     const onActivity = () => setActivityVersion((v) => v + 1);
+    const onXPUpdate = () => setXpState(getXPState());
     window.addEventListener("myenglish-activity-updated", onActivity);
-    return () => window.removeEventListener("myenglish-activity-updated", onActivity);
+    window.addEventListener("myenglish-xp-updated", onXPUpdate);
+    return () => {
+      window.removeEventListener("myenglish-activity-updated", onActivity);
+      window.removeEventListener("myenglish-xp-updated", onXPUpdate);
+    };
   }, []);
 
   useEffect(() => {
@@ -171,10 +186,8 @@ export default function MainDashboard({
     // Subscribe to AI pipeline updates
     const unsubscribePipeline = pipeline.subscribe((queue) => {
       setPipelineQueue(queue);
-      const justCompleted = queue.some((i) => i.status === "completed");
-      if (justCompleted) {
-        refreshWords();
-      }
+      // Synchronize library whenever any item state changes so newly added & updated words show up immediately
+      refreshWords();
     });
 
     // Listen to real-time word submissions from Quick Input floating bar (Cmd+Shift+E)
@@ -274,7 +287,10 @@ export default function MainDashboard({
         return;
       }
     }
-    setReviewSet(target);
+
+    // Apply smart queue ordering (urgency-based + interleaving)
+    const sorted = smartSortReviewQueue(target, now);
+    setReviewSet(sorted);
     setIsReviewing(true);
     setActiveTab("review");
   };
@@ -424,6 +440,9 @@ export default function MainDashboard({
       }
       if (filterMode === "mastered") {
         return item.srs.interval >= 6;
+      }
+      if (filterMode === "leech") {
+        return isLeech(item.srs);
       }
       return true;
     });
@@ -827,7 +846,24 @@ export default function MainDashboard({
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2 text-center pt-1">
+            {/* XP Level Progress */}
+            <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-zinc-800/50">
+              <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-400">
+                <span className="flex items-center gap-1">
+                  <span>{xpState.rankEmoji}</span>
+                  <span className="font-semibold text-amber-700 dark:text-amber-300">Lv.{xpState.level} {xpState.rank}</span>
+                </span>
+                <span className="text-amber-600 dark:text-amber-400 font-semibold">{xpState.totalXP} XP</span>
+              </div>
+              <div className="w-full h-1.5 rounded-full bg-amber-200/40 dark:bg-amber-900/30 overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-amber-500 to-yellow-500 rounded-full transition-all duration-500"
+                  style={{ width: `${xpState.progressPercent}%` }}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center pt-1">
               <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
                 <div className="text-base font-bold text-slate-900 dark:text-white font-mono">{dueCount}</div>
                 <div className="text-[10px] text-slate-500 dark:text-zinc-400">Cần ôn</div>
@@ -837,6 +873,12 @@ export default function MainDashboard({
                   {words.filter((w) => w.srs.repetitions > 0).length}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-zinc-400">Đã thuộc</div>
+              </div>
+              <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
+                <div className={`text-base font-bold font-mono ${getLeechWords(words).length > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-zinc-500"}`}>
+                  {getLeechWords(words).length}
+                </div>
+                <div className="text-[10px] text-slate-500 dark:text-zinc-400">Leech</div>
               </div>
             </div>
           </div>
@@ -1014,6 +1056,18 @@ export default function MainDashboard({
               >
                 Mastered
               </button>
+              <button
+                onClick={() => setFilterMode("leech")}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "leech"
+                  ? "bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                  }`}
+              >
+                🐛 Leech
+                {getLeechWords(words).length > 0 && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
+                )}
+              </button>
             </div>
 
             {/* Refresh */}
@@ -1173,7 +1227,26 @@ export default function MainDashboard({
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-1 shrink-0">
+                            <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+                              {/* Leech Badge */}
+                              {isLeech(item.srs) && (
+                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse" title={`Leech: ${item.srs.lapses ?? 0} lần quên`}>
+                                  🐛
+                                </span>
+                              )}
+                              {/* Retrievability Mini Indicator */}
+                              {(() => {
+                                const rInfo = getRetrievabilityInfo(item.srs);
+                                if (rInfo.level === "new") return null;
+                                return (
+                                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`} title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}>
+                                    <span className={`w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block`}>
+                                      <span className={`block h-full ${rInfo.colorClass} rounded-full`} style={{ width: `${rInfo.percent}%` }} />
+                                    </span>
+                                    {rInfo.percent}%
+                                  </span>
+                                );
+                              })()}
                               <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700/60">
                                 {item.srs.interval === 0 ? "New" : `${item.srs.interval}d`}
                               </span>
@@ -1469,6 +1542,18 @@ export default function MainDashboard({
                               {item.status === "failed" && "Failed"}
                               {item.status === "pending" && "Queued"}
                             </span>
+
+                            {item.status === "failed" && (
+                              <button
+                                type="button"
+                                onClick={() => pipeline.retry(item.word)}
+                                title="Thử lại phân tích AI"
+                                className="px-2.5 py-1 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 border border-rose-300 dark:border-rose-800 transition-colors flex items-center gap-1 text-xs font-medium shadow-sm"
+                              >
+                                <RotateCw className="w-3.5 h-3.5" />
+                                <span>Thử lại</span>
+                              </button>
+                            )}
 
                             {enrichedData && (
                               <button
@@ -2126,81 +2211,17 @@ export default function MainDashboard({
           )
         )}
 
-        {/* TAB 4: STREAKS & HEATMAP ANALYTICS */}
+        {/* TAB 4: ADVANCED ANALYTICS & INSIGHTS */}
         {activeTab === "analytics" && (
-          <div className="flex-1 overflow-y-auto p-6 max-w-4xl mx-auto w-full space-y-8 animate-in fade-in duration-200">
-            <div className="space-y-1 text-center">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-                Study Streaks & Memory Analytics
-              </h2>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Track your consistency and see how SuperMemo-2 distributes your English vocabulary over time.
-              </p>
-            </div>
-
-            {/* Heatmap Widget */}
-            <Heatmap words={words} />
-
-            {/* Memory Health Retention Breakdown */}
-            <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-6 space-y-4 shadow-sm">
-              <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Memory Distribution (Retention Health)</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/80 p-4 space-y-2 shadow-sm">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-zinc-400">New Words</span>
-                    <span className="text-cyan-700 dark:text-cyan-400 font-mono font-bold">
-                      {words.filter((w) => w.srs.interval === 0).length}
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
-                    <div
-                      className="h-full bg-cyan-500"
-                      style={{
-                        width: `${words.length ? (words.filter((w) => w.srs.interval === 0).length / words.length) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-500">Newly captured terms awaiting first review.</p>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/80 p-4 space-y-2 shadow-sm">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-zinc-400">In Progress</span>
-                    <span className="text-amber-700 dark:text-amber-400 font-mono font-bold">
-                      {words.filter((w) => w.srs.interval > 0 && w.srs.interval < 6).length}
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
-                    <div
-                      className="h-full bg-amber-500"
-                      style={{
-                        width: `${words.length ? (words.filter((w) => w.srs.interval > 0 && w.srs.interval < 6).length / words.length) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-500">Actively being reinforced in memory.</p>
-                </div>
-
-                <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/80 p-4 space-y-2 shadow-sm">
-                  <div className="flex items-center justify-between text-xs">
-                    <span className="text-slate-600 dark:text-zinc-400">Mastered (6d+ interval)</span>
-                    <span className="text-emerald-700 dark:text-emerald-400 font-mono font-bold">
-                      {words.filter((w) => w.srs.interval >= 6).length}
-                    </span>
-                  </div>
-                  <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
-                    <div
-                      className="h-full bg-emerald-500"
-                      style={{
-                        width: `${words.length ? (words.filter((w) => w.srs.interval >= 6).length / words.length) * 100 : 0}%`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-500">Strong long-term memory consolidation.</p>
-                </div>
-              </div>
-            </div>
-          </div>
+          <AnalyticsView
+            words={words}
+            onStartReviewWord={(w) => {
+              setReviewSet([w]);
+              setIsReviewing(true);
+              setActiveTab("review");
+            }}
+            onRefreshWords={refreshWords}
+          />
         )}
 
         {/* TAB 5: CLI & NOTIFICATION SETUP GUIDE */}
@@ -2851,6 +2872,9 @@ export default function MainDashboard({
           isPreview={true}
         />
       )}
+
+      {/* LEVEL UP CELEBRATION & BADGE UNLOCK TOASTS */}
+      <LevelUpModal />
     </div>
   );
 }

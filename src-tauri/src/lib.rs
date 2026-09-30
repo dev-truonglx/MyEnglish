@@ -361,16 +361,35 @@ fn hide_review_popup(app: AppHandle) -> Result<(), String> {
 }
 
 fn clean_json_string(s: &str) -> String {
-    let mut text = s.trim();
-    if let Some(stripped) = text.strip_prefix("```json") {
-        text = stripped.trim();
-    } else if let Some(stripped) = text.strip_prefix("```") {
-        text = stripped.trim();
+    let text = s.trim();
+
+    // 1. If markdown code block exists (```json ... ``` or ``` ... ```), strip wrapper
+    let unquoted = if let Some(start_idx) = text.find("```json") {
+        let after_start = &text[start_idx + 7..];
+        if let Some(end_idx) = after_start.rfind("```") {
+            after_start[..end_idx].trim()
+        } else {
+            after_start.trim()
+        }
+    } else if let Some(start_idx) = text.find("```") {
+        let after_start = &text[start_idx + 3..];
+        if let Some(end_idx) = after_start.rfind("```") {
+            after_start[..end_idx].trim()
+        } else {
+            after_start.trim()
+        }
+    } else {
+        text
+    };
+
+    // 2. Find first '{' and last '}' to strip any commentary or conversational text
+    if let (Some(first_brace), Some(last_brace)) = (unquoted.find('{'), unquoted.rfind('}')) {
+        if first_brace <= last_brace {
+            return unquoted[first_brace..=last_brace].to_string();
+        }
     }
-    if let Some(stripped) = text.strip_suffix("```") {
-        text = stripped.trim();
-    }
-    text.to_string()
+
+    unquoted.to_string()
 }
 
 /// Called by the frontend BEFORE invoking relaunch() during an update.
@@ -378,6 +397,11 @@ fn clean_json_string(s: &str) -> String {
 #[tauri::command]
 fn prepare_update_exit() {
     ALLOW_EXIT.store(true, Ordering::SeqCst);
+}
+
+#[tauri::command]
+fn log_debug(tag: String, message: String) {
+    println!("[{}] {}", tag, message);
 }
 
 #[derive(serde::Serialize)]
@@ -576,6 +600,8 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
 
     tauri::async_runtime::spawn_blocking(move || {
         let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
+        println!("[MyEnglish AI] Bắt đầu phân tích từ '{}' bằng binary: '{}'", clean_word, bin_path);
+        let start_time = std::time::Instant::now();
 
         let prompt = format!(
             "Analyze the English tech vocabulary: '{clean_word}'. \
@@ -618,15 +644,30 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
             }}"
         );
 
-        let output = create_hidden_command(&bin_path)
-            .arg("--dangerously-skip-permissions")
-            .arg("-p")
-            .arg(&prompt)
-            .output()
-            .map_err(|e| format!("Failed to execute Gemini CLI at '{}': {}", bin_path, e))?;
+        // Fast mode: gemini-3.8-flash-low with disabled slash commands & 35s timeout
+        let mut fast_cmd = create_hidden_command(&bin_path);
+        fast_cmd.arg("--dangerously-skip-permissions");
+        fast_cmd.arg("--disable-slash-commands");
+        fast_cmd.arg("--model").arg("gemini-3.8-flash-low");
+        fast_cmd.arg("--print-timeout").arg("35s");
+        fast_cmd.arg("-p").arg(&prompt);
+
+        let output = match fast_cmd.output() {
+            Ok(out) if out.status.success() => out,
+            _ => {
+                // Fallback attempt: Basic arguments without model flags in case of older CLI versions
+                create_hidden_command(&bin_path)
+                    .arg("--dangerously-skip-permissions")
+                    .arg("-p")
+                    .arg(&prompt)
+                    .output()
+                    .map_err(|e| format!("Failed to execute Gemini CLI at '{}': {}", bin_path, e))?
+            }
+        };
 
         if !output.status.success() {
             let err_msg = String::from_utf8_lossy(&output.stderr);
+            eprintln!("[MyEnglish AI] Lỗi CLI ({:?}): {}", output.status.code(), err_msg);
             return Err(format!(
                 "Gemini CLI exited with code {:?}: {}",
                 output.status.code(),
@@ -638,11 +679,15 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
         let cleaned = clean_json_string(&raw_stdout);
 
         let parsed: serde_json::Value = serde_json::from_str(&cleaned).map_err(|e| {
+            eprintln!("[MyEnglish AI] Lỗi parse JSON: {}. Raw: {}", e, cleaned);
             format!(
                 "Failed to parse Gemini response as JSON: {}. Raw output was: {}",
                 e, cleaned
             )
         })?;
+
+        let elapsed = start_time.elapsed();
+        println!("[MyEnglish AI] Phân tích hoàn tất cho '{}' trong {:.2?}", clean_word, elapsed);
 
         Ok(parsed)
     })
@@ -812,7 +857,8 @@ pub fn run() {
             trigger_review_navigation,
             show_review_popup,
             hide_review_popup,
-            prepare_update_exit
+            prepare_update_exit,
+            log_debug
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
