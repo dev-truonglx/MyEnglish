@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Volume2, CheckCircle2, HelpCircle, Snail, Music } from "lucide-react";
+import { Volume2, CheckCircle2, HelpCircle, Snail, Music, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 
@@ -134,21 +134,27 @@ export default function ListeningDictationExercise({
           </button>
         </div>
 
-        {/* Hint Box (if triggered) */}
-        {showHint && !isAnswered && (
-          <div className="pt-2 text-xs text-slate-500 dark:text-zinc-400 border-t border-slate-100 dark:border-zinc-800/80 animate-in fade-in">
-            <span>Gợi ý: </span>
-            {word.phonetic && (
-              <span className="font-mono text-cyan-600 dark:text-cyan-400 mr-2">
-                {word.phonetic}
+        {/* Hint Area - constant reserved height so card never jumps */}
+        <div className="min-h-[26px] pt-2 border-t border-slate-100 dark:border-zinc-800/80 flex items-center justify-center text-xs">
+          {showHint && !isAnswered ? (
+            <div className="text-slate-500 dark:text-zinc-400 animate-in fade-in duration-150">
+              <span>Gợi ý: </span>
+              {word.phonetic && (
+                <span className="font-mono text-cyan-600 dark:text-cyan-400 mr-2">
+                  {word.phonetic}
+                </span>
+              )}
+              <span>
+                Ký tự đầu: <strong>{word.word.charAt(0).toUpperCase()}</strong>, gồm{" "}
+                <strong>{word.word.length}</strong> chữ cái.
               </span>
-            )}
-            <span>
-              Ký tự đầu: <strong>{word.word.charAt(0).toUpperCase()}</strong>, gồm{" "}
-              <strong>{word.word.length}</strong> chữ cái.
+            </div>
+          ) : (
+            <span className="text-[11px] text-slate-400 dark:text-zinc-500 select-none">
+              Nhấn nút loa để nghe • Chọn 0.6x nếu muốn nghe chậm hơn
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
       {/* Input Form */}
@@ -174,41 +180,39 @@ export default function ListeningDictationExercise({
           />
         </div>
 
-        <div className="flex items-center justify-between text-xs px-1">
-          <button
-            type="button"
-            onClick={() => setShowHint(true)}
-            className="text-slate-400 hover:text-cyan-500 flex items-center gap-1 transition-colors"
-          >
-            <HelpCircle className="w-3.5 h-3.5" />
-            <span>Xem gợi ý phát âm</span>
-          </button>
+        <div className="flex items-center justify-between text-xs px-1 h-9">
+          {isAnswered && isCorrect ? (
+            <div className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-bold animate-in fade-in duration-150 truncate">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <span>Chính xác! {word.phonetic ? `(${word.phonetic}) ` : ""}{word.meaning_vn}</span>
+            </div>
+          ) : wrongAttempts > 0 && !isAnswered ? (
+            <span className="text-rose-500 dark:text-rose-400 font-semibold flex items-center gap-1 animate-in fade-in duration-150">
+              <AlertCircle className="w-3.5 h-3.5" />
+              Chưa đúng (Lần {wrongAttempts}) - Hãy thử lại!
+            </span>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setShowHint(true)}
+              className="text-slate-400 hover:text-cyan-500 flex items-center gap-1 transition-colors"
+            >
+              <HelpCircle className="w-3.5 h-3.5" />
+              <span>Xem gợi ý chữ cái</span>
+            </button>
+          )}
 
-          <button
-            type="submit"
-            disabled={!inputVal.trim() || isAnswered}
-            className="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 transition-all shadow-sm"
-          >
-            Kiểm tra
-          </button>
+          {!isAnswered && (
+            <button
+              type="submit"
+              disabled={!inputVal.trim()}
+              className="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 disabled:opacity-40 transition-all shadow-sm shrink-0 ml-2"
+            >
+              Kiểm tra
+            </button>
+          )}
         </div>
       </form>
-
-      {/* Result Card */}
-      {isAnswered && isCorrect && (
-        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-sm flex items-center justify-between animate-in fade-in">
-          <div className="flex items-center gap-3">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-            <div>
-              <p className="font-bold font-mono text-base">{word.word}</p>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                {word.phonetic && `${word.phonetic} — `}
-                {word.meaning_vn}
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -898,8 +898,11 @@ export function prepareSentenceBuilder(word: WordDetail): SentenceBuilderData | 
     text,
   }));
 
-  // Shuffle tokens
-  const shuffledTokens = [...tokens].sort(() => 0.5 - Math.random());
+  // Shuffle tokens (ensure it is actually shuffled if length > 1)
+  let shuffledTokens = [...tokens].sort(() => 0.5 - Math.random());
+  if (tokens.length > 1 && shuffledTokens.every((t, idx) => t.id === tokens[idx].id)) {
+    shuffledTokens = [shuffledTokens[1], shuffledTokens[0], ...shuffledTokens.slice(2)];
+  }
 
   return {
     fullSentence,

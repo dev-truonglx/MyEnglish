@@ -190,18 +190,29 @@ export default function ReverseClozeExercise({
                 {idx + 1}
               </span>
               <p className="text-sm font-medium leading-snug flex-1">{opt.text}</p>
-              {showSuccess && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />}
-              {showFail && <XCircle className="w-5 h-5 text-rose-500 shrink-0" />}
+              
+              {/* Reserved icon slot so text width and button height never shift */}
+              <div className="w-5 h-5 shrink-0 flex items-center justify-center">
+                {showSuccess && <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 animate-in zoom-in duration-150" />}
+                {showFail && <XCircle className="w-5 h-5 text-rose-500 shrink-0 animate-in zoom-in duration-150" />}
+              </div>
             </button>
           );
         })}
       </div>
 
-      {wrongAttempts > 0 && !isAnswered && (
-        <p className="text-center text-xs text-amber-500 font-medium">
-          Chưa đúng, hãy thử lại phương án khác!
-        </p>
-      )}
+      {/* Bottom Status - constant height h-7 so it NEVER jumps */}
+      <div className="h-7 min-h-[28px] flex items-center justify-center text-xs">
+        {wrongAttempts > 0 && !isAnswered ? (
+          <p className="text-center text-xs text-amber-500 dark:text-amber-400 font-semibold animate-in fade-in duration-150">
+            Chưa đúng ({wrongAttempts} lần thử) — Hãy thử lại phương án khác!
+          </p>
+        ) : (
+          <span className="text-center text-[11px] text-slate-400 dark:text-zinc-500">
+            Chọn phương án đúng nhất theo ngữ cảnh câu
+          </span>
+        )}
+      </div>
     </div>
   );
 }

@@ -124,9 +124,80 @@ export function getSnoozeRemainingMinutes(): number {
 }
 
 /**
+ * Key for recording the exact timestamp (ms) when the popup was last displayed.
+ * Note: Next reminder time MUST be strictly calculated starting from this timestamp.
+ */
+export const LAST_POPUP_DISPLAY_KEY = "myenglish_srs_last_trigger_ms";
+
+/**
+ * Get timestamp (ms) when the Focus Review Pop-up was last displayed
+ */
+export function getLastPopupDisplayTime(): number {
+  try {
+    const raw = localStorage.getItem(LAST_POPUP_DISPLAY_KEY);
+    if (!raw) return 0;
+    const parsed = parseInt(raw, 10);
+    return isNaN(parsed) ? 0 : parsed;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Record that the popup was displayed at timestamp (default: Date.now())
+ * Dispatches events to synchronize all components and windows.
+ */
+export function recordPopupDisplayed(timestamp: number = Date.now()): void {
+  try {
+    localStorage.setItem(LAST_POPUP_DISPLAY_KEY, timestamp.toString());
+    window.dispatchEvent(
+      new CustomEvent("myenglish-popup-displayed", { detail: { timestamp } })
+    );
+  } catch (err) {
+    console.warn("Failed to record popup display time:", err);
+  }
+}
+
+/**
+ * Calculate timestamp (ms) when the popup should next be displayed.
+ * STRICT REQUIREMENT: Calculated starting from the last time the popup was displayed!
+ */
+export function getNextReminderTime(): number {
+  const settings = getReminderSettings();
+  if (!settings.enabled || settings.intervalMinutes === 0) {
+    return 0;
+  }
+
+  // 1. NẾU ĐANG BỊ HOÃN (SNOOZED): Thời điểm hiển thị kế tiếp CHÍNH XÁC là khi hết thời gian hoãn!
+  if (settings.snoozedUntil && settings.snoozedUntil > Date.now()) {
+    return settings.snoozedUntil;
+  }
+
+  // 2. NẾU KHÔNG HOÃN: Thời gian hiển thị kế tiếp = lần cuối cùng popup hiển thị + chu kỳ cài đặt
+  const intervalMs = settings.intervalMinutes * 60 * 1000;
+  const lastDisplay = getLastPopupDisplayTime();
+
+  // If popup has never been displayed yet, next time is calculated from now
+  const baseTime = lastDisplay > 0 ? lastDisplay : Date.now();
+  return baseTime + intervalMs;
+}
+
+/**
+ * Get remaining seconds until next scheduled review popup (0 if overdue or disabled)
+ */
+export function getRemainingSecondsToNextReminder(): number {
+  const nextTime = getNextReminderTime();
+  if (nextTime === 0) return 0;
+  const remainingMs = nextTime - Date.now();
+  return Math.max(0, Math.ceil(remainingMs / 1000));
+}
+
+/**
  * Trigger the native desktop Focus Review Pop-up window
  */
 export async function triggerReviewPopup(): Promise<boolean> {
+  // Record that the popup is being displayed right now
+  recordPopupDisplayed(Date.now());
   try {
     await invoke("show_review_popup");
     return true;

@@ -18,6 +18,7 @@ import {
   getReminderSettings,
   snoozeReminder,
   hideReviewPopup,
+  recordPopupDisplayed,
   type ReminderSettings,
 } from "@/services/reminderSettings";
 import type { WordDetail } from "@/types/database";
@@ -301,6 +302,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   };
 
   useEffect(() => {
+    recordPopupDisplayed(Date.now());
     loadWords(true);
 
     let unlistenFn: (() => void) | null = null;
@@ -309,6 +311,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     // Listen to native Tauri event when review popup window is opened / focused
     listen("review-popup-opened", () => {
       if (isCancelled) return;
+      recordPopupDisplayed(Date.now());
       loadWords(false);
     })
       .then((fn) => {
@@ -321,6 +324,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     // In-app fallback preview event listener
     const onPreviewOpened = () => {
+      recordPopupDisplayed(Date.now());
       loadWords(false);
     };
     window.addEventListener("open-review-popup-preview", onPreviewOpened);
@@ -542,28 +546,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     advanceNextWord,
   ]);
 
-  // Determine blur backdrop intensity and guarantee overlay is ALWAYS clearly visible (never transparent or missing)
+  // Stable solid alpha overlay scrim - avoids WebKit backdrop-filter compositor thrashing and flickering
   const overlayStyle = useMemo(() => {
     switch (settings.blurOverlay) {
       case "heavy":
-        return { backgroundColor: "rgba(0, 0, 0, 0.82)" };
+        return { backgroundColor: "rgba(0, 0, 0, 0.85)" };
       case "light":
         return { backgroundColor: "rgba(0, 0, 0, 0.48)" };
       case "medium":
       default:
-        return { backgroundColor: "rgba(0, 0, 0, 0.65)" };
-    }
-  }, [settings.blurOverlay]);
-
-  const blurClass = useMemo(() => {
-    switch (settings.blurOverlay) {
-      case "heavy":
-        return "backdrop-blur-md";
-      case "light":
-        return "backdrop-blur-[2px]";
-      case "medium":
-      default:
-        return "backdrop-blur-sm";
+        return { backgroundColor: "rgba(0, 0, 0, 0.68)" };
     }
   }, [settings.blurOverlay]);
 
@@ -586,12 +578,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   return (
     <div
-      className={`fixed inset-0 w-screen h-screen z-50 flex items-center justify-center p-4 sm:p-6 select-none transition-colors duration-200 ${blurClass}`}
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 select-none"
       style={overlayStyle}
       onClick={handleClose}
     >
       <div
-        className="w-full max-w-xl bg-white/95 dark:bg-zinc-900/95 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl backdrop-blur-xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-200"
+        className="w-full max-w-xl min-h-[500px] bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col justify-between animate-in zoom-in-95 duration-200"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Top Header Bar */}

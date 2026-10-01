@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from "react";
-import { CheckCircle2, RotateCcw, Link2 } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { CheckCircle2, RotateCcw, Link2, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { prepareContextMatch, type ContextMatchPair } from "@/services/smartReview";
@@ -46,9 +46,14 @@ export default function ContextMatchExercise({
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [wrongAttempts, setWrongAttempts] = useState(0);
 
+  const onFallbackRef = useRef(onFallback);
+  useEffect(() => {
+    onFallbackRef.current = onFallback;
+  });
+
   useEffect(() => {
     if (!pairs || pairs.length < 2) {
-      onFallback();
+      onFallbackRef.current();
       return;
     }
     // Shuffle right-hand column sentences
@@ -58,7 +63,7 @@ export default function ContextMatchExercise({
     setIsAnswered(false);
     setIsCorrect(null);
     setWrongAttempts(0);
-  }, [pairs, onFallback]);
+  }, [pairs]);
 
   if (!pairs || pairs.length < 2) return null;
 
@@ -259,25 +264,32 @@ export default function ContextMatchExercise({
         </button>
       </div>
 
-      {/* Status Feedback */}
-      {isAnswered && isCorrect && (
-        <div className="p-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2">
-          <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-          <span>Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Đang chuyển tiếp...</span>
-        </div>
-      )}
-
-      {isCorrect === false && !isAnswered && (
-        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between">
-          <span>Một số cặp ghép chưa chính xác (Lần {wrongAttempts}). Hãy đổi lại vị trí!</span>
-          <button
-            onClick={handleReset}
-            className="px-2 py-1 rounded bg-rose-100 dark:bg-rose-900/60 font-medium hover:bg-rose-200 transition-colors"
-          >
-            Ghép lại
-          </button>
-        </div>
-      )}
+      {/* Dedicated Stable Feedback Area - ALWAYS occupies 48px so layout NEVER jumps */}
+      <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
+        {isAnswered && isCorrect ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span className="font-semibold">Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Đang chuyển tiếp...</span>
+          </div>
+        ) : isCorrect === false && !isAnswered ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <span>Một số cặp ghép chưa chính xác (Lần {wrongAttempts}). Hãy đổi lại vị trí!</span>
+            </div>
+            <button
+              onClick={handleReset}
+              className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 transition-colors text-rose-700 dark:text-rose-200 text-xs shrink-0 ml-2"
+            >
+              Ghép lại
+            </button>
+          </div>
+        ) : (
+          <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
+            <span>Chọn 1 từ ở cột trái rồi chọn câu có chỗ trống tương ứng ở cột phải</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

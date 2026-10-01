@@ -504,9 +504,10 @@ import {
   getReminderSettings,
   isSnoozed,
   triggerReviewPopup,
+  getLastPopupDisplayTime,
+  recordPopupDisplayed,
+  getNextReminderTime,
 } from "./reminderSettings";
-
-const SRS_LAST_TRIGGER_KEY = "myenglish_srs_last_trigger_ms";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -517,27 +518,22 @@ const SRS_LAST_TRIGGER_KEY = "myenglish_srs_last_trigger_ms";
 class SRSBackgroundWorker {
   private timerId: number | null = null;
   private unlistenHeartbeat: (() => void) | null = null;
+  private unlistenPopupOpened: (() => void) | null = null;
   private isTicking = false;
-
-  private getLastTriggerTime(): number {
-    try {
-      const stored = localStorage.getItem(SRS_LAST_TRIGGER_KEY);
-      return stored ? parseInt(stored, 10) : 0;
-    } catch {
-      return 0;
-    }
-  }
-
-  private setLastTriggerTime(time: number): void {
-    try {
-      localStorage.setItem(SRS_LAST_TRIGGER_KEY, time.toString());
-    } catch {}
-  }
 
   public async start() {
     this.stop();
 
-    // Lắng nghe heartbeat từ Rust (bắn mỗi 30s)
+    // Listen to native review-popup-opened event so worker syncs anytime popup is opened
+    try {
+      this.unlistenPopupOpened = await listen("review-popup-opened", () => {
+        recordPopupDisplayed(Date.now());
+      });
+    } catch (err) {
+      console.warn("Could not attach review-popup-opened listener in srsWorker:", err);
+    }
+
+    // 1. Lắng nghe heartbeat từ Rust (bắn mỗi 30s)
     try {
       this.unlistenHeartbeat = await listen("srs-heartbeat", () => {
         this.tick();
@@ -546,8 +542,8 @@ class SRSBackgroundWorker {
       console.warn("Could not attach srs-heartbeat listener:", err);
     }
 
-    // 2. Also keep a fallback local timer ticking every 30 seconds
-    this.timerId = window.setInterval(() => this.tick(), 30000);
+    // 2. Also keep a fallback local timer ticking every 15 seconds
+    this.timerId = window.setInterval(() => this.tick(), 15000);
   }
 
   public restart() {
@@ -563,6 +559,10 @@ class SRSBackgroundWorker {
       this.unlistenHeartbeat();
       this.unlistenHeartbeat = null;
     }
+    if (this.unlistenPopupOpened) {
+      this.unlistenPopupOpened();
+      this.unlistenPopupOpened = null;
+    }
   }
 
   public async tick(forceTrigger: boolean = false) {
@@ -575,13 +575,20 @@ class SRSBackgroundWorker {
         if (!settings.enabled || settings.intervalMinutes === 0) return;
         if (isSnoozed()) return;
 
-        const intervalMs = settings.intervalMinutes * 60 * 1000;
         const now = Date.now();
-        const lastTrigger = this.getLastTriggerTime();
+        const lastDisplay = getLastPopupDisplayTime();
 
-        // Check if full interval has elapsed since last popup
-        if (lastTrigger > 0 && now - lastTrigger < intervalMs) {
+        // Nếu chưa từng hiển thị lần nào (hoặc lần đầu mở app),
+        // mốc đếm bắt đầu từ lúc này -> popup sẽ hiển thị sau đúng 1 chu kỳ cài đặt
+        if (lastDisplay === 0) {
+          recordPopupDisplayed(now);
           return;
+        }
+
+        // ĐIỀU KIỆN CỐT LÕI: Thời gian lần tiếp theo hiển thị phải tính từ lần cuối cùng popup hiển thị!
+        const nextTime = getNextReminderTime();
+        if (now < nextTime) {
+          return; // Chưa đến giờ hiển thị tiếp theo
         }
       }
 
@@ -594,10 +601,8 @@ class SRSBackgroundWorker {
         if (all.length === 0 && !forceTrigger) return;
       }
 
-      // Record trigger timestamp
-      this.setLastTriggerTime(Date.now());
-
-      // Trigger the interactive full-screen Focus Review Modal
+      // Kích hoạt Focus Review Modal toàn màn hình
+      // (triggerReviewPopup tự động gọi recordPopupDisplayed để ghi nhận mốc hiển thị mới)
       await triggerReviewPopup();
     } catch (err) {
       console.warn("SRS worker tick failed:", err);

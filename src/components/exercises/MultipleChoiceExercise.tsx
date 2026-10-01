@@ -173,31 +173,33 @@ export default function MultipleChoiceExercise({
 
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium leading-snug break-words">{opt.text}</p>
-                {showSuccess && opt.explanation && (
-                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 mt-1">
-                    {opt.explanation}
-                  </p>
-                )}
               </div>
 
-              {showSuccess && (
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 mt-0.5" />
-              )}
-              {showFail && <XCircle className="w-5 h-5 text-rose-500 shrink-0 mt-0.5" />}
+              {/* Reserved icon slot so text width and button height never shift */}
+              <div className="w-5 h-5 shrink-0 flex items-center justify-center">
+                {showSuccess && (
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0 animate-in zoom-in duration-150" />
+                )}
+                {showFail && <XCircle className="w-5 h-5 text-rose-500 shrink-0 animate-in zoom-in duration-150" />}
+              </div>
             </button>
           );
         })}
       </div>
 
-      {/* Helpful Hint */}
-      <div className="flex items-center justify-between text-xs text-slate-400 dark:text-zinc-500 px-2">
+      {/* Helpful Hint - fixed height h-7 so it NEVER jumps */}
+      <div className="flex items-center justify-between text-xs text-slate-400 dark:text-zinc-500 px-2 h-7 min-h-[28px]">
         <span className="flex items-center gap-1">
           <HelpCircle className="w-3.5 h-3.5" />
           Phím tắt: bấm <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">1</kbd> - <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">4</kbd>
         </span>
-        {wrongAttempts > 0 && !isAnswered && (
-          <span className="text-amber-500 font-medium">
+        {wrongAttempts > 0 && !isAnswered ? (
+          <span className="text-amber-500 dark:text-amber-400 font-semibold animate-in fade-in duration-150">
             Chưa đúng ({wrongAttempts} lần thử) — Hãy chọn lại!
+          </span>
+        ) : (
+          <span className="text-[11px] text-slate-400 dark:text-zinc-500">
+            Chọn 1 trong 4 đáp án
           </span>
         )}
       </div>

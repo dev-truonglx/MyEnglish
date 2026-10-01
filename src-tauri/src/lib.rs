@@ -265,6 +265,36 @@ mod macos_cursor {
     }
 }
 
+#[cfg(target_os = "macos")]
+mod macos_app {
+    use std::ffi::c_void;
+
+    #[link(name = "AppKit", kind = "framework")]
+    extern "C" {
+        fn objc_getClass(name: *const std::os::raw::c_char) -> *mut c_void;
+        fn sel_registerName(name: *const std::os::raw::c_char) -> *mut c_void;
+        fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+    }
+
+    pub fn activate_app_ignoring_other_apps() {
+        unsafe {
+            let ns_app_cls = objc_getClass(b"NSApplication\0".as_ptr() as *const _);
+            if ns_app_cls.is_null() {
+                return;
+            }
+            let shared_app_sel = sel_registerName(b"sharedApplication\0".as_ptr() as *const _);
+            let shared_app = objc_msgSend(ns_app_cls, shared_app_sel);
+            if shared_app.is_null() {
+                return;
+            }
+            let activate_sel = sel_registerName(b"activateIgnoringOtherApps:\0".as_ptr() as *const _);
+            let activate_fn: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) -> *mut c_void =
+                std::mem::transmute(objc_msgSend as *const ());
+            activate_fn(shared_app, activate_sel, true);
+        }
+    }
+}
+
 fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
     let monitors = window.available_monitors().ok()?;
 
@@ -307,29 +337,49 @@ fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor
     window.current_monitor().ok().flatten().or_else(|| window.primary_monitor().ok().flatten())
 }
 
+/// Robust monitor selection:
+/// 1. If "main" window is visible, show popup on the SAME monitor the user is viewing the dashboard!
+/// 2. If "main" window is hidden/minimized, target the monitor where the cursor currently resides.
+/// 3. Fallback to primary monitor (guaranteed to be the active display with menu bar).
+fn get_target_monitor_for_popup(app: &AppHandle, popup_win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
+    if let Some(main_win) = app.get_webview_window("main") {
+        if main_win.is_visible().unwrap_or(false) {
+            if let Ok(Some(m)) = main_win.current_monitor() {
+                return Some(m);
+            }
+        }
+    }
+
+    if let Some(m) = get_monitor_at_cursor(popup_win) {
+        return Some(m);
+    }
+
+    popup_win.primary_monitor().ok().flatten().or_else(|| popup_win.current_monitor().ok().flatten())
+}
+
 #[tauri::command]
 fn show_review_popup(app: AppHandle) -> Result<bool, String> {
     if let Some(window) = app.get_webview_window("review-popup") {
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.set_always_on_top(true);
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-            return Ok(true);
+        let _ = window.set_visible_on_all_workspaces(true);
+        let _ = window.set_always_on_top(true);
+        let _ = window.unminimize();
+
+        #[cfg(target_os = "macos")]
+        {
+            macos_app::activate_app_ignoring_other_apps();
         }
 
-        if let Some(monitor) = get_monitor_at_cursor(&window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
             let _ = window.set_size(tauri::Size::Physical(*size));
         }
 
-        let _ = window.set_always_on_top(true);
-        let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
 
         // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
-        if let Some(monitor) = get_monitor_at_cursor(&window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
@@ -345,7 +395,10 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
 
         let _ = window.set_focus();
 
-        let _ = window.emit("review-popup-opened", serde_json::json!({}));
+        // Broadcast to ALL windows (app.emit instead of window.emit)
+        let _ = app.emit("review-popup-opened", serde_json::json!({
+            "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+        }));
         Ok(true)
     } else {
         Err("Review popup window not found".to_string())

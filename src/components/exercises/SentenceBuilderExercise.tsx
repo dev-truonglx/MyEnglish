@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
-import { Volume2, CheckCircle2, RotateCcw, Sparkles } from "lucide-react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
@@ -28,10 +28,23 @@ export default function SentenceBuilderExercise({
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [shake, setShake] = useState(false);
 
-  // Initialize
+  // Stable references to callbacks and state to prevent infinite auto-check loops
+  const onFallbackRef = useRef(onFallback);
+  const onCompleteRef = useRef(onComplete);
+  const onSpeakRef = useRef(onSpeak);
+  const wrongAttemptsRef = useRef(0);
+  const lastCheckedKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    onFallbackRef.current = onFallback;
+    onCompleteRef.current = onComplete;
+    onSpeakRef.current = onSpeak;
+  });
+
+  // Initialize state when target sentence data changes
   useEffect(() => {
     if (!data) {
-      onFallback();
+      onFallbackRef.current();
       return;
     }
     setAvailableTokens(data.tokens);
@@ -39,19 +52,25 @@ export default function SentenceBuilderExercise({
     setIsAnswered(false);
     setIsCorrect(null);
     setWrongAttempts(0);
+    wrongAttemptsRef.current = 0;
+    lastCheckedKeyRef.current = "";
     setShake(false);
-  }, [data, onFallback]);
+  }, [data]);
 
   if (!data) return null;
 
   const handlePlaceToken = (token: { id: string; text: string }) => {
     if (isAnswered) return;
+    setIsCorrect(null);
+    lastCheckedKeyRef.current = "";
     setAvailableTokens((prev) => prev.filter((t) => t.id !== token.id));
     setPlacedTokens((prev) => [...prev, token]);
   };
 
   const handleRemoveToken = (token: { id: string; text: string }) => {
     if (isAnswered) return;
+    setIsCorrect(null);
+    lastCheckedKeyRef.current = "";
     setPlacedTokens((prev) => prev.filter((t) => t.id !== token.id));
     setAvailableTokens((prev) => [...prev, token]);
   };
@@ -61,74 +80,98 @@ export default function SentenceBuilderExercise({
     setAvailableTokens(data.tokens);
     setPlacedTokens([]);
     setIsCorrect(null);
+    lastCheckedKeyRef.current = "";
   };
 
   const handleCheck = useCallback(() => {
     if (isAnswered || placedTokens.length === 0) return;
 
+    const currentKey = placedTokens.map((t) => t.id).join("|");
+    // Prevent duplicate evaluation of the exact same placement sequence
+    if (lastCheckedKeyRef.current === currentKey) return;
+    lastCheckedKeyRef.current = currentKey;
+
     const constructed = placedTokens.map((t) => t.text).join(" ").trim().toLowerCase();
     const target = data.fullSentence.trim().toLowerCase();
 
-    // Remove punctuation from both for flexible comparison
-    const cleanConstructed = constructed.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "");
-    const cleanTarget = target.replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "");
+    // Remove punctuation from both for flexible comparison and normalize whitespace
+    const cleanConstructed = constructed
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    const cleanTarget = target
+      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
 
     const matched = cleanConstructed === cleanTarget;
 
     if (matched) {
       setIsCorrect(true);
       setIsAnswered(true);
-      onSpeak(data.fullSentence);
+      onSpeakRef.current(data.fullSentence);
 
+      const attempts = wrongAttemptsRef.current;
       let rating: Rating = Rating.Easy;
-      if (wrongAttempts === 0) {
+      if (attempts === 0) {
         rating = Rating.Easy;
-      } else if (wrongAttempts === 1) {
+      } else if (attempts === 1) {
         rating = Rating.Good;
       } else {
         rating = Rating.Hard;
       }
 
       setTimeout(() => {
-        onComplete(true, wrongAttempts, rating);
+        onCompleteRef.current(true, attempts, rating);
       }, 1000);
     } else {
       setIsCorrect(false);
-      setWrongAttempts((prev) => prev + 1);
+      setWrongAttempts((prev) => {
+        const next = prev + 1;
+        wrongAttemptsRef.current = next;
+        return next;
+      });
       setShake(true);
       setTimeout(() => setShake(false), 400);
     }
-  }, [data, isAnswered, onComplete, onSpeak, placedTokens, wrongAttempts]);
+  }, [data, isAnswered, placedTokens]);
 
-  // Auto-check when all tokens have been placed
+  // Auto-check when all tokens have been placed and haven't been evaluated yet
   useEffect(() => {
-    if (availableTokens.length === 0 && placedTokens.length > 0 && !isAnswered) {
+    if (
+      availableTokens.length === 0 &&
+      placedTokens.length > 0 &&
+      !isAnswered &&
+      isCorrect === null
+    ) {
       handleCheck();
     }
-  }, [availableTokens.length, placedTokens.length, isAnswered, handleCheck]);
+  }, [availableTokens.length, placedTokens.length, isAnswered, isCorrect, handleCheck]);
+
+  const firstWordHint = data.fullSentence.trim().split(/\s+/)[0];
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-6 animate-in fade-in duration-200">
-      {/* Target meaning prompt */}
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-3 shadow-sm">
+    <div className="w-full max-w-xl mx-auto space-y-4 animate-in fade-in duration-200">
+      {/* Target meaning prompt - fixed height block */}
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-5 text-center space-y-2 shadow-sm shrink-0">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/50 dark:border-amber-800/40">
           <Sparkles className="w-3 h-3" />
           <span>Sắp xếp thành câu hoàn chỉnh</span>
         </div>
 
-        <p className="text-lg md:text-xl font-semibold text-slate-900 dark:text-white leading-relaxed">
+        <p className="text-base md:text-lg font-semibold text-slate-900 dark:text-white leading-relaxed line-clamp-2">
           "{data.meaningVN}"
         </p>
 
-        <div className="flex items-center justify-center gap-2 pt-1">
+        <div className="flex items-center justify-center gap-2 pt-0.5">
           <span className="text-xs text-slate-500 dark:text-zinc-400">Từ mục tiêu:</span>
           <span className="text-xs font-mono font-bold text-cyan-600 dark:text-cyan-400 px-2 py-0.5 rounded bg-cyan-50 dark:bg-cyan-950/50 border border-cyan-200 dark:border-cyan-800">
             {word.word}
           </span>
           <button
-            onClick={() => onSpeak(word.word)}
+            onClick={() => onSpeakRef.current(word.word)}
             type="button"
-            className="p-1 rounded-full text-slate-400 hover:text-cyan-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+            className="p-1 rounded-full text-slate-400 hover:text-cyan-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
             title="Phát âm từ"
           >
             <Volume2 className="w-4 h-4" />
@@ -136,9 +179,9 @@ export default function SentenceBuilderExercise({
         </div>
       </div>
 
-      {/* Sentence Construction Zone */}
+      {/* Sentence Construction Zone - constant height so it doesn't jump */}
       <div
-        className={`rounded-2xl border-2 min-h-[96px] p-4 flex flex-wrap items-center gap-2 transition-all ${
+        className={`rounded-2xl border-2 min-h-[92px] p-3.5 flex flex-wrap items-center gap-2 transition-all content-center ${
           isCorrect === true
             ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30"
             : isCorrect === false
@@ -172,8 +215,8 @@ export default function SentenceBuilderExercise({
         )}
       </div>
 
-      {/* Available Word Bank */}
-      <div className="space-y-3">
+      {/* Available Word Bank - constant min-height matching placed zone */}
+      <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400 px-1">
           <span>Ngân hàng từ vựng:</span>
           {placedTokens.length > 0 && !isAnswered && (
@@ -187,7 +230,7 @@ export default function SentenceBuilderExercise({
           )}
         </div>
 
-        <div className="flex flex-wrap gap-2 min-h-[48px] p-3 rounded-xl bg-slate-100 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800">
+        <div className="flex flex-wrap gap-2 min-h-[92px] p-3 rounded-xl bg-slate-100 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 content-start">
           {availableTokens.map((token) => (
             <button
               key={token.id}
@@ -198,47 +241,65 @@ export default function SentenceBuilderExercise({
               {token.text}
             </button>
           ))}
-          {availableTokens.length === 0 && placedTokens.length > 0 && !isAnswered && (
-            <span className="text-xs text-slate-400 dark:text-zinc-500 italic my-auto">
-              Đã dùng hết từ. Đang kiểm tra...
+          {availableTokens.length === 0 && placedTokens.length > 0 && (
+            <span className="text-xs text-slate-400 dark:text-zinc-500 italic my-auto mx-auto select-none">
+              {isAnswered && isCorrect
+                ? "Hoàn thành chính xác!"
+                : isCorrect === null
+                ? "Đã dùng hết từ. Đang kiểm tra..."
+                : "Đã chọn toàn bộ từ"}
             </span>
           )}
         </div>
       </div>
 
-      {/* Status Feedback / Next Button */}
-      {isAnswered && isCorrect && (
-        <div className="p-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-sm flex items-center justify-between animate-in fade-in">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 shrink-0" />
-            <div>
-              <p className="font-semibold">Chính xác!</p>
-              <p className="text-xs text-emerald-700 dark:text-emerald-300">
-                {data.fullSentence}
-              </p>
+      {/* Dedicated Stable Feedback Area - ALWAYS occupies 52px so layout NEVER jumps */}
+      <div className="h-[52px] min-h-[52px] flex items-center justify-center w-full">
+        {isAnswered && isCorrect ? (
+          <div className="w-full h-full px-4 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-2 min-w-0">
+              <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+              <div className="truncate">
+                <span className="font-bold mr-1.5">Chính xác!</span>
+                <span className="text-emerald-700 dark:text-emerald-300 font-mono">
+                  {data.fullSentence}
+                </span>
+              </div>
             </div>
+            <button
+              onClick={() => onSpeakRef.current(data.fullSentence)}
+              className="p-1.5 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-600 shrink-0 ml-2"
+              title="Nghe câu"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
           </div>
-          <button
-            onClick={() => onSpeak(data.fullSentence)}
-            className="p-1.5 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-900/50 text-emerald-600"
-            title="Nghe câu"
-          >
-            <Volume2 className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {isCorrect === false && !isAnswered && (
-        <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between animate-in fade-in">
-          <span>Thứ tự từ chưa chính xác (Lần {wrongAttempts}). Hãy sắp xếp lại nhé!</span>
-          <button
-            onClick={handleReset}
-            className="px-2 py-1 rounded bg-rose-100 dark:bg-rose-900/60 font-medium hover:bg-rose-200 transition-colors"
-          >
-            Xếp lại
-          </button>
-        </div>
-      )}
+        ) : isCorrect === false && !isAnswered ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <div className="truncate">
+                <span className="font-semibold">Thứ tự từ chưa đúng (Lần {wrongAttempts}).</span>
+                {wrongAttempts >= 2 && firstWordHint && (
+                  <span className="ml-1.5 text-amber-700 dark:text-amber-300 font-medium">
+                    Gợi ý: Bắt đầu bằng "<strong>{firstWordHint}</strong>"
+                  </span>
+                )}
+              </div>
+            </div>
+            <button
+              onClick={handleReset}
+              className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-200 transition-colors shrink-0 ml-2"
+            >
+              Xếp lại
+            </button>
+          </div>
+        ) : (
+          <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
+            <span>Chạm các từ để ghép • Chạm từ đã ghép để gỡ • Ghép xong sẽ tự động kiểm tra</span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
