@@ -61,6 +61,12 @@ import CliGuideView from "./CliGuideView";
 import FocusReviewModal from "./FocusReviewModal";
 import GrammarHub from "./grammar/GrammarHub";
 import { getDueGrammarLessons } from "@/services/grammarService";
+import {
+  checkAutoReplenishEligibility,
+  triggerAutoReplenish,
+  type AutoReplenishSummary,
+} from "@/services/autoReplenish";
+import { assessUserProficiency } from "@/services/userProficiency";
 
 interface MainDashboardProps {
   onOpenQuickInputPreview?: () => void;
@@ -89,12 +95,42 @@ export default function MainDashboard({
   const [wordToDelete, setWordToDelete] = useState<{ id: string; word: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [globalToast, setGlobalToast] = useState<{ title: string; body: string; target?: string } | null>(null);
+  const [autoReplenishBanner, setAutoReplenishBanner] = useState<AutoReplenishSummary | null>(null);
+  const [isQuickReplenishing, setIsQuickReplenishing] = useState(false);
   const [expandedTerms, setExpandedTerms] = useState<Record<string, boolean>>({});
   const [activityVersion, setActivityVersion] = useState(0);
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const [xpState, setXpState] = useState<XPState>(getXPState);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const currentProficiency = useMemo(() => {
+    return assessUserProficiency(words);
+  }, [words, activityVersion]);
+  const effectiveLevel = currentProficiency.effectiveLevel;
+
+  const handleQuickReplenish = async () => {
+    if (isQuickReplenishing) return;
+    setIsQuickReplenishing(true);
+    try {
+      const res = await triggerAutoReplenish(words, true);
+      if (res.success) {
+        refreshWords();
+      } else {
+        setGlobalToast({
+          title: "Thông báo sinh bài học AI",
+          body: res.message,
+        });
+      }
+    } catch (err) {
+      setGlobalToast({
+        title: "Lỗi kết nối Gemini CLI",
+        body: "Không thể gọi Gemini CLI để sinh bài học mới. Vui lòng kiểm tra lại CLI binary.",
+      });
+    } finally {
+      setIsQuickReplenishing(false);
+    }
+  };
 
   const {
     status: updateStatus,
@@ -156,6 +192,37 @@ export default function MainDashboard({
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
   }, []);
 
+  // Auto-replenish listener & background check
+  useEffect(() => {
+    const onAutoReplenish = (e: Event) => {
+      const custom = e as CustomEvent<AutoReplenishSummary>;
+      if (custom.detail) {
+        setAutoReplenishBanner(custom.detail);
+        refreshWords();
+      }
+    };
+    window.addEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
+
+    if (words.length > 0 && !loading) {
+      const timer = setTimeout(() => {
+        checkAutoReplenishEligibility(words)
+          .then((eligibility) => {
+            if (eligibility.isEligible) {
+              console.log("[AutoReplenish] Đủ điều kiện tự động: Kích hoạt sinh từ vựng và bài tập mới...");
+              triggerAutoReplenish(words, false);
+            }
+          })
+          .catch((err) => console.warn("Auto-replenish eligibility check:", err));
+      }, 4000);
+      return () => {
+        clearTimeout(timer);
+        window.removeEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
+      };
+    }
+
+    return () => window.removeEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
+  }, [words.length, loading]);
+
   const toggleTermExpanded = (termKey: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setExpandedTerms((prev) => ({
@@ -164,11 +231,11 @@ export default function MainDashboard({
     }));
   };
 
-  const [collapsedQueueItems, setCollapsedQueueItems] = useState<Record<string, boolean>>({});
+  const [expandedQueueItems, setExpandedQueueItems] = useState<Record<string, boolean>>({});
 
-  const toggleQueueItemCollapse = (wordKey: string, e?: React.MouseEvent) => {
+  const toggleQueueItemExpand = (wordKey: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    setCollapsedQueueItems((prev) => ({
+    setExpandedQueueItems((prev) => ({
       ...prev,
       [wordKey]: !prev[wordKey],
     }));
@@ -570,6 +637,56 @@ export default function MainDashboard({
               e.stopPropagation();
               setGlobalToast(null);
             }}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {/* SMART AUTO-REPLENISH BANNER NOTIFICATION */}
+      {autoReplenishBanner && (
+        <div className="fixed top-5 left-1/2 -translate-x-1/2 z-50 max-w-lg w-[92%] bg-white dark:bg-zinc-900 border-2 border-cyan-500/90 rounded-2xl shadow-2xl p-4 flex items-start gap-3.5 animate-in slide-in-from-top-4 duration-300 backdrop-blur-xl">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 text-white flex items-center justify-center shrink-0 shadow-md shadow-cyan-500/30">
+            <Sparkles className="w-5 h-5 animate-pulse" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center justify-between gap-1">
+              <h4 className="text-xs font-black text-slate-900 dark:text-white truncate">
+                🎉 Đã Tự Động Bổ Sung Bài Học Cấp Độ [{autoReplenishBanner.level}]
+              </h4>
+              <span className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-950/80 px-2 py-0.5 rounded-full border border-cyan-300 dark:border-cyan-800">
+                AI Adaptive
+              </span>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">
+              Bạn đang học rất chăm chỉ! Hệ thống vừa tự động bổ sung <strong>{autoReplenishBanner.words.length} từ vựng mới</strong> ({autoReplenishBanner.words.join(", ")})
+              {autoReplenishBanner.grammarTopic ? ` & bài tập ngữ pháp "${autoReplenishBanner.grammarTopic}"` : ""}.
+            </p>
+            <div className="mt-2.5 flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setActiveTab("library");
+                  setAutoReplenishBanner(null);
+                }}
+                className="flex-1 py-1.5 px-3 rounded-lg bg-cyan-500 hover:bg-cyan-600 text-white font-semibold text-xs flex items-center justify-center gap-1.5 transition-colors shadow-sm"
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>Xem kho từ vựng</span>
+              </button>
+              <button
+                onClick={() => {
+                  setActiveTab("analytics");
+                  setAutoReplenishBanner(null);
+                }}
+                className="py-1.5 px-3 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 font-semibold text-xs transition-colors"
+              >
+                Xem đánh giá CEFR
+              </button>
+            </div>
+          </div>
+          <button
+            onClick={() => setAutoReplenishBanner(null)}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-1"
           >
             <X className="w-4 h-4" />
@@ -1115,6 +1232,29 @@ export default function MainDashboard({
               <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-600 dark:text-cyan-400" : ""}`} />
             </button>
 
+            {/* Quick Auto-Replenish Button */}
+            <button
+              onClick={handleQuickReplenish}
+              disabled={isQuickReplenishing}
+              title={`Tự động sinh 3 từ vựng & bài tập ngữ pháp chuẩn cấp độ ${effectiveLevel}`}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {isQuickReplenishing ? (
+                <>
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <span>Đang sinh...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
+                  <span>Bổ sung ngay</span>
+                  <span className="text-[10px] bg-black/25 text-white px-1.5 py-0.5 rounded font-mono font-bold">
+                    {effectiveLevel}
+                  </span>
+                </>
+              )}
+            </button>
+
             {/* Add Word Button */}
             <button
               onClick={() => setActiveTab("capture")}
@@ -1458,23 +1598,32 @@ export default function MainDashboard({
                         };
                       })();
 
-                    const isCardCollapsed = !!collapsedQueueItems[item.word];
+                    const isExpanded = !!expandedQueueItems[item.word];
                     const matchingWord = words.find(
                       (w) =>
                         (item.wordId && w.id === item.wordId) ||
                         w.word.toLowerCase() === item.word.toLowerCase()
                     );
 
-                    if (isCardCollapsed && enrichedData) {
+                    // MẶC ĐỊNH THU GỌN KHI ĐÃ HOÀN TẤT SINH TỪ (Chỉ mở ra khi user click)
+                    if (!isExpanded && enrichedData && item.status !== "analyzing") {
                       return (
                         <div
                           key={idx}
-                          className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 space-y-2 shadow-sm transition-all"
+                          onClick={(e) => toggleQueueItemExpand(item.word, e)}
+                          className="relative rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 space-y-2 shadow-sm hover:border-slate-300 dark:hover:border-zinc-700 transition-all pr-14 cursor-pointer select-none"
                         >
-                          <div
-                            onClick={(e) => toggleQueueItemCollapse(item.word, e)}
-                            className="flex items-center justify-between cursor-pointer select-none"
+                          {/* Nút xổ ra luôn cố định ở góc trên phải */}
+                          <button
+                            type="button"
+                            onClick={(e) => toggleQueueItemExpand(item.word, e)}
+                            title="Bấm để mở rộng chi tiết"
+                            className="absolute top-3.5 right-3.5 p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors z-10 shadow-sm"
                           >
+                            <ChevronDown className="w-4 h-4" />
+                          </button>
+
+                          <div className="flex items-center justify-between flex-wrap gap-2">
                             <div className="flex items-center gap-2.5 flex-wrap">
                               <span className="font-mono text-base font-bold text-slate-900 dark:text-white capitalize">
                                 {item.word}
@@ -1489,14 +1638,43 @@ export default function MainDashboard({
                                   {enrichedData.part_of_speech}
                                 </span>
                               )}
+                              {enrichedData.topic && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-100 dark:bg-cyan-950/70 text-cyan-800 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 flex items-center gap-1">
+                                  <Tag className="w-2.5 h-2.5 text-cyan-600 dark:text-cyan-400" />
+                                  <span>{enrichedData.topic}</span>
+                                </span>
+                              )}
                             </div>
                             <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSpeak(item.word);
+                                }}
+                                title="Phát âm từ này"
+                                className="p-1 rounded-lg bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:hover:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-500/30 transition-colors"
+                              >
+                                <Volume2 className="w-3.5 h-3.5" />
+                              </button>
+                              {matchingWord && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    setSelectedWord(matchingWord);
+                                    setActiveTab("library");
+                                  }}
+                                  title="Xem chi tiết trong Thư viện"
+                                  className="px-2 py-0.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 border border-slate-300 dark:border-zinc-700 text-[11px] font-medium flex items-center gap-1 shadow-sm"
+                                >
+                                  <BookOpen className="w-3 h-3 text-cyan-500" />
+                                  <span>Thư viện</span>
+                                </button>
+                              )}
                               <span className="text-xs font-mono px-2.5 py-0.5 rounded-full border bg-emerald-100 dark:bg-emerald-950/60 border-emerald-300 dark:border-emerald-700 text-emerald-800 dark:text-emerald-300">
                                 Saved to Library ✓
                               </span>
-                              <div className="text-slate-400 p-0.5">
-                                <ChevronDown className="w-4 h-4" />
-                              </div>
                             </div>
                           </div>
                           <p className="text-xs text-slate-700 dark:text-zinc-300">
@@ -1510,8 +1688,20 @@ export default function MainDashboard({
                     return (
                       <div
                         key={idx}
-                        className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-5 shadow-sm transition-all"
+                        className="relative rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-5 shadow-sm transition-all pr-14"
                       >
+                        {/* Nút thu gọn thẻ luôn cố định ở góc trên phải */}
+                        {enrichedData && (
+                          <button
+                            type="button"
+                            onClick={(e) => toggleQueueItemExpand(item.word, e)}
+                            title="Bấm để thu gọn thẻ"
+                            className="absolute top-4 right-4 p-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-100 transition-colors z-10 shadow-sm"
+                          >
+                            <ChevronUp className="w-4 h-4" />
+                          </button>
+                        )}
+
                         {/* Header Bar */}
                         <div className="flex items-center justify-between pb-3 border-b border-slate-200 dark:border-zinc-800/80 flex-wrap gap-2">
                           <div className="flex items-center gap-2.5 flex-wrap">
@@ -1587,17 +1777,6 @@ export default function MainDashboard({
                               >
                                 <RotateCw className="w-3.5 h-3.5" />
                                 <span>Thử lại</span>
-                              </button>
-                            )}
-
-                            {enrichedData && (
-                              <button
-                                type="button"
-                                onClick={(e) => toggleQueueItemCollapse(item.word, e)}
-                                title="Thu gọn thẻ"
-                                className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 transition-colors"
-                              >
-                                <ChevronUp className="w-4 h-4" />
                               </button>
                             )}
                           </div>

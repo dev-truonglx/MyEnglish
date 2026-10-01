@@ -112,9 +112,26 @@ class WordProcessingPipeline {
     logTerminal("Pipeline", `Bắt đầu xử lý từ: "${pendingItem.word}"`);
 
     try {
-      // 1. Call Gemini CLI integration (fast mode with low effort & timeout)
-      const enrichment = await enrichWordWithGemini(pendingItem.word);
-      logTerminal("Pipeline", `Đã nhận kết quả AI cho "${pendingItem.word}". Bắt đầu lưu vào SQLite...`);
+      // 1. Determine user's active CEFR level for tailored examples
+      let userLevel = "B1";
+      try {
+        const override = localStorage.getItem("myenglish_user_cefr_override_v1");
+        if (override) {
+          userLevel = override;
+        } else {
+          const rawReminder = localStorage.getItem("myenglish_reminder_settings_v1");
+          if (rawReminder) {
+            const parsed = JSON.parse(rawReminder);
+            if (Array.isArray(parsed.grammarLevels) && parsed.grammarLevels[0]) {
+              userLevel = parsed.grammarLevels[0];
+            }
+          }
+        }
+      } catch {}
+
+      // Call Gemini CLI integration (calibrated to user's CEFR level)
+      const enrichment = await enrichWordWithGemini(pendingItem.word, userLevel);
+      logTerminal("Pipeline", `Đã nhận kết quả AI (${userLevel}) cho "${pendingItem.word}". Bắt đầu lưu vào SQLite...`);
       pendingItem.result = enrichment;
 
       // 2. Save/Update primary enriched word to SQLite

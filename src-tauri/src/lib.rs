@@ -687,7 +687,11 @@ fn check_cli_status(custom_path: Option<String>) -> CliStatusResult {
 }
 
 #[tauri::command]
-async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> Result<serde_json::Value, String> {
+async fn enrich_word_with_gemini(
+    word: String,
+    level: Option<String>,
+    custom_path: Option<String>,
+) -> Result<serde_json::Value, String> {
     let clean_word = word.trim().to_lowercase();
     if clean_word.is_empty() {
         return Err("Word cannot be empty".to_string());
@@ -695,11 +699,22 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
 
     tauri::async_runtime::spawn_blocking(move || {
         let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
-        println!("[MyEnglish AI] Bắt đầu phân tích từ '{}' bằng binary: '{}'", clean_word, bin_path);
+        let user_level = level.unwrap_or_else(|| "B1".to_string());
+        println!("[MyEnglish AI] Bắt đầu phân tích từ '{}' (CEFR: {}) bằng binary: '{}'", clean_word, user_level, bin_path);
         let start_time = std::time::Instant::now();
 
+        let level_guideline = match user_level.as_str() {
+            "A1" => "Target audience: CEFR A1 (Starter). Use very simple, clear phrasing, common words, and direct sentence structures. Explain grammar in basic terms.",
+            "A2" => "Target audience: CEFR A2 (Elementary). Use daily workplace/tech routines, past simple/continuous, basic modals, and straightforward examples.",
+            "B1" => "Target audience: CEFR B1 (Intermediate). Use realistic technical discussions (APIs, bug reports, PR reviews), present perfect, conditionals, and standard professional vocabulary.",
+            "B2" => "Target audience: CEFR B2 (Upper-Intermediate). Use authentic software engineering debates (scalability, concurrency, system design), nuanced collocations, mixed conditionals, and passive voice.",
+            "C1" | "C2" => "Target audience: CEFR C1 (Advanced). Use advanced architectural trade-offs, inversion, participle clauses, formal technical register, and sophisticated idiomatic collocations.",
+            _ => "Target audience: CEFR B1 (Intermediate). Use clear tech workplace context.",
+        };
+
         let prompt = format!(
-            "Analyze the English tech vocabulary: '{clean_word}'. \
+            "You are an expert English linguist and software engineering mentor. \
+            Analyze the English tech/workplace vocabulary: '{clean_word}' specifically calibrated for CEFR level {user_level}. {level_guideline} \
             Return strictly valid JSON with no markdown formatting or backticks, matching this exact schema: \
             {{\
               \"phonetic\": \"/IPA/\",\
@@ -710,19 +725,19 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
               \"code_snippet\": \"// 2-3 lines realistic code illustrating '{clean_word}'\",\
               \"examples\": [\
                 {{\
-                  \"sentence_en\": \"Present Simple or Continuous sentence with '{clean_word}'\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"[Present Simple] S + V(s/es) - Thói quen/Quy tắc\"\
+                  \"sentence_en\": \"Practical present or habit sentence with '{clean_word}' calibrated to {user_level}\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
+                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V... - Giải thích ngắn gọn cách dùng phù hợp trình độ {user_level}\"\
                 }},\
                 {{\
-                  \"sentence_en\": \"Past Simple or Continuous sentence with '{clean_word}'\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"[Past Simple] S + V2/ed - Sự kiện đã xảy ra\"\
+                  \"sentence_en\": \"Past or progressive action sentence with '{clean_word}' calibrated to {user_level}\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
+                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V2/ed / was doing... - Phân tích ngữ cảnh\"\
                 }},\
                 {{\
-                  \"sentence_en\": \"Present Perfect, Conditional, or Passive sentence with '{clean_word}'\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"[Present Perfect/Passive] Cấu trúc & giải thích\"\
+                  \"sentence_en\": \"Compound/complex sentence (Conditional, Passive, or Relative Clause) with '{clean_word}' calibrated to {user_level}\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
+                  \"grammar_analysis\": \"[Cấu trúc nâng cao] Phân tích cấu trúc ngữ pháp\"\
                 }}\
               ],\
               \"synonyms\": [\
@@ -787,7 +802,7 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
         })?;
 
         let elapsed = start_time.elapsed();
-        println!("[MyEnglish AI] Phân tích hoàn tất cho '{}' trong {:.2?}", clean_word, elapsed);
+        println!("[MyEnglish AI] Phân tích hoàn tất cho '{}' ({}) trong {:.2?}", clean_word, user_level, elapsed);
 
         Ok(parsed)
     })
@@ -808,22 +823,36 @@ async fn generate_grammar_exercises_ai(
 
     tauri::async_runtime::spawn_blocking(move || {
         let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
-        println!("[MyEnglish AI] Sinh bài tập ngữ pháp cho: '{}' ({})", clean_topic, level);
+        println!("[MyEnglish AI] Sinh bài tập ngữ pháp chuyên sâu cho: '{}' ({})", clean_topic, level);
 
-        // Ultra-compact token-optimized prompt
+        let cefr_criteria = match level.as_str() {
+            "A1" => "CEFR A1: Simple sentences, basic present/past simple, singular/plural, high-frequency tech terms (code, bug, file, run, error). Avoid complex clauses.",
+            "A2" => "CEFR A2: Daily tech routines, past continuous, basic modals (can, must, should), comparisons (faster, more reliable), time clauses (when, before).",
+            "B1" => "CEFR B1: Present perfect vs past simple, first/second conditionals, passive voice, relative pronouns (which, that, who), tech communication (PRs, releases).",
+            "B2" => "CEFR B2: Mixed conditionals, passive with reporting verbs, modal deductions (must have been), participle clauses, system architecture discussions.",
+            "C1" | "C2" => "CEFR C1: Inversion with negative adverbials, cleft sentences, subjunctive mood, sophisticated architecture trade-offs, precise academic/tech tone.",
+            _ => "CEFR B1: Intermediate practical workplace communication.",
+        };
+
         let prompt = format!(
-            "Generate 10 practical English grammar test questions for level {level}, topic: '{clean_topic}'. Focus on tech/work context. \
+            "You are a master English pedagogue specializing in CEFR assessment and technical English. \
+            Generate 10 authentic, practical English grammar test questions strictly calibrated for level {level} on the topic: '{clean_topic}'. \
+            Level Benchmark: {cefr_criteria} \
+            Requirements: \
+            1. Questions must use realistic tech workplace contexts (code reviews, deployments, debugging, architecture, team collaboration). \
+            2. For 'multiple_choice', distractors must represent typical learner errors, not nonsense. \
+            3. 'explanation' must be in Vietnamese, explaining both the rule and WHY the correct answer fits the context. \
             Output ONLY valid JSON array with NO markdown, matching: \
             [\
               {{\
                 \"type\": \"multiple_choice|conjugation|error_spotting\",\
                 \"prompt_en\": \"Sentence to test with blank _____ or bracketed words [word]\",\
-                \"prompt_vn\": \"Vietnamese translation\",\
-                \"hint\": \"Short grammar hint\",\
+                \"prompt_vn\": \"Bản dịch tiếng Việt chính xác\",\
+                \"hint\": \"Gợi ý ngữ pháp ngắn gọn\",\
                 \"options\": [\"optA\", \"optB\", \"optC\", \"optD\"],\
                 \"correct_answer\": \"exact correct answer\",\
                 \"error_word\": \"wrong word if error_spotting\",\
-                \"explanation\": \"Brief explanation in Vietnamese\"\
+                \"explanation\": \"Giải thích chi tiết quy tắc ngữ pháp bằng tiếng Việt\"\
               }}\
             ]"
         );
@@ -832,7 +861,7 @@ async fn generate_grammar_exercises_ai(
         cmd.arg("--dangerously-skip-permissions");
         cmd.arg("--disable-slash-commands");
         cmd.arg("--model").arg("gemini-3.6-flash-medium");
-        cmd.arg("--print-timeout").arg("30s");
+        cmd.arg("--print-timeout").arg("35s");
         cmd.arg("-p").arg(&prompt);
 
         let output = match cmd.output() {
@@ -855,7 +884,6 @@ async fn generate_grammar_exercises_ai(
         let raw_stdout = String::from_utf8_lossy(&output.stdout);
         let cleaned = clean_json_string(&raw_stdout);
 
-        // Try direct parse first; if it fails (e.g. Gemini returned comma-separated objects without outer [ ]), fallback to wrapping in [ ]
         let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
             Ok(v) => v,
             Err(first_err) => {
@@ -874,10 +902,118 @@ async fn generate_grammar_exercises_ai(
             }
         };
 
-        // If the model wrapped the result in an object like { "exercises": [...] } or { "questions": [...] }, unwrap it
         let final_val = if parsed.is_array() {
             parsed
         } else if let Some(arr) = parsed.get("exercises").or_else(|| parsed.get("questions")) {
+            arr.clone()
+        } else {
+            serde_json::Value::Array(vec![parsed])
+        };
+
+        Ok(final_val)
+    })
+    .await
+    .map_err(|e| format!("Task execution failed: {}", e))?
+}
+
+#[tauri::command]
+async fn generate_vocabulary_recommendations_ai(
+    level: String,
+    existing_words: Vec<String>,
+    topic: Option<String>,
+    count: Option<u32>,
+    custom_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let target_level = if level.trim().is_empty() { "B1".to_string() } else { level.trim().to_uppercase() };
+    let target_count = count.unwrap_or(3).clamp(1, 10);
+    let target_topic = topic.unwrap_or_else(|| "Software Engineering & Technical Work".to_string());
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
+        println!(
+            "[MyEnglish AI] Đề xuất {} từ vựng cấp độ {} (Chủ đề: '{}')",
+            target_count, target_level, target_topic
+        );
+
+        // Take a sample of existing words to exclude (max 100 to avoid huge prompt length)
+        let sample_exclusions = if existing_words.len() > 80 {
+            existing_words[..80].join(", ")
+        } else {
+            existing_words.join(", ")
+        };
+
+        let prompt = format!(
+            "You are an expert English lexicographer and tech career coach. \
+            Recommend exactly {target_count} high-value English vocabulary words strictly calibrated for a learner at CEFR level {target_level} in the domain of '{target_topic}'. \
+            CRITICAL: DO NOT choose any of the following already known words: [{sample_exclusions}]. \
+            Selection Criteria: \
+            1. Match the exact cognitive difficulty and lexical frequency band of CEFR {target_level}. \
+            2. Authentically used in professional tech environments (code reviews, RFCs, technical docs, team standups, product discussions). \
+            3. Practical and impactful for career advancement. \
+            Output ONLY valid JSON array with NO markdown formatting, matching this exact schema: \
+            [\
+              {{\
+                \"word\": \"<english_word>\",\
+                \"phonetic\": \"/<ipa>/\",\
+                \"part_of_speech\": \"noun|verb|adjective|adverb\",\
+                \"meaning_vn\": \"<nghĩa tiếng Việt ngắn gọn, súc tích trong ngữ cảnh CNTT và đời sống>\",\
+                \"topic\": \"<chuyên mục phụ, ví dụ: System Design, Git & CI/CD, Frontend, DevOps, Daily Tech>\",\
+                \"why_recommended\": \"<Giải thích 1-2 câu tiếng Việt lý do tại sao người học ở level {target_level} cần biết từ này>\",\
+                \"sample_sentence_en\": \"<Câu ví dụ thực tế sử dụng từ này, cấu trúc ngữ pháp chuẩn level {target_level}>\",\
+                \"sample_sentence_vn\": \"<Bản dịch tiếng Việt của câu ví dụ>\",\
+                \"grammar_structure\": \"<Cấu trúc ngữ pháp áp dụng trong câu ví dụ>\"\
+              }}\
+            ]"
+        );
+
+        let mut cmd = create_hidden_command(&bin_path);
+        cmd.arg("--dangerously-skip-permissions");
+        cmd.arg("--disable-slash-commands");
+        cmd.arg("--model").arg("gemini-3.6-flash-medium");
+        cmd.arg("--print-timeout").arg("35s");
+        cmd.arg("-p").arg(&prompt);
+
+        let output = match cmd.output() {
+            Ok(out) if out.status.success() => out,
+            _ => {
+                create_hidden_command(&bin_path)
+                    .arg("--dangerously-skip-permissions")
+                    .arg("-p")
+                    .arg(&prompt)
+                    .output()
+                    .map_err(|e| format!("Failed to execute Gemini CLI at '{}': {}", bin_path, e))?
+            }
+        };
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Gemini CLI exited with error: {}", err_msg));
+        }
+
+        let raw_stdout = String::from_utf8_lossy(&output.stdout);
+        let cleaned = clean_json_string(&raw_stdout);
+
+        let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
+            Ok(v) => v,
+            Err(first_err) => {
+                let trimmed = cleaned.trim();
+                let wrapped = if !trimmed.starts_with('[') && !trimmed.ends_with(']') {
+                    format!("[{}]", trimmed)
+                } else {
+                    trimmed.to_string()
+                };
+                match serde_json::from_str(&wrapped) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return Err(format!("Failed to parse Gemini recommendations output as JSON: {}. Raw: {}", first_err, cleaned));
+                    }
+                }
+            }
+        };
+
+        let final_val = if parsed.is_array() {
+            parsed
+        } else if let Some(arr) = parsed.get("words").or_else(|| parsed.get("recommendations")) {
             arr.clone()
         } else {
             serde_json::Value::Array(vec![parsed])
@@ -1046,6 +1182,7 @@ pub fn run() {
             submit_word,
             enrich_word_with_gemini,
             generate_grammar_exercises_ai,
+            generate_vocabulary_recommendations_ai,
             get_clipboard_text,
             check_cli_status,
             send_desktop_notification,

@@ -54,9 +54,13 @@ function normalizeTerms(items: unknown): TermWithMeaning[] {
 }
 
 /**
- * Calls the Gemini CLI integration to analyze and enrich an English vocabulary word.
+ * Calls the Gemini CLI integration to analyze and enrich an English vocabulary word
+ * with sentence examples and grammatical depth calibrated to user's CEFR level.
  */
-export async function enrichWordWithGemini(word: string): Promise<GeminiEnrichmentResult> {
+export async function enrichWordWithGemini(
+  word: string,
+  level?: string
+): Promise<GeminiEnrichmentResult> {
   const cleanWord = word.trim().toLowerCase();
   if (!cleanWord) {
     throw new Error("Word is empty");
@@ -74,6 +78,7 @@ export async function enrichWordWithGemini(word: string): Promise<GeminiEnrichme
     const rawResult = await Promise.race([
       invoke<Record<string, unknown>>("enrich_word_with_gemini", {
         word: cleanWord,
+        level,
         customPath,
       }),
       timeoutPromise,
@@ -119,7 +124,7 @@ export async function enrichWordWithGemini(word: string): Promise<GeminiEnrichme
 }
 
 /**
- * Generate 3 practical grammar test questions using Gemini CLI
+ * Generate 10 practical grammar test questions using Gemini CLI strictly calibrated to CEFR level
  */
 export async function generateGrammarExercisesWithGemini(
   topic: string,
@@ -164,4 +169,63 @@ export async function generateGrammarExercisesWithGemini(
     throw err;
   }
 }
+
+export interface VocabularyRecommendation {
+  word: string;
+  phonetic?: string;
+  part_of_speech?: string;
+  meaning_vn: string;
+  topic?: string;
+  why_recommended: string;
+  sample_sentence_en: string;
+  sample_sentence_vn?: string;
+  grammar_structure?: string;
+}
+
+/**
+ * Automatically generate high-value vocabulary recommendations tailored to user's CEFR level
+ */
+export async function generateVocabularyRecommendationsAI(
+  level: string,
+  existingWords: string[],
+  topic?: string,
+  count: number = 3
+): Promise<VocabularyRecommendation[]> {
+  try {
+    const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+    const rawResult = await invoke<unknown>("generate_vocabulary_recommendations_ai", {
+      level,
+      existingWords,
+      topic,
+      count,
+      customPath,
+    });
+
+    const items: Array<Record<string, unknown>> = Array.isArray(rawResult)
+      ? (rawResult as Array<Record<string, unknown>>)
+      : rawResult && typeof rawResult === "object" && Array.isArray((rawResult as Record<string, unknown>).words)
+      ? ((rawResult as Record<string, unknown>).words as Array<Record<string, unknown>>)
+      : rawResult && typeof rawResult === "object" && Array.isArray((rawResult as Record<string, unknown>).recommendations)
+      ? ((rawResult as Record<string, unknown>).recommendations as Array<Record<string, unknown>>)
+      : [];
+
+    return items
+      .map((item) => ({
+        word: String(item.word || "").trim(),
+        phonetic: item.phonetic ? String(item.phonetic) : undefined,
+        part_of_speech: item.part_of_speech ? String(item.part_of_speech) : undefined,
+        meaning_vn: String(item.meaning_vn || ""),
+        topic: item.topic ? String(item.topic) : "General Tech",
+        why_recommended: String(item.why_recommended || ""),
+        sample_sentence_en: String(item.sample_sentence_en || ""),
+        sample_sentence_vn: item.sample_sentence_vn ? String(item.sample_sentence_vn) : undefined,
+        grammar_structure: item.grammar_structure ? String(item.grammar_structure) : undefined,
+      }))
+      .filter((w) => w.word.length > 0 && w.meaning_vn.length > 0);
+  } catch (err) {
+    console.error("AI vocabulary recommendation failed:", err);
+    throw err;
+  }
+}
+
 

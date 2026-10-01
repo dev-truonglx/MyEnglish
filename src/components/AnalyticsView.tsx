@@ -28,6 +28,7 @@ import { getAchievements } from "@/services/achievements";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 import Heatmap from "./Heatmap";
+import ProficiencyAssessmentCard from "./ProficiencyAssessmentCard";
 
 interface AnalyticsViewProps {
   words: WordDetail[];
@@ -38,6 +39,7 @@ interface AnalyticsViewProps {
 export default function AnalyticsView({
   words,
   onStartReviewWord,
+  onRefreshWords,
 }: AnalyticsViewProps) {
   const [xpState, setXpState] = useState<XPState>(getXPState);
   const [leechSettings, setLeechSettings] = useState<LeechSettings>(getLeechSettings);
@@ -115,7 +117,7 @@ export default function AnalyticsView({
             <span>Trung Tâm Phân Tích & Tiến Trình</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-            Theo dõi khả năng lưu giữ ký ức theo FSRS, xu hướng phản xạ và thành tựu đã mở khóa.
+            Theo dõi năng lực CEFR, khả năng lưu giữ ký ức theo FSRS, xu hướng phản xạ và chế độ tự động bổ sung.
           </p>
         </div>
 
@@ -136,6 +138,9 @@ export default function AnalyticsView({
           </div>
         </div>
       </div>
+
+      {/* CEFR User Proficiency Assessment & Auto-Replenish Center */}
+      <ProficiencyAssessmentCard words={words} onRefreshWords={onRefreshWords} />
 
       {/* Top 4 Key Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
