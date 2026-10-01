@@ -435,11 +435,53 @@ fn clean_json_string(s: &str) -> String {
         text
     };
 
-    // 2. Find first '{' and last '}' to strip any commentary or conversational text
-    if let (Some(first_brace), Some(last_brace)) = (unquoted.find('{'), unquoted.rfind('}')) {
-        if first_brace <= last_brace {
-            return unquoted[first_brace..=last_brace].to_string();
+    // 2. Identify outer JSON delimiter: either object `{ ... }` or array `[ ... ]`
+    let first_brace = unquoted.find('{');
+    let first_bracket = unquoted.find('[');
+
+    match (first_brace, first_bracket) {
+        (Some(b), Some(k)) => {
+            if k < b {
+                // Array bracket appears first
+                if let Some(last_bracket) = unquoted.rfind(']') {
+                    if last_bracket >= k {
+                        return unquoted[k..=last_bracket].to_string();
+                    }
+                }
+                if let Some(last_brace) = unquoted.rfind('}') {
+                    if last_brace >= b {
+                        return unquoted[b..=last_brace].to_string();
+                    }
+                }
+            } else {
+                // Object brace appears first
+                if let Some(last_brace) = unquoted.rfind('}') {
+                    if last_brace >= b {
+                        return unquoted[b..=last_brace].to_string();
+                    }
+                }
+                if let Some(last_bracket) = unquoted.rfind(']') {
+                    if last_bracket >= k {
+                        return unquoted[k..=last_bracket].to_string();
+                    }
+                }
+            }
         }
+        (Some(b), None) => {
+            if let Some(last_brace) = unquoted.rfind('}') {
+                if last_brace >= b {
+                    return unquoted[b..=last_brace].to_string();
+                }
+            }
+        }
+        (None, Some(k)) => {
+            if let Some(last_bracket) = unquoted.rfind(']') {
+                if last_bracket >= k {
+                    return unquoted[k..=last_bracket].to_string();
+                }
+            }
+        }
+        (None, None) => {}
     }
 
     unquoted.to_string()
@@ -665,17 +707,22 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
               \"topic\": \"Category (e.g. System Design, DevOps, Frontend, Database, Concurrency, Security, General Tech, Everyday Life)\",\
               \"meaning_vn\": \"Concise, clear Vietnamese meaning in tech & daily context\",\
               \"collocations\": [\"phrase 1\", \"phrase 2\", \"phrase 3\"],\
-              \"code_snippet\": \"// 2-4 lines realistic code illustrating '{clean_word}'\",\
+              \"code_snippet\": \"// 2-3 lines realistic code illustrating '{clean_word}'\",\
               \"examples\": [\
                 {{\
-                  \"sentence_en\": \"Software engineering sentence with '{clean_word}'\",\
+                  \"sentence_en\": \"Present Simple or Continuous sentence with '{clean_word}'\",\
                   \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"Cấu trúc & giải thích ngắn gọn\"\
+                  \"grammar_analysis\": \"[Present Simple] S + V(s/es) - Thói quen/Quy tắc\"\
                 }},\
                 {{\
-                  \"sentence_en\": \"Everyday life sentence with '{clean_word}'\",\
+                  \"sentence_en\": \"Past Simple or Continuous sentence with '{clean_word}'\",\
                   \"sentence_vn\": \"Bản dịch tiếng Việt\",\
-                  \"grammar_analysis\": \"Cấu trúc & giải thích ngắn gọn\"\
+                  \"grammar_analysis\": \"[Past Simple] S + V2/ed - Sự kiện đã xảy ra\"\
+                }},\
+                {{\
+                  \"sentence_en\": \"Present Perfect, Conditional, or Passive sentence with '{clean_word}'\",\
+                  \"sentence_vn\": \"Bản dịch tiếng Việt\",\
+                  \"grammar_analysis\": \"[Present Perfect/Passive] Cấu trúc & giải thích\"\
                 }}\
               ],\
               \"synonyms\": [\
@@ -701,7 +748,7 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
         let mut fast_cmd = create_hidden_command(&bin_path);
         fast_cmd.arg("--dangerously-skip-permissions");
         fast_cmd.arg("--disable-slash-commands");
-        fast_cmd.arg("--model").arg("gemini-3.8-flash-low");
+        fast_cmd.arg("--model").arg("gemini-3.6-flash-medium");
         fast_cmd.arg("--print-timeout").arg("35s");
         fast_cmd.arg("-p").arg(&prompt);
 
@@ -743,6 +790,100 @@ async fn enrich_word_with_gemini(word: String, custom_path: Option<String>) -> R
         println!("[MyEnglish AI] Phân tích hoàn tất cho '{}' trong {:.2?}", clean_word, elapsed);
 
         Ok(parsed)
+    })
+    .await
+    .map_err(|e| format!("Task execution failed: {}", e))?
+}
+
+#[tauri::command]
+async fn generate_grammar_exercises_ai(
+    topic: String,
+    level: String,
+    custom_path: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let clean_topic = topic.trim().to_string();
+    if clean_topic.is_empty() {
+        return Err("Topic cannot be empty".to_string());
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
+        println!("[MyEnglish AI] Sinh bài tập ngữ pháp cho: '{}' ({})", clean_topic, level);
+
+        // Ultra-compact token-optimized prompt
+        let prompt = format!(
+            "Generate 10 practical English grammar test questions for level {level}, topic: '{clean_topic}'. Focus on tech/work context. \
+            Output ONLY valid JSON array with NO markdown, matching: \
+            [\
+              {{\
+                \"type\": \"multiple_choice|conjugation|error_spotting\",\
+                \"prompt_en\": \"Sentence to test with blank _____ or bracketed words [word]\",\
+                \"prompt_vn\": \"Vietnamese translation\",\
+                \"hint\": \"Short grammar hint\",\
+                \"options\": [\"optA\", \"optB\", \"optC\", \"optD\"],\
+                \"correct_answer\": \"exact correct answer\",\
+                \"error_word\": \"wrong word if error_spotting\",\
+                \"explanation\": \"Brief explanation in Vietnamese\"\
+              }}\
+            ]"
+        );
+
+        let mut cmd = create_hidden_command(&bin_path);
+        cmd.arg("--dangerously-skip-permissions");
+        cmd.arg("--disable-slash-commands");
+        cmd.arg("--model").arg("gemini-3.6-flash-medium");
+        cmd.arg("--print-timeout").arg("30s");
+        cmd.arg("-p").arg(&prompt);
+
+        let output = match cmd.output() {
+            Ok(out) if out.status.success() => out,
+            _ => {
+                create_hidden_command(&bin_path)
+                    .arg("--dangerously-skip-permissions")
+                    .arg("-p")
+                    .arg(&prompt)
+                    .output()
+                    .map_err(|e| format!("Failed to execute Gemini CLI at '{}': {}", bin_path, e))?
+            }
+        };
+
+        if !output.status.success() {
+            let err_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Gemini CLI exited with error: {}", err_msg));
+        }
+
+        let raw_stdout = String::from_utf8_lossy(&output.stdout);
+        let cleaned = clean_json_string(&raw_stdout);
+
+        // Try direct parse first; if it fails (e.g. Gemini returned comma-separated objects without outer [ ]), fallback to wrapping in [ ]
+        let parsed: serde_json::Value = match serde_json::from_str(&cleaned) {
+            Ok(v) => v,
+            Err(first_err) => {
+                let trimmed = cleaned.trim();
+                let wrapped = if !trimmed.starts_with('[') && !trimmed.ends_with(']') {
+                    format!("[{}]", trimmed)
+                } else {
+                    trimmed.to_string()
+                };
+                match serde_json::from_str(&wrapped) {
+                    Ok(v) => v,
+                    Err(_) => {
+                        return Err(format!("Failed to parse Gemini output as JSON: {}. Raw: {}", first_err, cleaned));
+                    }
+                }
+            }
+        };
+
+        // If the model wrapped the result in an object like { "exercises": [...] } or { "questions": [...] }, unwrap it
+        let final_val = if parsed.is_array() {
+            parsed
+        } else if let Some(arr) = parsed.get("exercises").or_else(|| parsed.get("questions")) {
+            arr.clone()
+        } else {
+            serde_json::Value::Array(vec![parsed])
+        };
+
+        Ok(final_val)
     })
     .await
     .map_err(|e| format!("Task execution failed: {}", e))?
@@ -904,6 +1045,7 @@ pub fn run() {
             show_main_window,
             submit_word,
             enrich_word_with_gemini,
+            generate_grammar_exercises_ai,
             get_clipboard_text,
             check_cli_status,
             send_desktop_notification,
@@ -969,4 +1111,44 @@ pub fn run() {
             _ => {}
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_clean_json_string_array() {
+        let input = r#"
+        ```json
+        [
+          { "type": "multiple_choice", "prompt": "hello" },
+          { "type": "conjugation", "prompt": "world" }
+        ]
+        ```
+        "#;
+        let cleaned = clean_json_string(input);
+        assert!(cleaned.starts_with('['));
+        assert!(cleaned.ends_with(']'));
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned).expect("Should parse as JSON array");
+        assert!(parsed.is_array());
+        assert_eq!(parsed.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_clean_json_string_object_with_nested_array() {
+        let input = r#"
+        Here is the analysis:
+        {
+          "meaning_vn": "lập trình",
+          "examples": ["code", "debug"]
+        }
+        Hope this helps!
+        "#;
+        let cleaned = clean_json_string(input);
+        assert!(cleaned.starts_with('{'));
+        assert!(cleaned.ends_with('}'));
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned).expect("Should parse as JSON object");
+        assert!(parsed.is_object());
+    }
 }

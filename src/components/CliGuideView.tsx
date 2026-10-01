@@ -20,6 +20,7 @@ import {
   VolumeX,
   Hourglass,
   Sparkles,
+  GraduationCap,
 } from "lucide-react";
 import {
   sendTestNotification,
@@ -41,6 +42,7 @@ import {
   type ReminderInterval,
   type SnoozeDuration,
   type BlurOverlayLevel,
+  type GrammarLevel,
 } from "@/services/reminderSettings";
 
 interface CliStatus {
@@ -52,7 +54,7 @@ interface CliStatus {
 
 interface CliGuideViewProps {
   onRefreshWords?: () => void;
-  onNavigateTab?: (tab: "library" | "capture" | "review" | "analytics" | "guide") => void;
+  onNavigateTab?: (tab: "library" | "capture" | "review" | "analytics" | "guide" | "grammar") => void;
 }
 
 export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuideViewProps) {
@@ -1016,6 +1018,79 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
                   Các câu hỏi trong phiên pop-up được tự động phân bổ ngẫu nhiên giữa trắc nghiệm 1-4 và gõ từ vựng.
                 </p>
+              </div>
+
+              {/* Field 5: Grammar Review in Popup & Level Multi-Select */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <GraduationCap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    Ôn tập ngữ pháp trong Pop-up:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateReminder({ includeGrammar: !reminderSettings.includeGrammar })}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      reminderSettings.includeGrammar !== false ? "bg-cyan-600" : "bg-slate-300 dark:bg-zinc-700"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        reminderSettings.includeGrammar !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Tự động xen kẽ câu hỏi ngữ pháp song song với từ vựng trong mỗi phiên Pop-up theo thuật toán Spaced Repetition.
+                </p>
+
+                {reminderSettings.includeGrammar !== false && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-zinc-800/60">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                        Cấp độ ngữ pháp ôn tập (chọn nhiều):
+                      </span>
+                      <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold">
+                        {(reminderSettings.grammarLevels || []).join(", ") || "Chưa chọn"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {(["A1", "A2", "B1", "B2", "C1"] as GrammarLevel[]).map((lvl) => {
+                        const currentLevels = reminderSettings.grammarLevels || ["A1", "A2", "B1"];
+                        const isSelected = currentLevels.includes(lvl);
+                        return (
+                          <button
+                            key={lvl}
+                            type="button"
+                            onClick={() => {
+                              let next: GrammarLevel[];
+                              if (isSelected) {
+                                next = currentLevels.filter((l) => l !== lvl);
+                                if (next.length === 0) next = [lvl];
+                              } else {
+                                next = [...currentLevels, lvl];
+                              }
+                              handleUpdateReminder({ grammarLevels: next });
+                            }}
+                            className={`py-2 px-1 rounded-xl text-xs font-bold transition-all text-center border ${
+                              isSelected
+                                ? "bg-cyan-600 border-cyan-500 text-white shadow-sm shadow-cyan-600/30"
+                                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 hover:border-cyan-400"
+                            }`}
+                          >
+                            {lvl}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic">
+                      Chỉ các câu hỏi thuộc cấp độ được chọn ở trên sẽ được đưa vào hàng đợi Pop-up.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Field 6: Fullscreen Overlay Blur Level & Audio Policy */}

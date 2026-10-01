@@ -7,6 +7,7 @@ export type SnoozeDuration = 5 | 10 | 15 | 30; // in minutes
 export type BlurOverlayLevel = "light" | "medium" | "heavy";
 
 export type WordsPerSession = 3 | 5 | 10;
+export type GrammarLevel = "A1" | "A2" | "B1" | "B2" | "C1";
 
 export interface ReminderSettings {
   enabled: boolean;
@@ -18,6 +19,8 @@ export interface ReminderSettings {
   blurOverlay: BlurOverlayLevel;
   autoPlayAudio: boolean; // strictly false by user requirement
   snoozedUntil: number | null; // timestamp ms
+  includeGrammar: boolean; // whether to review grammar in popup alongside vocabulary
+  grammarLevels: GrammarLevel[]; // selected grammar levels (multi-select)
 }
 
 const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
@@ -28,10 +31,12 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   snoozeMinutes: 10,   // Default 10 minutes snooze
   triggerCondition: "due_only", // Default only when words are due
   quizMode: "multiple_choice",  // Legacy fallback
-  wordsPerSession: 3,  // Default 3 words per popup
+  wordsPerSession: 3,  // Default 3 items per popup
   blurOverlay: "medium", // Backdrop blur
   autoPlayAudio: false, // DO NOT play audio when displayed
   snoozedUntil: null,
+  includeGrammar: true,
+  grammarLevels: ["A1", "A2", "B1"],
 };
 
 /**
@@ -46,10 +51,18 @@ export function getReminderSettings(): ReminderSettings {
       typeof parsed.wordsPerSession === "number" && [3, 5, 10].includes(parsed.wordsPerSession)
         ? parsed.wordsPerSession
         : 3;
+    const grammarLevels: GrammarLevel[] =
+      Array.isArray(parsed.grammarLevels) && parsed.grammarLevels.length > 0
+        ? parsed.grammarLevels
+        : ["A1", "A2", "B1"];
+    const includeGrammar = parsed.includeGrammar !== undefined ? Boolean(parsed.includeGrammar) : true;
+
     return {
       ...DEFAULT_REMINDER_SETTINGS,
       ...parsed,
       wordsPerSession,
+      includeGrammar,
+      grammarLevels,
       autoPlayAudio: false, // enforce no sound on display
     };
   } catch {

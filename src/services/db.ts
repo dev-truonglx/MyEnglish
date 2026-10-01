@@ -83,6 +83,41 @@ export async function initSchema(db: Database): Promise<void> {
     );
   `);
 
+  // 4. Grammar Progress & SRS table
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_progress (
+      lesson_id TEXT PRIMARY KEY,
+      diagnostic_status TEXT DEFAULT 'unattempted',
+      score INTEGER DEFAULT 0,
+      mastery INTEGER DEFAULT 0,
+      reps INTEGER DEFAULT 0,
+      lapses INTEGER DEFAULT 0,
+      last_attempt_date TIMESTAMP,
+      next_review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      streak INTEGER DEFAULT 0
+    );
+  `);
+
+  // 5. Grammar Custom / AI Generated Exercises table (for permanent persistence)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_custom_exercises (
+      id TEXT PRIMARY KEY,
+      lesson_id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      prompt_en TEXT NOT NULL,
+      prompt_vn TEXT,
+      hint TEXT,
+      options TEXT,
+      correct_answer TEXT NOT NULL,
+      error_word TEXT,
+      explanation TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+  try {
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_custom_ex_lesson ON grammar_custom_exercises(lesson_id);`);
+  } catch {}
+
   // Safe migrations for existing databases
   try {
     await db.execute(`ALTER TABLE words ADD COLUMN phonetic TEXT;`);

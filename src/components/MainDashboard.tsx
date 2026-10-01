@@ -34,6 +34,7 @@ import {
   Loader2,
   CheckCircle2,
   Download,
+  GraduationCap,
 } from "lucide-react";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
@@ -58,6 +59,8 @@ import LevelUpModal from "./LevelUpModal";
 import WordTableView from "./WordTableView";
 import CliGuideView from "./CliGuideView";
 import FocusReviewModal from "./FocusReviewModal";
+import GrammarHub from "./grammar/GrammarHub";
+import { getDueGrammarLessons } from "@/services/grammarService";
 
 interface MainDashboardProps {
   onOpenQuickInputPreview?: () => void;
@@ -76,7 +79,8 @@ export default function MainDashboard({
   const [filterMode, setFilterMode] = useState<"all" | "due" | "mastered" | "leech">("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<"gallery" | "table">("gallery");
-  const [activeTab, setActiveTab] = useState<"library" | "capture" | "review" | "analytics" | "guide">("library");
+  const [activeTab, setActiveTab] = useState<"library" | "capture" | "review" | "analytics" | "guide" | "grammar">("library");
+  const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
   const [selectedWord, setSelectedWord] = useState<WordDetail | null>(null);
   const [inputWord, setInputWord] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -130,6 +134,15 @@ export default function MainDashboard({
       window.removeEventListener("myenglish-activity-updated", onActivity);
       window.removeEventListener("myenglish-xp-updated", onXPUpdate);
     };
+  }, []);
+
+  useEffect(() => {
+    const updateDue = () => {
+      setGrammarDueCount(getDueGrammarLessons().length);
+    };
+    updateDue();
+    window.addEventListener("myenglish-grammar-updated", updateDue);
+    return () => window.removeEventListener("myenglish-grammar-updated", updateDue);
   }, []);
 
   useEffect(() => {
@@ -788,6 +801,28 @@ export default function MainDashboard({
             </button>
 
             <button
+              onClick={() => setActiveTab("grammar")}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "grammar"
+                ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <GraduationCap className="w-4 h-4 text-cyan-500" />
+                <span>Grammar (A1-C1)</span>
+              </div>
+              {grammarDueCount > 0 ? (
+                <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 font-semibold animate-pulse">
+                  {grammarDueCount}
+                </span>
+              ) : (
+                <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
+                  CEFR
+                </span>
+              )}
+            </button>
+
+            <button
               onClick={() => setActiveTab("analytics")}
               className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "analytics"
                 ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
@@ -809,7 +844,7 @@ export default function MainDashboard({
             >
               <div className="flex items-center gap-2.5">
                 <Terminal className="w-4 h-4 text-cyan-500" />
-                <span>CLI & Thông báo</span>
+                <span>Settings</span>
               </div>
               <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300">
                 Setup
@@ -2233,6 +2268,9 @@ export default function MainDashboard({
             }}
           />
         )}
+
+        {/* TAB 6: GRAMMAR HUB (A1 - C1 ROADMAP & DIAGNOSTIC PRACTICE) */}
+        {activeTab === "grammar" && <GrammarHub />}
       </main>
 
       {/* RIGHT SLIDE-OVER WORD DETAIL INSPECTOR */}
@@ -2762,9 +2800,21 @@ export default function MainDashboard({
 
                       {/* Grammar & Syntax analysis */}
                       <div className="space-y-1.5 pt-1 border-t border-slate-200 dark:border-zinc-900">
-                        <span className="text-[11px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-bold block">
-                          Phân tích cú pháp (Grammar / Syntax):
-                        </span>
+                        <div className="flex items-center justify-between">
+                          <span className="text-[11px] font-mono uppercase tracking-wider text-amber-700 dark:text-amber-400 font-bold block">
+                            Phân tích cú pháp (Grammar / Syntax):
+                          </span>
+                          <button
+                            onClick={() => {
+                              setSelectedWord(null);
+                              setActiveTab("grammar");
+                            }}
+                            className="text-[10px] text-cyan-600 dark:text-cyan-400 hover:underline flex items-center gap-1 font-sans font-medium"
+                          >
+                            <GraduationCap className="w-3 h-3" />
+                            <span>Mở trung tâm ngữ pháp</span>
+                          </button>
+                        </div>
                         <div className="p-3 rounded-xl bg-white dark:bg-zinc-900/90 border border-slate-200 dark:border-zinc-800 text-xs font-mono text-slate-800 dark:text-zinc-300 leading-relaxed whitespace-pre-wrap shadow-inner">
                           {ex.grammar_analysis}
                         </div>

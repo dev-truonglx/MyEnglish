@@ -117,3 +117,51 @@ export async function enrichWordWithGemini(word: string): Promise<GeminiEnrichme
     throw error;
   }
 }
+
+/**
+ * Generate 3 practical grammar test questions using Gemini CLI
+ */
+export async function generateGrammarExercisesWithGemini(
+  topic: string,
+  level: string
+): Promise<import("@/types/grammar").GrammarExercise[]> {
+  try {
+    const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+    const rawResult = await invoke<unknown>("generate_grammar_exercises_ai", {
+      topic,
+      level,
+      customPath,
+    });
+
+    const items: Array<Record<string, unknown>> = Array.isArray(rawResult)
+      ? (rawResult as Array<Record<string, unknown>>)
+      : rawResult && typeof rawResult === "object" && Array.isArray((rawResult as Record<string, unknown>).exercises)
+      ? ((rawResult as Record<string, unknown>).exercises as Array<Record<string, unknown>>)
+      : rawResult && typeof rawResult === "object" && Array.isArray((rawResult as Record<string, unknown>).questions)
+      ? ((rawResult as Record<string, unknown>).questions as Array<Record<string, unknown>>)
+      : [];
+
+    if (items.length === 0) return [];
+
+    return items.map((item, idx) => {
+      const type = (item.type as import("@/types/grammar").GrammarExercise["type"]) || "multiple_choice";
+      const options = Array.isArray(item.options) ? item.options.map((o) => String(o)) : undefined;
+
+      return {
+        id: `ai-gen-${Date.now()}-${idx}`,
+        type,
+        promptEn: String(item.prompt_en || item.prompt || ""),
+        promptVn: item.prompt_vn ? String(item.prompt_vn) : undefined,
+        hint: item.hint ? String(item.hint) : undefined,
+        options,
+        correctAnswer: String(item.correct_answer || item.correct || ""),
+        errorWord: item.error_word ? String(item.error_word) : undefined,
+        explanation: String(item.explanation || "Bài tập được sinh tự động bởi Gemini AI"),
+      };
+    });
+  } catch (err) {
+    console.error("AI grammar exercise generation failed:", err);
+    throw err;
+  }
+}
+

@@ -10,6 +10,8 @@ import {
   ArrowRight,
   Sparkles,
   HelpCircle,
+  GraduationCap,
+  BookOpen,
 } from "lucide-react";
 import { getAllWords } from "@/services/db";
 import { getDueWords, recordReview, Rating } from "@/services/srs";
@@ -21,7 +23,13 @@ import {
   recordPopupDisplayed,
   type ReminderSettings,
 } from "@/services/reminderSettings";
+import {
+  getGrammarExercisesForReview,
+  recordGrammarExerciseAttempt,
+  recordPracticeResult,
+} from "@/services/grammarService";
 import type { WordDetail } from "@/types/database";
+import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
 
 interface FocusReviewModalProps {
   onClose?: () => void;
@@ -33,6 +41,10 @@ interface ChoiceOption {
   word: string;
   isCorrect: boolean;
 }
+
+export type FocusReviewItem =
+  | { kind: "word"; word: WordDetail }
+  | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson };
 
 /**
  * Trích xuất định nghĩa tiếng Việt ngắn gọn, súc tích và loại bỏ hoàn toàn việc lộ từ tiếng Anh
@@ -157,16 +169,52 @@ function getPosLabel(pos?: string | null): string | null {
   return pos;
 }
 
+/**
+ * Kiểm tra đối soát đáp án bài tập ngữ pháp (chuẩn hóa khoảng trắng & dấu câu)
+ */
+function checkGrammarOptionCorrect(option: string, ex: GrammarExercise): boolean {
+  const clean = (s: string) => s.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "");
+  const user = clean(option);
+  const targets: string[] = [];
+  if (Array.isArray(ex.correctAnswer)) {
+    targets.push(...ex.correctAnswer);
+  } else if (ex.correctAnswer) {
+    targets.push(ex.correctAnswer);
+  }
+  if (ex.errorWord) {
+    targets.push(ex.errorWord);
+  }
+  return targets.map(clean).some((t) => t === user);
+}
+
+/**
+ * Tạo câu tiếng Anh hoàn chỉnh khi điền đáp án bài tập ngữ pháp
+ */
+function getGrammarFullCompletedSentence(ex: GrammarExercise): string {
+  const ans = Array.isArray(ex.correctAnswer)
+    ? ex.correctAnswer[0]
+    : ex.correctAnswer || ex.errorWord || "";
+  if (!ans) return ex.promptEn;
+
+  if (ex.promptEn.includes("_____")) {
+    return ex.promptEn.replace(/_____(\s*\([a-z\s]+\))?/gi, ans);
+  }
+  if (/\[[^\]]+\]/.test(ex.promptEn)) {
+    return ex.promptEn.replace(/\[[^\]]+\]/g, ans);
+  }
+  return `${ex.promptEn} (${ans})`;
+}
+
 export default function FocusReviewModal({ onClose, isPreview = false }: FocusReviewModalProps) {
   const [settings, setSettings] = useState<ReminderSettings>(getReminderSettings());
-  const [queue, setQueue] = useState<WordDetail[]>([]);
+  const [queue, setQueue] = useState<FocusReviewItem[]>([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [loading, setLoading] = useState(true);
 
-  // Active question mode: multiple_choice (50%) or typing (50%)
+  // Active question mode: multiple_choice (phím 1-4) or typing (nhập đáp án)
   const [activeMode, setActiveMode] = useState<"multiple_choice" | "typing">("multiple_choice");
 
-  // Multiple choice state (4 English words)
+  // Multiple choice state
   const [choices, setChoices] = useState<ChoiceOption[]>([]);
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState(false);
@@ -182,7 +230,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   // Auto-advance timer ref for proper cleanup
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const currentWord = queue[currentIndex];
+  const currentItem = queue[currentIndex];
+  const currentWord = currentItem?.kind === "word" ? currentItem.word : null;
+  const currentGrammar = currentItem?.kind === "grammar" ? currentItem : null;
 
   const handleClose = useCallback(async () => {
     if (advanceTimerRef.current) {
@@ -207,13 +257,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }, 600);
   }, [handleClose]);
 
-  // Pick random question mode per card (multiple choice or typing)
-  const pickRandomMode = useCallback((): "multiple_choice" | "typing" => {
-    return Math.random() < 0.5 ? "multiple_choice" : "typing";
-  }, []);
-
-  // Advance to next word in queue or conclude session
-  const advanceNextWord = useCallback(() => {
+  // Advance to next item in queue or conclude session
+  const advanceNextItem = useCallback(() => {
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -221,7 +266,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (currentIndex + 1 < queue.length) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      // Completed all words in session
+      // Completed all items in session
       setFeedbackMsg("Hoàn thành phiên ôn tập! Cửa sổ sẽ đóng lại...");
       setTimeout(async () => {
         await handleClose();
@@ -229,8 +274,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [currentIndex, queue.length, handleClose]);
 
-  // Load words for review queue based on settings
-  const loadWords = async (forceSpinner = true) => {
+  // Load review queue: song song từ vựng và ngữ pháp theo thuật toán Spaced Repetition & Interleaving
+  const loadReviewQueue = async (forceSpinner = true) => {
     if (forceSpinner) setLoading(true);
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
@@ -240,62 +285,102 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       const currentSettings = getReminderSettings();
       setSettings(currentSettings);
 
-      const [dueWords, allWords] = await Promise.all([
+      const targetCount = Math.max(3, currentSettings.wordsPerSession || 3);
+      const includeGrammar = currentSettings.includeGrammar ?? true;
+      const grammarLevels = currentSettings.grammarLevels || ["A1", "A2", "B1"];
+
+      // 1. Phân bổ chỉ tiêu số lượng (Interleaving Quota)
+      // Ví dụ: phiên 3 câu -> 2 từ + 1 ngữ pháp
+      //        phiên 5 câu -> 3 từ + 2 ngữ pháp
+      //        phiên 10 câu -> 6 từ + 4 ngữ pháp
+      let grammarTarget = 0;
+      let wordTarget = targetCount;
+
+      if (includeGrammar) {
+        grammarTarget = Math.max(1, Math.round(targetCount * 0.4));
+        wordTarget = Math.max(1, targetCount - grammarTarget);
+      }
+
+      // 2. Nạp dữ liệu đồng thời từ database & grammar service
+      const [dueWords, allWords, grammarCandidates] = await Promise.all([
         getDueWords().catch(() => [] as WordDetail[]),
         getAllWords().catch(() => [] as WordDetail[]),
+        includeGrammar
+          ? getGrammarExercisesForReview(grammarLevels, grammarTarget + 4).catch(() => [])
+          : Promise.resolve([]),
       ]);
 
-      let candidates: WordDetail[] = [];
-
+      // 3. Tuyển chọn từ vựng ưu tiên SRS (due words)
+      let wordPool: WordDetail[] = [];
       if (currentSettings.triggerCondition === "due_only") {
-        candidates = dueWords;
+        wordPool = dueWords;
       } else {
-        candidates = dueWords.length > 0 ? dueWords : allWords;
+        wordPool = dueWords.length > 0 ? dueWords : allWords;
+      }
+      if (wordPool.length === 0) {
+        wordPool = allWords;
       }
 
-      // If no words are due (e.g. user tested popup or finished queue),
-      // fallback to allWords so the popup always has cards to quiz!
-      if (candidates.length === 0) {
-        candidates = allWords;
-      }
-
-      // Target count: 3, 5, or 10 words (default 3)
-      const targetCount = Math.max(3, currentSettings.wordsPerSession || 3);
-      
-      let selected: WordDetail[] = [];
-      // If we are prioritizing due words, sort by oldest next_review_date first
-      if (candidates === dueWords || (candidates.length > 0 && new Date(candidates[0].srs?.next_review_date) <= new Date())) {
-        const sortedDue = [...candidates].sort(
+      let selectedWords: WordDetail[] = [];
+      if (wordPool === dueWords || (wordPool.length > 0 && new Date(wordPool[0].srs?.next_review_date) <= new Date())) {
+        const sortedDue = [...wordPool].sort(
           (a, b) => new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime()
         );
-        // Take top overdue, then shuffle so they aren't totally predictable
-        selected = sortedDue.slice(0, targetCount).sort(() => 0.5 - Math.random());
+        selectedWords = sortedDue.slice(0, wordTarget).sort(() => 0.5 - Math.random());
       } else {
-        // Fallback or random words (allWords)
-        const shuffled = [...candidates].sort(() => 0.5 - Math.random());
-        selected = shuffled.slice(0, targetCount);
+        const shuffled = [...wordPool].sort(() => 0.5 - Math.random());
+        selectedWords = shuffled.slice(0, wordTarget);
       }
 
-      // If candidates had fewer than targetCount words, supplement from allWords to meet targetCount
-      if (selected.length < targetCount && allWords.length > selected.length) {
-        const selectedIds = new Set(selected.map((w) => w.id));
-        const extraCandidates = allWords
-          .filter((w) => !selectedIds.has(w.id))
-          .sort(() => 0.5 - Math.random());
-        const needed = targetCount - selected.length;
-        selected = [...selected, ...extraCandidates.slice(0, needed)];
+      // Bổ sung thêm từ nếu chưa đủ wordTarget
+      if (selectedWords.length < wordTarget && allWords.length > selectedWords.length) {
+        const selectedIds = new Set(selectedWords.map((w) => w.id));
+        const extra = allWords.filter((w) => !selectedIds.has(w.id)).sort(() => 0.5 - Math.random());
+        selectedWords = [...selectedWords, ...extra.slice(0, wordTarget - selectedWords.length)];
       }
 
-      setQueue(selected);
+      // 4. Tuyển chọn bài tập ngữ pháp
+      const selectedGrammar = grammarCandidates.slice(0, grammarTarget);
+
+      // Dự phòng: Nếu kho từ vựng trống (0 từ), bù bằng bài tập ngữ pháp để người dùng vẫn học được
+      if (selectedWords.length === 0 && selectedGrammar.length < targetCount) {
+        const moreGrammar = await getGrammarExercisesForReview(grammarLevels, targetCount).catch(() => []);
+        selectedGrammar.push(...moreGrammar.slice(selectedGrammar.length, targetCount));
+      }
+
+      // 5. Xen kẽ (Interleaving) Từ vựng và Ngữ pháp để tối ưu hóa khả năng ghi nhớ dài hạn
+      const wordQueue: FocusReviewItem[] = selectedWords.map((w) => ({ kind: "word", word: w }));
+      const grammarQueue: FocusReviewItem[] = selectedGrammar.map((g) => ({
+        kind: "grammar",
+        exercise: g.exercise,
+        lesson: g.lesson,
+      }));
+
+      const finalQueue: FocusReviewItem[] = [];
+      let wIdx = 0;
+      let gIdx = 0;
+
+      while (wIdx < wordQueue.length || gIdx < grammarQueue.length) {
+        if (wIdx < wordQueue.length) {
+          finalQueue.push(wordQueue[wIdx++]);
+        }
+        if (wIdx < wordQueue.length && (grammarQueue.length === 0 || wordQueue.length > grammarQueue.length * 1.5)) {
+          finalQueue.push(wordQueue[wIdx++]);
+        }
+        if (gIdx < grammarQueue.length) {
+          finalQueue.push(grammarQueue[gIdx++]);
+        }
+      }
+
+      setQueue(finalQueue);
       setCurrentIndex(0);
-      setActiveMode(pickRandomMode());
       setIsAnswered(false);
       setSelectedChoiceId(null);
       setIsCorrect(false);
       setTypedInput("");
       setFeedbackMsg(null);
     } catch (err) {
-      console.error("Failed to load review words for modal:", err);
+      console.error("Failed to load review queue for modal:", err);
     } finally {
       setLoading(false);
     }
@@ -303,16 +388,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   useEffect(() => {
     recordPopupDisplayed(Date.now());
-    loadWords(true);
+    loadReviewQueue(true);
 
     let unlistenFn: (() => void) | null = null;
     let isCancelled = false;
 
-    // Listen to native Tauri event when review popup window is opened / focused
+    // Lắng nghe sự kiện mở popup từ Tauri backend
     listen("review-popup-opened", () => {
       if (isCancelled) return;
       recordPopupDisplayed(Date.now());
-      loadWords(false);
+      loadReviewQueue(false);
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -325,7 +410,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     // In-app fallback preview event listener
     const onPreviewOpened = () => {
       recordPopupDisplayed(Date.now());
-      loadWords(false);
+      loadReviewQueue(false);
     };
     window.addEventListener("open-review-popup-preview", onPreviewOpened);
 
@@ -337,75 +422,94 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     };
   }, []);
 
-  // When current word changes: randomize quiz mode, reset answer state, and prepare choices
+  // Khi item thay đổi: thiết lập chế độ câu hỏi, reset trạng thái, nạp lựa chọn trắc nghiệm
   useEffect(() => {
-    if (!currentWord) return;
+    if (!currentItem) return;
 
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
     }
 
-    setActiveMode(pickRandomMode());
     setIsAnswered(false);
     setSelectedChoiceId(null);
     setIsCorrect(false);
     setTypedInput("");
     setFeedbackMsg(null);
 
-    // Prepare English choices for multiple choice mode
-    getAllWords().then((all) => {
-      const otherWords = all.filter(
-        (w) => w.id !== currentWord.id && w.word.trim().toLowerCase() !== currentWord.word.trim().toLowerCase()
-      );
+    if (currentItem.kind === "word") {
+      const wordObj = currentItem.word;
+      const isTyping = Math.random() < 0.5;
+      setActiveMode(isTyping ? "typing" : "multiple_choice");
 
-      // Pick 3 distractors from library
-      const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
-      const distractors: ChoiceOption[] = shuffledOthers.slice(0, 3).map((w) => ({
-        id: w.id,
-        word: w.word,
-        isCorrect: false,
-      }));
+      // Chuẩn bị 4 lựa chọn từ tiếng Anh
+      getAllWords().then((all) => {
+        const otherWords = all.filter(
+          (w) => w.id !== wordObj.id && w.word.trim().toLowerCase() !== wordObj.word.trim().toLowerCase()
+        );
 
-      // Fallback English words if library has fewer than 4 words
-      const genericFallbacks = [
-        "commit",
-        "deploy",
-        "refactor",
-        "optimize",
-        "pipeline",
-        "cache",
-        "thread",
-        "execute",
-      ];
-      let fallbackIdx = 0;
-      while (distractors.length < 3) {
-        const fbWord = genericFallbacks[fallbackIdx % genericFallbacks.length];
-        if (
-          fbWord.toLowerCase() !== currentWord.word.toLowerCase() &&
-          !distractors.some((d) => d.word.toLowerCase() === fbWord.toLowerCase())
-        ) {
-          distractors.push({
-            id: `fallback-${fallbackIdx}`,
-            word: fbWord,
-            isCorrect: false,
-          });
+        const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
+        const distractors: ChoiceOption[] = shuffledOthers.slice(0, 3).map((w) => ({
+          id: w.id,
+          word: w.word,
+          isCorrect: false,
+        }));
+
+        const genericFallbacks = [
+          "commit",
+          "deploy",
+          "refactor",
+          "optimize",
+          "pipeline",
+          "cache",
+          "thread",
+          "execute",
+        ];
+        let fallbackIdx = 0;
+        while (distractors.length < 3) {
+          const fbWord = genericFallbacks[fallbackIdx % genericFallbacks.length];
+          if (
+            fbWord.toLowerCase() !== wordObj.word.toLowerCase() &&
+            !distractors.some((d) => d.word.toLowerCase() === fbWord.toLowerCase())
+          ) {
+            distractors.push({
+              id: `fallback-${fallbackIdx}`,
+              word: fbWord,
+              isCorrect: false,
+            });
+          }
+          fallbackIdx++;
         }
-        fallbackIdx++;
+
+        const correctChoice: ChoiceOption = {
+          id: wordObj.id,
+          word: wordObj.word,
+          isCorrect: true,
+        };
+
+        const allChoices = [correctChoice, ...distractors].sort(() => 0.5 - Math.random());
+        setChoices(allChoices);
+      });
+    } else {
+      // Bài tập ngữ pháp
+      const ex = currentItem.exercise;
+      if (ex.options && ex.options.length > 0) {
+        setActiveMode("multiple_choice");
+        const allChoices: ChoiceOption[] = ex.options.map((opt, idx) => ({
+          id: `grammar-opt-${idx}-${opt}`,
+          word: opt,
+          isCorrect: checkGrammarOptionCorrect(opt, ex),
+        }));
+        setChoices(allChoices);
+      } else {
+        // Dạng câu hỏi không có options (chia động từ / viết câu) -> gõ nhập liệu
+        setActiveMode("typing");
+        setChoices([]);
       }
+    }
+  }, [currentIndex, currentItem]);
 
-      const correctChoice: ChoiceOption = {
-        id: currentWord.id,
-        word: currentWord.word,
-        isCorrect: true,
-      };
-
-      const allChoices = [correctChoice, ...distractors].sort(() => 0.5 - Math.random());
-      setChoices(allChoices);
-    });
-  }, [currentIndex, currentWord, pickRandomMode]);
-
-  // Focus input when active mode is typing
+  // Focus ô input khi ở chế độ gõ
   useEffect(() => {
     if (activeMode === "typing" && !isAnswered) {
       setTimeout(() => {
@@ -414,13 +518,21 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [activeMode, currentIndex, isAnswered]);
 
-  // STRICT REQUIREMENT: DO NOT auto-play audio on display.
-  // Only allow manual pronunciation click.
+  // Phát âm khi người dùng chủ động bấm loa (KHÔNG tự động phát khi mở popup)
   const handleManualSpeak = () => {
-    if (!currentWord?.word) return;
+    if (!currentItem) return;
     try {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(currentWord.word);
+      let textToSpeak = "";
+      if (currentItem.kind === "word") {
+        textToSpeak = currentItem.word.word;
+      } else {
+        textToSpeak = isAnswered
+          ? getGrammarFullCompletedSentence(currentItem.exercise)
+          : currentItem.exercise.promptEn.replace(/\[([^\]]+)\]/g, "$1").replace(/_____/g, "");
+      }
+      if (!textToSpeak.trim()) return;
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
       utterance.lang = "en-US";
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
@@ -429,9 +541,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   };
 
-  // Submit multiple-choice answer
+  // Xử lý nộp đáp án dạng trắc nghiệm (phím 1-4)
   const handleSelectChoice = async (choice: ChoiceOption) => {
-    if (isAnswered) return;
+    if (isAnswered || !currentItem) return;
 
     setSelectedChoiceId(choice.id);
     setIsAnswered(true);
@@ -439,74 +551,130 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     setIsCorrect(correct);
 
     try {
-      if (correct) {
-        await recordReview(currentWord.id, Rating.Good);
-        recordDailyActivity(1);
-        setFeedbackMsg("Chính xác! Đã tích lũy mục tiêu hằng ngày 🎉");
+      if (currentItem.kind === "word") {
+        const wordObj = currentItem.word;
+        if (correct) {
+          await recordReview(wordObj.id, Rating.Good);
+          recordDailyActivity(1);
+          setFeedbackMsg("Chính xác! Đã tích lũy mục tiêu hằng ngày 🎉");
 
-        // Pause for 3.5s so user can comfortably review pronunciation & sentence context
-        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-        advanceTimerRef.current = setTimeout(() => {
-          advanceNextWord();
-        }, 3500);
+          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = setTimeout(() => {
+            advanceNextItem();
+          }, 3500);
+        } else {
+          await recordReview(wordObj.id, Rating.Again);
+          setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${wordObj.word}"`);
+          // Cải tiến: Đẩy câu trả lời sai vào cuối hàng đợi để củng cố ngay
+          setQueue((prev) => [...prev, currentItem]);
+        }
       } else {
-        await recordReview(currentWord.id, Rating.Again);
-        setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${currentWord.word}"`);
-        
-        // Cải tiến: Đẩy từ trả lời sai vào cuối hàng đợi để buộc người dùng phải học lại trong phiên này
-        setQueue((prev) => [...prev, currentWord]);
+        // Xử lý bài tập ngữ pháp
+        const ex = currentItem.exercise;
+        const lesson = currentItem.lesson;
+
+        if (correct) {
+          recordGrammarExerciseAttempt(ex.id, true);
+          await recordPracticeResult(lesson.id, 100);
+          recordDailyActivity(1);
+          setFeedbackMsg("Chính xác! Bạn đã nắm vững cấu trúc ngữ pháp 🎉");
+
+          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = setTimeout(() => {
+            advanceNextItem();
+          }, 3500);
+        } else {
+          recordGrammarExerciseAttempt(ex.id, false);
+          await recordPracticeResult(lesson.id, 40);
+          const rawAns = Array.isArray(ex.correctAnswer)
+            ? ex.correctAnswer.join(" / ")
+            : (ex.correctAnswer || ex.errorWord || "");
+          setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: "${rawAns}"`);
+          // Đẩy bài tập sai vào cuối hàng đợi
+          setQueue((prev) => [...prev, currentItem]);
+        }
       }
     } catch (err) {
       console.warn("Failed to record review from popup:", err);
     }
   };
 
-  // Submit typing answer
+  // Xử lý nộp đáp án dạng gõ (Typing)
   const handleTypingSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (isAnswered || !currentWord) return;
+    if (isAnswered || !currentItem) return;
 
-    const trimmedInput = typedInput.trim().toLowerCase();
-    const target = currentWord.word.trim().toLowerCase();
-    const correct = trimmedInput === target;
+    if (currentItem.kind === "word") {
+      const wordObj = currentItem.word;
+      const trimmedInput = typedInput.trim().toLowerCase();
+      const target = wordObj.word.trim().toLowerCase();
+      const correct = trimmedInput === target;
 
-    setIsAnswered(true);
-    setIsCorrect(correct);
+      setIsAnswered(true);
+      setIsCorrect(correct);
 
-    try {
-      if (correct) {
-        await recordReview(currentWord.id, Rating.Good);
-        recordDailyActivity(1);
-        setFeedbackMsg("Tuyệt vời! Bạn đã gõ chính xác 🚀");
+      try {
+        if (correct) {
+          await recordReview(wordObj.id, Rating.Good);
+          recordDailyActivity(1);
+          setFeedbackMsg("Tuyệt vời! Bạn đã gõ chính xác 🚀");
 
-        // Pause for 3.5s so user can comfortably review pronunciation & sentence context
-        if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-        advanceTimerRef.current = setTimeout(() => {
-          advanceNextWord();
-        }, 3500);
-      } else {
-        await recordReview(currentWord.id, Rating.Again);
-        setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${currentWord.word}"`);
-        
-        // Cải tiến: Đẩy từ trả lời sai vào cuối hàng đợi
-        setQueue((prev) => [...prev, currentWord]);
+          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = setTimeout(() => {
+            advanceNextItem();
+          }, 3500);
+        } else {
+          await recordReview(wordObj.id, Rating.Again);
+          setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${wordObj.word}"`);
+          setQueue((prev) => [...prev, currentItem]);
+        }
+      } catch (err) {
+        console.warn("Failed to record typing review:", err);
       }
-    } catch (err) {
-      console.warn("Failed to record typing review:", err);
+    } else {
+      // Gõ đáp án ngữ pháp (chia động từ / điền từ)
+      const ex = currentItem.exercise;
+      const lesson = currentItem.lesson;
+      const correct = checkGrammarOptionCorrect(typedInput, ex);
+
+      setIsAnswered(true);
+      setIsCorrect(correct);
+
+      try {
+        if (correct) {
+          recordGrammarExerciseAttempt(ex.id, true);
+          await recordPracticeResult(lesson.id, 100);
+          recordDailyActivity(1);
+          setFeedbackMsg("Tuyệt vời! Bạn đã chia dạng đúng cấu trúc ngữ pháp 🚀");
+
+          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
+          advanceTimerRef.current = setTimeout(() => {
+            advanceNextItem();
+          }, 3500);
+        } else {
+          recordGrammarExerciseAttempt(ex.id, false);
+          await recordPracticeResult(lesson.id, 40);
+          const rawAns = Array.isArray(ex.correctAnswer)
+            ? ex.correctAnswer.join(" / ")
+            : (ex.correctAnswer || "");
+          setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${rawAns}"`);
+          setQueue((prev) => [...prev, currentItem]);
+        }
+      } catch (err) {
+        console.warn("Failed to record grammar typing review:", err);
+      }
     }
   };
 
-  // Keyboard navigation: Esc to close, 1-4 for choices, S for snooze, Enter/Space to advance
+  // Keyboard navigation: Esc đóng, 1-4 chọn trắc nghiệm, S hoãn, Enter/Space chuyển câu
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
-      // Escape key to dismiss immediately
       if (e.key === "Escape") {
         e.preventDefault();
         handleClose();
         return;
       }
 
-      // Snooze shortcut: key 's' or 'S' (when not actively typing)
       if (
         (e.key === "s" || e.key === "S") &&
         activeMode !== "typing" &&
@@ -517,7 +685,6 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         return;
       }
 
-      // Keys 1, 2, 3, 4 for multiple choice
       if (["1", "2", "3", "4"].includes(e.key)) {
         const num = parseInt(e.key, 10);
         if (activeMode === "multiple_choice" && !isAnswered && choices.length >= num) {
@@ -526,10 +693,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         }
       }
 
-      // Enter or Space to advance when answered
       if ((e.key === "Enter" || e.key === " ") && isAnswered) {
         e.preventDefault();
-        advanceNextWord();
+        advanceNextItem();
       }
     };
 
@@ -543,10 +709,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     activeMode,
     currentIndex,
     queue.length,
-    advanceNextWord,
+    advanceNextItem,
   ]);
 
-  // Stable solid alpha overlay scrim - avoids WebKit backdrop-filter compositor thrashing and flickering
   const overlayStyle = useMemo(() => {
     switch (settings.blurOverlay) {
       case "heavy":
@@ -559,13 +724,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [settings.blurOverlay]);
 
-  // Concise Vietnamese meaning
+  // Từ vựng: Nghĩa tiếng Việt & ví dụ ẩn từ
   const conciseMeaning = useMemo(() => {
     if (!currentWord) return "";
     return getConciseMeaning(currentWord.meaning_vn, currentWord.word);
   }, [currentWord]);
 
-  // Example sentence with masked blank
   const primaryExample = currentWord?.examples?.[0];
   const maskedSentence = useMemo(() => {
     if (!primaryExample?.sentence_en || !currentWord?.word) return null;
@@ -575,6 +739,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const posLabel = useMemo(() => {
     return getPosLabel(currentWord?.part_of_speech);
   }, [currentWord]);
+
+  // Ngữ pháp: Câu hoàn chỉnh
+  const grammarFullSentence = useMemo(() => {
+    if (!currentGrammar) return "";
+    return getGrammarFullCompletedSentence(currentGrammar.exercise);
+  }, [currentGrammar]);
 
   return (
     <div
@@ -589,19 +759,32 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         {/* Top Header Bar */}
         <div className="px-6 py-3.5 bg-slate-50/80 dark:bg-zinc-950/60 border-b border-slate-200/80 dark:border-zinc-800/80 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="flex items-center justify-center w-7 h-7 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-sm shadow-cyan-500/30">
-              <Zap className="w-4 h-4 fill-white" />
+            <span
+              className={`flex items-center justify-center w-7 h-7 rounded-xl text-white shadow-sm ${
+                currentGrammar
+                  ? "bg-gradient-to-tr from-violet-600 to-indigo-600 shadow-violet-500/30"
+                  : "bg-gradient-to-tr from-cyan-500 to-indigo-500 shadow-cyan-500/30"
+              }`}
+            >
+              {currentGrammar ? (
+                <GraduationCap className="w-4 h-4 fill-white" />
+              ) : (
+                <Zap className="w-4 h-4 fill-white" />
+              )}
             </span>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
-                  Flash-Quiz
+                  {currentGrammar ? "Grammar-Quiz" : "Flash-Quiz"}
                 </span>
-                {queue.length > 0 && currentWord && (
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 font-bold border border-cyan-200 dark:border-cyan-800">
-                    Từ {currentIndex + 1} / {queue.length}
+
+                {queue.length > 0 && currentItem && (
+                  <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-bold border border-slate-200 dark:border-zinc-700">
+                    Câu {currentIndex + 1} / {queue.length}
                   </span>
                 )}
+
+                {/* Tag phân biệt Từ vựng vs Ngữ pháp */}
                 {currentWord && (
                   <span
                     className={`text-[10px] font-medium px-2 py-0.5 rounded-full border ${
@@ -610,7 +793,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         : "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800"
                     }`}
                   >
-                    {new Date(currentWord.srs.next_review_date) <= new Date() ? "Đến hạn ôn" : "Củng cố"}
+                    {new Date(currentWord.srs.next_review_date) <= new Date() ? "Từ vựng · Đến hạn ôn" : "Từ vựng · Củng cố"}
+                  </span>
+                )}
+
+                {currentGrammar && (
+                  <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-violet-100 dark:bg-violet-950/60 text-violet-700 dark:text-violet-400 border border-violet-200 dark:border-violet-800 flex items-center gap-1">
+                    <span>Ngữ pháp · {currentGrammar.lesson.level}</span>
                   </span>
                 )}
               </div>
@@ -646,17 +835,17 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
             <div className="py-12 flex flex-col items-center justify-center space-y-3">
               <div className="w-8 h-8 border-3 border-cyan-500 border-t-transparent rounded-full animate-spin" />
               <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Đang chuẩn bị câu hỏi ôn tập...
+                Đang chuẩn bị câu hỏi ôn tập song song...
               </p>
             </div>
-          ) : !currentWord ? (
+          ) : !currentItem ? (
             <div className="py-10 text-center space-y-3">
               <CheckCircle2 className="w-12 h-12 text-emerald-500 mx-auto" />
               <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Chưa có từ vựng nào trong thư viện!
+                Chưa có câu hỏi ôn tập phù hợp!
               </h3>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Hãy mở thanh Quick Input (Cmd+Shift+E) hoặc vào Dashboard để thêm từ mới nhé.
+              <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-sm mx-auto">
+                Hãy thêm từ vựng mới hoặc kiểm tra cấu hình cấp độ ôn tập ngữ pháp trong phần Cài đặt nhé.
               </p>
               <button
                 onClick={handleClose}
@@ -665,13 +854,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 Đóng lại
               </button>
             </div>
-          ) : (
+          ) : currentItem.kind === "word" ? (
+            /* ========================================================
+               PHẦN 1: BÀI TẬP TỪ VỰNG (VOCABULARY)
+               ======================================================== */
             <>
-              {/* ========================================================
-                  QUESTION PROMPT AREA: Concise Vietnamese & Cloze Clue
-                  ======================================================== */}
               <div className="space-y-3">
-                {/* Header Hint / Tags */}
+                {/* Header Tags */}
                 <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
                   <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-cyan-600 dark:text-cyan-400">
                     <Sparkles className="w-3.5 h-3.5" />
@@ -684,7 +873,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         {posLabel}
                       </span>
                     )}
-                    {currentWord.topic && (
+                    {currentWord?.topic && (
                       <span className="px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-950/50 text-indigo-600 dark:text-indigo-400 font-semibold text-[11px] border border-indigo-200 dark:border-indigo-800/60">
                         {currentWord.topic}
                       </span>
@@ -692,14 +881,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   </div>
                 </div>
 
-                {/* Main Prompt: Crisp, Concise Vietnamese Meaning */}
+                {/* Nghĩa tiếng Việt */}
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 text-center">
                   <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-snug tracking-tight">
-                    {conciseMeaning || currentWord.meaning_vn}
+                    {conciseMeaning || currentWord?.meaning_vn}
                   </h2>
                 </div>
 
-                {/* Cloze Hint Context: Sentence with blank ______ */}
+                {/* Ngữ cảnh trong câu với chỗ trống */}
                 {maskedSentence && (
                   <div className="p-3.5 rounded-2xl bg-cyan-50/40 dark:bg-cyan-950/20 border border-cyan-200/60 dark:border-cyan-800/50 text-xs leading-relaxed space-y-1">
                     <div className="flex items-center gap-1.5 text-[11px] font-semibold text-cyan-700 dark:text-cyan-400">
@@ -718,9 +907,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 )}
               </div>
 
-              {/* ========================================================
-                  MODE 1: MULTIPLE CHOICE (4 Clean English Word Choices)
-                  ======================================================== */}
+              {/* Trắc nghiệm từ vựng */}
               {activeMode === "multiple_choice" && (
                 <div className="space-y-3 pt-1">
                   <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400">
@@ -779,10 +966,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 </div>
               )}
 
-              {/* ========================================================
-                  MODE 2: TYPING / SPELLING (Active Recall)
-                  ======================================================== */}
-              {activeMode === "typing" && (
+              {/* Gõ từ vựng */}
+              {activeMode === "typing" && currentWord && (
                 <form onSubmit={handleTypingSubmit} className="space-y-3.5 pt-1">
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
@@ -820,10 +1005,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 </form>
               )}
 
-              {/* ========================================================
-                  ANSWER REVEAL & LEARNING CARD (When Answered)
-                  ======================================================== */}
-              {isAnswered && (
+              {/* Kết quả & Thẻ ghi nhớ từ vựng */}
+              {isAnswered && currentWord && (
                 <div
                   className={`p-4 rounded-2xl border text-xs leading-relaxed space-y-3 animate-in fade-in duration-200 ${
                     isCorrect
@@ -831,7 +1014,6 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                       : "bg-rose-50/70 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-950 dark:text-rose-100"
                   }`}
                 >
-                  {/* Status Banner */}
                   {feedbackMsg && (
                     <div className="flex items-center gap-1.5 font-bold text-xs">
                       {isCorrect ? (
@@ -843,7 +1025,6 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     </div>
                   )}
 
-                  {/* Word Reveal: English Word, Phonetic, Speaker */}
                   <div className="pt-2 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-3">
                     <div className="flex items-baseline gap-2.5 flex-wrap">
                       <span className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
@@ -865,17 +1046,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     </button>
                   </div>
 
-                  {/* Full Sentence Reveal */}
                   {primaryExample && (
                     <div className="text-[11px] text-slate-600 dark:text-zinc-300 italic pl-2 border-l-2 border-cyan-500/50">
                       "{primaryExample.sentence_en}"
                     </div>
                   )}
 
-                  {/* Continue Button (Especially when incorrect, or to skip waiting) */}
                   <div className="pt-1 flex justify-end">
                     <button
-                      onClick={advanceNextWord}
+                      onClick={advanceNextItem}
                       className="px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-xs"
                     >
                       <span>Tiếp tục</span>
@@ -888,6 +1067,233 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 </div>
               )}
             </>
+          ) : (
+            /* ========================================================
+               PHẦN 2: BÀI TẬP NGỮ PHÁP (GRAMMAR REVIEW)
+               ======================================================== */
+            currentGrammar && (
+              <>
+                <div className="space-y-3">
+                  {/* Header Lesson & Grammar Type */}
+                  <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
+                    <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-violet-600 dark:text-violet-400">
+                      <GraduationCap className="w-3.5 h-3.5" />
+                      <span>
+                        Bài tập ngữ pháp (
+                        {currentGrammar.exercise.type === "conjugation"
+                          ? "Chia động từ"
+                          : currentGrammar.exercise.type === "error_spotting"
+                          ? "Tìm lỗi sai"
+                          : currentGrammar.exercise.type === "sentence_transform"
+                          ? "Viết lại câu"
+                          : "Trắc nghiệm"}
+                        ):
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded-full bg-violet-50 dark:bg-violet-950/50 text-violet-700 dark:text-violet-300 font-semibold text-[11px] border border-violet-200 dark:border-violet-800/60 flex items-center gap-1">
+                        <BookOpen className="w-3 h-3" />
+                        <span>{currentGrammar.lesson.title}</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Câu bài tập tiếng Anh chính */}
+                  <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 text-center">
+                    <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-relaxed tracking-tight">
+                      {currentGrammar.exercise.promptEn}
+                    </h2>
+                  </div>
+
+                  {/* Dịch nghĩa tiếng Việt */}
+                  {currentGrammar.exercise.promptVn && (
+                    <div className="p-3 rounded-2xl bg-violet-50/30 dark:bg-violet-950/20 border border-violet-200/50 dark:border-violet-800/40 text-xs text-center">
+                      <p className="font-medium text-slate-700 dark:text-zinc-300">
+                        {currentGrammar.exercise.promptVn}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Gợi ý */}
+                  {currentGrammar.exercise.hint && (
+                    <div className="flex items-center justify-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
+                      <HelpCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Gợi ý: {currentGrammar.exercise.hint}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Trắc nghiệm ngữ pháp */}
+                {activeMode === "multiple_choice" && (
+                  <div className="space-y-3 pt-1">
+                    <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400">
+                      <span>Chọn đáp án ngữ pháp chính xác:</span>
+                      <span className="text-[11px] font-mono text-slate-400">Nhấn phím 1 - 4</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {choices.map((choice, idx) => {
+                        const isSelected = selectedChoiceId === choice.id;
+                        let btnStyle =
+                          "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200 hover:border-violet-500 hover:bg-violet-50/40 dark:hover:bg-violet-950/20 shadow-xs";
+                        let badgeStyle =
+                          "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300";
+
+                        if (isAnswered) {
+                          if (choice.isCorrect) {
+                            btnStyle =
+                              "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-100 ring-2 ring-emerald-500/30";
+                            badgeStyle = "bg-emerald-500 text-white font-bold";
+                          } else if (isSelected && !choice.isCorrect) {
+                            btnStyle =
+                              "border-rose-500 bg-rose-50 dark:bg-rose-950/50 text-rose-900 dark:text-rose-100";
+                            badgeStyle = "bg-rose-500 text-white font-bold";
+                          } else {
+                            btnStyle =
+                              "border-slate-200 dark:border-zinc-800 opacity-40 bg-white dark:bg-zinc-900";
+                          }
+                        }
+
+                        return (
+                          <button
+                            key={choice.id}
+                            disabled={isAnswered}
+                            onClick={() => handleSelectChoice(choice)}
+                            className={`w-full p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all duration-150 ${btnStyle}`}
+                          >
+                            <span
+                              className={`w-6 h-6 shrink-0 rounded-lg flex items-center justify-center font-mono text-xs font-bold ${badgeStyle}`}
+                            >
+                              {idx + 1}
+                            </span>
+                            <span className="text-sm sm:text-base font-bold flex-1 tracking-tight">
+                              {choice.word}
+                            </span>
+                            {isAnswered && choice.isCorrect && (
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            )}
+                            {isAnswered && isSelected && !choice.isCorrect && (
+                              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Gõ đáp án ngữ pháp (chia động từ / điền vào chỗ trống) */}
+                {activeMode === "typing" && (
+                  <form onSubmit={handleTypingSubmit} className="space-y-3.5 pt-1">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
+                        <span>Nhập đáp án hoặc dạng đúng của từ:</span>
+                        <span className="text-[11px] font-mono text-violet-600 dark:text-violet-400 font-bold">
+                          Ví dụ: chia thì phù hợp với chủ ngữ
+                        </span>
+                      </div>
+
+                      <div className="relative">
+                        <input
+                          ref={inputRef}
+                          type="text"
+                          autoFocus
+                          disabled={isAnswered}
+                          value={typedInput}
+                          onChange={(e) => setTypedInput(e.target.value)}
+                          placeholder="Nhập từ hoặc đáp án chính xác..."
+                          className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-base font-bold text-slate-900 dark:text-white placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-violet-500 transition-all shadow-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {!isAnswered ? (
+                      <button
+                        type="submit"
+                        disabled={!typedInput.trim()}
+                        className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-sm shadow-violet-600/20"
+                      >
+                        Kiểm tra đáp án (Enter)
+                      </button>
+                    ) : null}
+                  </form>
+                )}
+
+                {/* Kết quả & Thẻ củng cố ngữ pháp khi đã trả lời */}
+                {isAnswered && (
+                  <div
+                    className={`p-4 rounded-2xl border text-xs leading-relaxed space-y-3 animate-in fade-in duration-200 ${
+                      isCorrect
+                        ? "bg-emerald-50/70 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-950 dark:text-emerald-100"
+                        : "bg-rose-50/70 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-950 dark:text-rose-100"
+                    }`}
+                  >
+                    {feedbackMsg && (
+                      <div className="flex items-center gap-1.5 font-bold text-xs">
+                        {isCorrect ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                        )}
+                        <span>{feedbackMsg}</span>
+                      </div>
+                    )}
+
+                    {/* Câu hoàn chỉnh sau khi điền đáp án chuẩn */}
+                    <div className="pt-2 border-t border-black/5 dark:border-white/5 flex items-center justify-between gap-3">
+                      <div className="flex-1">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400 block mb-1">
+                          Câu tiếng Anh chuẩn xác:
+                        </span>
+                        <p className="text-sm sm:text-base font-bold text-slate-900 dark:text-white leading-relaxed">
+                          {grammarFullSentence}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={handleManualSpeak}
+                        title="Nghe phát âm cả câu tiếng Anh (Nhấp để nghe)"
+                        className="p-2 rounded-full text-slate-500 hover:text-violet-600 dark:hover:text-violet-400 hover:bg-black/5 dark:hover:bg-white/5 transition-colors shrink-0"
+                      >
+                        <Volume2 className="w-5 h-5" />
+                      </button>
+                    </div>
+
+                    {/* Giải thích ngữ pháp */}
+                    {currentGrammar.exercise.explanation && (
+                      <div className="text-[11px] text-slate-700 dark:text-zinc-300 bg-white/60 dark:bg-zinc-900/60 p-2.5 rounded-xl border border-black/5 dark:border-white/5">
+                        <span className="font-bold text-violet-700 dark:text-violet-400">💡 Giải thích: </span>
+                        <span>{currentGrammar.exercise.explanation}</span>
+                      </div>
+                    )}
+
+                    {/* Công thức ngữ pháp */}
+                    {currentGrammar.lesson.formula?.positive && (
+                      <div className="text-[11px] text-slate-600 dark:text-zinc-400 font-mono">
+                        <span>Cấu trúc: </span>
+                        <span className="font-semibold text-slate-800 dark:text-zinc-200">
+                          {currentGrammar.lesson.formula.positive}
+                        </span>
+                      </div>
+                    )}
+
+                    <div className="pt-1 flex justify-end">
+                      <button
+                        onClick={advanceNextItem}
+                        className="px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-xs"
+                      >
+                        <span>Tiếp tục</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                        <kbd className="px-1 py-0.2 bg-white/20 dark:bg-black/20 rounded text-[9px] font-mono">
+                          Enter
+                        </kbd>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )
           )}
         </div>
 
@@ -899,7 +1305,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 <kbd className="px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
                   1-4
                 </kbd>
-                <span>Chọn từ</span>
+                <span>Chọn đáp án</span>
               </span>
             ) : (
               <span className="flex items-center gap-1">
@@ -928,5 +1334,3 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     </div>
   );
 }
-
-
