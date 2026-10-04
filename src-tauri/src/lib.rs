@@ -107,6 +107,9 @@ fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, Stri
         .arg("--disable-slash-commands")
         .arg("--model")
         .arg("gemini-3.6-flash-medium")
+        // Structured extraction needs little reasoning: low effort is faster and cheaper
+        .arg("--effort")
+        .arg("low")
         .arg("--print-timeout")
         .arg("35s")
         .arg("-p")
@@ -123,6 +126,83 @@ fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, Stri
     fallback.arg("-p").arg(prompt);
     output_with_timeout(fallback, AI_CLI_FALLBACK_TIMEOUT)
         .map_err(|e| format!("Failed to execute AI CLI at '{}': {}", bin_path, e))
+}
+
+// ─── AI prompts ──────────────────────────────────────────────────────────────
+// Kept short to save tokens: a compact schema, strict length limits and one shared CEFR guide,
+// so every English sentence the model writes stays inside the learner's level.
+
+/// Topic list shared with the frontend (src/services/db.ts PREDEFINED_TOPICS).
+const WORD_TOPICS: &str = "System Design|Database & Storage|Concurrency & Async|Networking & APIs|Security & Auth|DevOps & Cloud|Frontend & UI|Backend & Microservices|Data Structures & Algorithms|Architecture & Patterns|Testing & QA|General Tech|Everyday Life";
+
+/// What English a learner at `level` can read: vocabulary range, allowed grammar, sentence length.
+fn cefr_guide(level: &str) -> &'static str {
+    match level {
+        "A1" => "A1: only very common everyday words (top ~1000); present simple/continuous, can, there is/are, imperatives; max 8 words per sentence; no subordinate clauses",
+        "A2" => "A2: common words (Oxford 3000 A1-A2); past simple, going to/will, comparatives, and/but/because/when; max 12 words per sentence",
+        "B1" => "B1: everyday and common work words; present perfect, 1st/2nd conditional, simple passive, relative clauses; max 16 words per sentence",
+        "B2" => "B2: work and technical vocabulary, natural collocations; mixed conditionals, passive with modals, participle clauses, reported speech; max 22 words per sentence",
+        _ => "C1: precise technical and formal vocabulary, idioms; inversion, cleft sentences, nuanced modality; natural professional register",
+    }
+}
+
+fn build_enrich_prompt(word: &str, level: &str) -> String {
+    format!(
+        "Dictionary entry for Vietnamese learners. Term: \"{word}\". Learner level {guide}.\n\
+Rules: every English sentence, collocation and synonym must stay within {level}, even if the term itself is harder. \
+Vietnamese must be natural. Keep fields short.\n\
+Return ONLY minified JSON:\n\
+{{\"cefr\":\"A1|A2|B1|B2|C1|C2 level of the term itself\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"noun|verb|adjective|adverb|phrase\",\
+\"topic\":\"one of {topics}\",\"meaning_vn\":\"max 12 words\",\"collocations\":[\"max 3\"],\
+\"code_snippet\":\"1-2 code lines only for programming terms, else empty\",\
+\"examples\":[{{\"sentence_en\":\"\",\"sentence_vn\":\"\",\"grammar_analysis\":\"[structure] max 15 Vietnamese words\"}}],\
+\"synonyms\":[{{\"word\":\"\",\"phonetic\":\"\",\"meaning_vn\":\"\",\"examples\":[{{\"sentence_en\":\"\",\"meaning_vn\":\"\"}}]}}],\"antonyms\":[]}}\n\
+Exactly 3 examples, each using a different {level} structure and a work or daily-life context. \
+Max 2 synonyms and 2 antonyms, each with 1 example; use [] when none fit {level}.",
+        word = word,
+        level = level,
+        guide = cefr_guide(level),
+        topics = WORD_TOPICS,
+    )
+}
+
+fn build_grammar_prompt(topic: &str, level: &str) -> String {
+    format!(
+        "Write 10 English grammar questions on \"{topic}\" for Vietnamese learners at {guide}.\n\
+Rules: use only {level} vocabulary and structures; workplace or daily-life contexts; \
+mix types multiple_choice (4 options, distractors = typical learner mistakes), conjugation (base verb in [brackets]), \
+error_spotting (exactly one wrong word). Explanation in Vietnamese, max 25 words, say why the answer fits.\n\
+Return ONLY a minified JSON array:\n\
+[{{\"type\":\"multiple_choice|conjugation|error_spotting\",\"prompt_en\":\"sentence with _____ or [verb]\",\"prompt_vn\":\"\",\
+\"hint\":\"max 8 words\",\"options\":[\"multiple_choice only\"],\"correct_answer\":\"\",\"error_word\":\"error_spotting only\",\"explanation\":\"\"}}]",
+        topic = topic,
+        level = level,
+        guide = cefr_guide(level),
+    )
+}
+
+fn build_recommend_prompt(level: &str, topic: &str, count: u32, known_words: &[String]) -> String {
+    let exclusions = known_words.iter().take(80).cloned().collect::<Vec<_>>().join(",");
+    let word_policy = match level {
+        "A1" | "A2" => "high-frequency everyday words that are also used at work (no technical jargon)",
+        "B1" => "common work and IT words that a non-specialist also meets",
+        _ => "professional and technical words used in real engineering work",
+    };
+    format!(
+        "Suggest {count} English words whose CEFR level is exactly {level} (English Vocabulary Profile / Oxford 3000-5000), \
+for a Vietnamese learner working in \"{topic}\". Choose {word_policy}. Learner level {guide}.\n\
+Do not suggest: [{exclusions}].\n\
+Return ONLY a minified JSON array:\n\
+[{{\"word\":\"\",\"cefr\":\"real CEFR level of the word\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"\",\"meaning_vn\":\"max 12 words\",\"topic\":\"one of {topics}\",\
+\"why_recommended\":\"max 20 Vietnamese words\",\"sample_sentence_en\":\"{level} sentence\",\"sample_sentence_vn\":\"\",\"grammar_structure\":\"\"}}]",
+        count = count,
+        level = level,
+        topic = topic,
+        word_policy = word_policy,
+        guide = cefr_guide(level),
+        exclusions = exclusions,
+        topics = WORD_TOPICS,
+    )
 }
 
 /// Vocabulary terms that may be embedded in prompts: letters/digits plus a few
@@ -1133,61 +1213,7 @@ async fn enrich_word_with_gemini(
         println!("[MyEnglish AI] Bắt đầu phân tích từ '{}' (CEFR: {}) bằng binary: '{}'", clean_word, user_level, bin_path);
         let start_time = std::time::Instant::now();
 
-        let level_guideline = match user_level.as_str() {
-            "A1" => "Target audience: CEFR A1 (Starter). Use very simple, clear phrasing, common words, and direct sentence structures. Explain grammar in basic terms.",
-            "A2" => "Target audience: CEFR A2 (Elementary). Use daily workplace/tech routines, past simple/continuous, basic modals, and straightforward examples.",
-            "B1" => "Target audience: CEFR B1 (Intermediate). Use realistic technical discussions (APIs, bug reports, PR reviews), present perfect, conditionals, and standard professional vocabulary.",
-            "B2" => "Target audience: CEFR B2 (Upper-Intermediate). Use authentic software engineering debates (scalability, concurrency, system design), nuanced collocations, mixed conditionals, and passive voice.",
-            "C1" | "C2" => "Target audience: CEFR C1 (Advanced). Use advanced architectural trade-offs, inversion, participle clauses, formal technical register, and sophisticated idiomatic collocations.",
-            _ => "Target audience: CEFR B1 (Intermediate). Use clear tech workplace context.",
-        };
-
-        let prompt = format!(
-            "You are an expert English linguist and software engineering mentor. \
-            Analyze the English tech/workplace vocabulary: '{clean_word}' specifically calibrated for CEFR level {user_level}. {level_guideline} \
-            Return strictly valid JSON with no markdown formatting or backticks, matching this exact schema: \
-            {{\
-              \"phonetic\": \"/IPA/\",\
-              \"part_of_speech\": \"noun|verb|adjective|adverb\",\
-              \"topic\": \"Category (e.g. System Design, DevOps, Frontend, Database, Concurrency, Security, General Tech, Everyday Life)\",\
-              \"meaning_vn\": \"Concise, clear Vietnamese meaning in tech & daily context\",\
-              \"collocations\": [\"phrase 1\", \"phrase 2\", \"phrase 3\"],\
-              \"code_snippet\": \"// 2-3 lines realistic code illustrating '{clean_word}'\",\
-              \"examples\": [\
-                {{\
-                  \"sentence_en\": \"Practical present or habit sentence with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V... - Giải thích ngắn gọn cách dùng phù hợp trình độ {user_level}\"\
-                }},\
-                {{\
-                  \"sentence_en\": \"Past or progressive action sentence with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V2/ed / was doing... - Phân tích ngữ cảnh\"\
-                }},\
-                {{\
-                  \"sentence_en\": \"Compound/complex sentence (Conditional, Passive, or Relative Clause) with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Cấu trúc nâng cao] Phân tích cấu trúc ngữ pháp\"\
-                }}\
-              ],\
-              \"synonyms\": [\
-                {{\
-                  \"word\": \"synonym1\",\
-                  \"phonetic\": \"/IPA/\",\
-                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
-                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
-                }}\
-              ],\
-              \"antonyms\": [\
-                {{\
-                  \"word\": \"antonym1\",\
-                  \"phonetic\": \"/IPA/\",\
-                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
-                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
-                }}\
-              ]\
-            }}"
-        );
+        let prompt = build_enrich_prompt(&clean_word, &user_level);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1238,37 +1264,7 @@ async fn generate_grammar_exercises_ai(
         let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
         println!("[MyEnglish AI] Sinh bài tập ngữ pháp chuyên sâu cho: '{}' ({})", clean_topic, level);
 
-        let cefr_criteria = match level.as_str() {
-            "A1" => "CEFR A1: Simple sentences, basic present/past simple, singular/plural, high-frequency tech terms (code, bug, file, run, error). Avoid complex clauses.",
-            "A2" => "CEFR A2: Daily tech routines, past continuous, basic modals (can, must, should), comparisons (faster, more reliable), time clauses (when, before).",
-            "B1" => "CEFR B1: Present perfect vs past simple, first/second conditionals, passive voice, relative pronouns (which, that, who), tech communication (PRs, releases).",
-            "B2" => "CEFR B2: Mixed conditionals, passive with reporting verbs, modal deductions (must have been), participle clauses, system architecture discussions.",
-            "C1" | "C2" => "CEFR C1: Inversion with negative adverbials, cleft sentences, subjunctive mood, sophisticated architecture trade-offs, precise academic/tech tone.",
-            _ => "CEFR B1: Intermediate practical workplace communication.",
-        };
-
-        let prompt = format!(
-            "You are a master English pedagogue specializing in CEFR assessment and technical English. \
-            Generate 10 authentic, practical English grammar test questions strictly calibrated for level {level} on the topic: '{clean_topic}'. \
-            Level Benchmark: {cefr_criteria} \
-            Requirements: \
-            1. Questions must use realistic tech workplace contexts (code reviews, deployments, debugging, architecture, team collaboration). \
-            2. For 'multiple_choice', distractors must represent typical learner errors, not nonsense. \
-            3. 'explanation' must be in Vietnamese, explaining both the rule and WHY the correct answer fits the context. \
-            Output ONLY valid JSON array with NO markdown, matching: \
-            [\
-              {{\
-                \"type\": \"multiple_choice|conjugation|error_spotting\",\
-                \"prompt_en\": \"Sentence to test with blank _____ or bracketed words [word]\",\
-                \"prompt_vn\": \"Bản dịch tiếng Việt chính xác\",\
-                \"hint\": \"Gợi ý ngữ pháp ngắn gọn\",\
-                \"options\": [\"optA\", \"optB\", \"optC\", \"optD\"],\
-                \"correct_answer\": \"exact correct answer\",\
-                \"error_word\": \"wrong word if error_spotting\",\
-                \"explanation\": \"Giải thích chi tiết quy tắc ngữ pháp bằng tiếng Việt\"\
-              }}\
-            ]"
-        );
+        let prompt = build_grammar_prompt(&clean_topic, &level);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1340,35 +1336,7 @@ async fn generate_vocabulary_recommendations_ai(
         );
 
         // Take a sample of existing words to exclude (max 100 to avoid huge prompt length)
-        let sample_exclusions = if existing_words.len() > 80 {
-            existing_words[..80].join(", ")
-        } else {
-            existing_words.join(", ")
-        };
-
-        let prompt = format!(
-            "You are an expert English lexicographer and tech career coach. \
-            Recommend exactly {target_count} high-value English vocabulary words strictly calibrated for a learner at CEFR level {target_level} in the domain of '{target_topic}'. \
-            CRITICAL: DO NOT choose any of the following already known words: [{sample_exclusions}]. \
-            Selection Criteria: \
-            1. Match the exact cognitive difficulty and lexical frequency band of CEFR {target_level}. \
-            2. Authentically used in professional tech environments (code reviews, RFCs, technical docs, team standups, product discussions). \
-            3. Practical and impactful for career advancement. \
-            Output ONLY valid JSON array with NO markdown formatting, matching this exact schema: \
-            [\
-              {{\
-                \"word\": \"<english_word>\",\
-                \"phonetic\": \"/<ipa>/\",\
-                \"part_of_speech\": \"noun|verb|adjective|adverb\",\
-                \"meaning_vn\": \"<nghĩa tiếng Việt ngắn gọn, súc tích trong ngữ cảnh CNTT và đời sống>\",\
-                \"topic\": \"<chuyên mục phụ, ví dụ: System Design, Git & CI/CD, Frontend, DevOps, Daily Tech>\",\
-                \"why_recommended\": \"<Giải thích 1-2 câu tiếng Việt lý do tại sao người học ở level {target_level} cần biết từ này>\",\
-                \"sample_sentence_en\": \"<Câu ví dụ thực tế sử dụng từ này, cấu trúc ngữ pháp chuẩn level {target_level}>\",\
-                \"sample_sentence_vn\": \"<Bản dịch tiếng Việt của câu ví dụ>\",\
-                \"grammar_structure\": \"<Cấu trúc ngữ pháp áp dụng trong câu ví dụ>\"\
-              }}\
-            ]"
-        );
+        let prompt = build_recommend_prompt(&target_level, &target_topic, target_count, &existing_words);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1630,6 +1598,41 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn prompts_stay_compact() {
+        let known: Vec<String> = (0..120).map(|i| format!("word{}", i)).collect();
+        for level in ["A1", "A2", "B1", "B2", "C1"] {
+            // Rough budget in characters (~4 chars per token) to keep input cost low
+            assert!(build_enrich_prompt("latency", level).len() < 1500, "enrich {}", level);
+            assert!(build_grammar_prompt("Present simple", level).len() < 1100, "grammar {}", level);
+            // Exclusion list is capped at 80 words
+            let rec = build_recommend_prompt(level, "General Tech", 3, &known);
+            assert!(rec.contains("word79,") || rec.contains("word79]"));
+            assert!(!rec.contains("word80"));
+        }
+    }
+
+    #[test]
+    fn a1_prompts_never_ask_for_structures_above_a1() {
+        for prompt in [
+            build_enrich_prompt("deploy", "A1"),
+            build_grammar_prompt("Present simple", "A1"),
+            build_recommend_prompt("A1", "General Tech", 3, &[]),
+        ] {
+            assert!(prompt.contains("max 8 words per sentence"), "{}", prompt);
+            for advanced in ["conditional", "Conditional", "passive", "Passive", "relative clause", "inversion"] {
+                assert!(!prompt.contains(advanced), "A1 prompt mentions {}: {}", advanced, prompt);
+            }
+        }
+        assert!(build_recommend_prompt("A1", "DevOps", 3, &[]).contains("no technical jargon"));
+    }
+
+    #[test]
+    fn prompts_ask_for_the_real_cefr_level() {
+        assert!(build_enrich_prompt("deploy", "B1").contains("\"cefr\""));
+        assert!(build_recommend_prompt("B1", "General Tech", 3, &[]).contains("real CEFR level"));
+    }
 
     #[test]
     fn safe_terms_accept_vocabulary_and_reject_prompt_injection() {

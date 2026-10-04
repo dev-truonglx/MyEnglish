@@ -1,6 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TermWithMeaning } from "@/types/database";
 import type { GrammarExercise } from "@/types/grammar";
+import { normalizeCefr, isWithinLevel, type CefrLevel } from "./cefr";
+import { PREDEFINED_TOPICS } from "./db";
+
+/** Map the model's topic onto the fixed topic list (avoids near-duplicate topics in the library) */
+function normalizeTopic(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  return PREDEFINED_TOPICS.find((t) => t.toLowerCase() === raw) ?? "General Tech";
+}
 
 const VALID_EXERCISE_TYPES: GrammarExercise["type"][] = [
   "multiple_choice",
@@ -16,6 +24,7 @@ export interface EnrichedExample {
 }
 
 export interface GeminiEnrichmentResult {
+  cefr?: CefrLevel | null; // CEFR level of the term itself
   phonetic?: string;
   part_of_speech?: string;
   topic?: string;
@@ -129,12 +138,10 @@ export async function enrichWordWithGemini(
       .map((c) => String(c).trim())
       .filter((c) => c.length > 0);
 
-    const topic =
-      typeof rawResult.topic === "string" && rawResult.topic.trim().length > 0
-        ? rawResult.topic.trim()
-        : "General Tech";
+    const topic = normalizeTopic(rawResult.topic);
 
     return {
+      cefr: normalizeCefr(rawResult.cefr),
       phonetic: typeof rawResult.phonetic === "string" ? rawResult.phonetic : undefined,
       part_of_speech: typeof rawResult.part_of_speech === "string" ? rawResult.part_of_speech : undefined,
       topic,
@@ -223,6 +230,7 @@ export async function generateGrammarExercisesWithGemini(
 
 export interface VocabularyRecommendation {
   word: string;
+  cefr?: CefrLevel | null;
   phonetic?: string;
   part_of_speech?: string;
   meaning_vn: string;
@@ -267,16 +275,18 @@ export async function generateVocabularyRecommendationsAI(
       .filter((item) => item && typeof item === "object" && typeof item.word === "string")
       .map((item) => ({
         word: String(item.word || "").trim(),
+        cefr: normalizeCefr(item.cefr),
         phonetic: item.phonetic ? String(item.phonetic) : undefined,
         part_of_speech: item.part_of_speech ? String(item.part_of_speech) : undefined,
         meaning_vn: String(item.meaning_vn || ""),
-        topic: item.topic ? String(item.topic) : "General Tech",
+        topic: normalizeTopic(item.topic),
         why_recommended: String(item.why_recommended || ""),
         sample_sentence_en: String(item.sample_sentence_en || ""),
         sample_sentence_vn: item.sample_sentence_vn ? String(item.sample_sentence_vn) : undefined,
         grammar_structure: item.grammar_structure ? String(item.grammar_structure) : undefined,
       }))
-      .filter((w) => isSafeVocabularyTerm(w.word) && w.meaning_vn.trim().length > 0);
+      // Words above the learner's level are dropped: an A1 learner only gets A1 (or easier) words
+      .filter((w) => isSafeVocabularyTerm(w.word) && w.meaning_vn.trim().length > 0 && isWithinLevel(w.cefr, level));
   } catch (err) {
     console.error("AI vocabulary recommendation failed:", err);
     throw err;

@@ -162,6 +162,7 @@ class WordProcessingPipeline {
       const wordTopic = enrichment.topic || "General Tech";
       const wordId = await insertEnrichedWord({
         word: pendingItem.word,
+        cefr_level: enrichment.cefr ?? null,
         phonetic: enrichment.phonetic,
         part_of_speech: enrichment.part_of_speech,
         topic: wordTopic,

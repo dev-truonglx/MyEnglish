@@ -24,6 +24,7 @@ export interface Word {
   collocations?: string | null; // JSON array string of string[]
   code_snippet?: string | null;
   topic?: string | null;
+  cefr_level?: string | null; // CEFR level of the term (A1..C2), null for words added before tagging
   created_at: string;
 }
 
@@ -92,6 +93,7 @@ export interface CreateWordInput {
   collocations?: string[];
   code_snippet?: string | null;
   topic?: string | null;
+  cefr_level?: string | null;
   examples: Array<{
     sentence_en: string;
     sentence_vn?: string;
