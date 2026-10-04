@@ -17,7 +17,17 @@ interface GradingBarProps {
   onlyAgain: boolean;
   /** Easy is offered only for production (recall) cards; recognition is capped at Good */
   allowEasy: boolean;
+  /** Grade of a correct typed answer waiting for the user to continue */
+  pendingRating: Rating | null;
+  onContinue: () => void;
 }
+
+const RATING_LABEL: Record<number, string> = {
+  [Rating.Again]: "Quên",
+  [Rating.Hard]: "Khó",
+  [Rating.Good]: "Tốt",
+  [Rating.Easy]: "Dễ",
+};
 
 /** BOTTOM ACTION BAR - Always present with fixed height (h-14) so card NEVER jumps */
 export default function GradingBar({
@@ -33,10 +43,25 @@ export default function GradingBar({
   userInput,
   onlyAgain,
   allowEasy,
+  pendingRating,
+  onContinue,
 }: GradingBarProps) {
   return (
     <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
-      {["multiple_choice", "sentence_builder", "context_match", "listening", "reverse_cloze"].includes(
+      {pendingRating !== null ? (
+        <button
+          onClick={onContinue}
+          disabled={isAdvancing}
+          autoFocus
+          className="w-full h-full rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md"
+        >
+          <span>Tiếp tục</span>
+          <span className="text-[10px] font-mono opacity-70">
+            (chấm: {RATING_LABEL[pendingRating]} · {intervalPreviews[pendingRating as keyof IntervalPreviews]})
+          </span>
+          <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
+        </button>
+      ) : ["multiple_choice", "sentence_builder", "context_match", "listening", "reverse_cloze"].includes(
         effectiveExerciseType
       ) ? (
         <div className="w-full flex items-center justify-between px-3">

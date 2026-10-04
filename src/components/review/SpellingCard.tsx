@@ -90,6 +90,7 @@ export default function SpellingCard({
                     if (feedbackMessage?.type === "error") setFeedbackMessage(null);
                   }}
                   disabled={isAdvancing}
+                  readOnly={isCorrect === true}
                   placeholder="Gõ chính tả từ tiếng Anh và nhấn Enter ↵..."
                   className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-2xl px-6 py-3.5 text-lg md:text-xl font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-widest font-bold shadow-sm transition-all ${
                     isCorrect

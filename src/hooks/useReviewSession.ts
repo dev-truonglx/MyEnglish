@@ -89,7 +89,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
   // Set as soon as a card is being graded or a correct typed answer is waiting to be graded
   const gradingLockRef = useRef(false);
   const answerLockedRef = useRef(false);
-  const autoGradeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Grade of a correct typed answer, applied when the user continues (Enter / "Tiếp tục")
+  const [pendingRating, setPendingRating] = useState<Rating | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
@@ -186,23 +187,12 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     setFallbackMode(null);
     gradingLockRef.current = false;
     answerLockedRef.current = false;
-    if (autoGradeTimerRef.current) {
-      clearTimeout(autoGradeTimerRef.current);
-      autoGradeTimerRef.current = null;
-    }
+    setPendingRating(null);
     cardStartTime.current = Date.now(); // Reset response timer
     setTimeout(() => {
       inputRef.current?.focus();
     }, 100);
   };
-
-  // A pending auto-grade must never fire after the session unmounts
-  useEffect(
-    () => () => {
-      if (autoGradeTimerRef.current) clearTimeout(autoGradeTimerRef.current);
-    },
-    []
-  );
 
   useEffect(() => {
     resetCardState();
@@ -381,7 +371,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       answerLockedRef.current = true;
       setIsCorrect(true);
       setFeedbackMessage({
-        text: "Chính xác tuyệt đối! 🎉 Đang chuyển từ tiếp theo...",
+        text: "Chính xác tuyệt đối! 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.",
         type: "success",
       });
       handleSpeak(currentWord.word);
@@ -397,16 +387,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       });
       if (match === "near") {
         setFeedbackMessage({
-          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó).`,
+          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó). Nhấn Enter hoặc Tiếp tục.`,
           type: "info",
         });
       }
 
-      // Smooth auto-transition to next word
-      autoGradeTimerRef.current = setTimeout(() => {
-        autoGradeTimerRef.current = null;
-        handleGrade(rating);
-      }, match === "near" ? 1800 : 700);
+      // No auto-advance: the learner reads the answer and continues when ready
+      setPendingRating(rating);
     } else {
       // ---------------- INCORRECT ----------------
       const newAttempts = wrongAttempts + 1;
@@ -439,6 +426,12 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
         inputRef.current?.select();
       }, 50);
     }
+  };
+
+  /** Apply the grade of a correct typed answer and go to the next card */
+  const confirmCorrectAnswer = () => {
+    if (pendingRating === null) return;
+    handleGrade(pendingRating);
   };
 
   // User explicitly skips this word
@@ -483,6 +476,15 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       const isTyping =
         e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
 
+      // Correct answer waiting: Enter (from the input or anywhere) moves to the next card
+      if (pendingRating !== null) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmCorrectAnswer();
+        }
+        return;
+      }
+
       // In Cloze or Spelling mode, if typing into input, Enter submits answer
       if (isTyping) {
         if (e.key === "Enter" && !hasCheckedAnswer) {
@@ -521,10 +523,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     isAdvancing,
     wrongAttempts,
     showHint,
+    pendingRating,
   ]);
 
   return {
     revealedWithoutRecall,
+    pendingRating,
+    confirmCorrectAnswer,
     mode,
     handleModeChange,
     setFallbackMode,
