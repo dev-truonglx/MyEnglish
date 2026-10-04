@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import QuickInput from "@/components/QuickInput";
-import MainDashboard from "@/components/MainDashboard";
-import FocusReviewModal from "@/components/FocusReviewModal";
+// Each window (main, quick-input, review-popup) loads only the code it renders
+const QuickInput = lazy(() => import("@/components/QuickInput"));
+const MainDashboard = lazy(() => import("@/components/MainDashboard"));
+const FocusReviewModal = lazy(() => import("@/components/FocusReviewModal"));
 import { useUpdateStore } from "@/services/updateService";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -73,6 +74,7 @@ export default function App() {
   if (windowLabel === "quick-input") {
     return (
       <div className="w-screen h-screen overflow-hidden flex items-center justify-center bg-transparent">
+        <Suspense fallback={null}>
         <QuickInput
           onSubmitted={() => {
             if (!("__TAURI_INTERNALS__" in window)) {
@@ -90,6 +92,7 @@ export default function App() {
             }
           }}
         />
+        </Suspense>
       </div>
     );
   }
@@ -97,21 +100,25 @@ export default function App() {
   // When inside the Review Popup floating window
   if (windowLabel === "review-popup") {
     return (
-      <FocusReviewModal
-        onClose={() => {
-          if (!("__TAURI_INTERNALS__" in window)) {
-            setWindowLabel("main");
-          }
-        }}
-      />
+      <Suspense fallback={null}>
+        <FocusReviewModal
+          onClose={() => {
+            if (!("__TAURI_INTERNALS__" in window)) {
+              setWindowLabel("main");
+            }
+          }}
+        />
+      </Suspense>
     );
   }
 
   // When inside the Main Dashboard window
   return (
-    <MainDashboard
-      onOpenQuickInputPreview={() => setWindowLabel("quick-input")}
-      onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
-    />
+    <Suspense fallback={null}>
+      <MainDashboard
+        onOpenQuickInputPreview={() => setWindowLabel("quick-input")}
+        onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
+      />
+    </Suspense>
   );
 }
