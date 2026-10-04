@@ -541,6 +541,7 @@ import {
   getReminderSettings,
   isSnoozed,
   triggerReviewPopup,
+  triggerReviewNudge,
   getLastPopupDisplayTime,
   recordPopupDisplayed,
   getNextReminderTime,
@@ -556,25 +557,40 @@ export interface PopupBlockers {
   fullscreen_app: string | null;
   screen_sharing_app: string | null;
   focus_mode: boolean | null;
-  idle_seconds: number;
+  idle_seconds: number | null; // null where input idle time can't be measured
 }
 
 /** Away from the computer for this long: hold the popup until the user is back */
 export const IDLE_POSTPONE_SECONDS = 5 * 60;
+/** Wait for a natural pause: no keyboard/mouse input for this long */
+export const NATURAL_BREAK_SECONDS = 15;
+/** ...but never wait for a pause longer than this once the reminder is due */
+export const MAX_WAIT_FOR_BREAK_MS = 10 * 60 * 1000;
 
 /**
- * Why the review popup should wait right now, or null when it is fine to show it.
+ * Why the reminder should wait right now (null = show it). `waitedMs` is how long the reminder
+ * has already been waiting for a natural pause in the user's activity.
+ */
+export function popupBlockReasonFrom(b: PopupBlockers | null | undefined, waitedMs: number): string | null {
+  if (!b) return null;
+  if (b.screen_sharing_app) return `Đang chia sẻ màn hình (${b.screen_sharing_app})`;
+  if (b.fullscreen_app) return `Đang dùng ${b.fullscreen_app} ở chế độ toàn màn hình`;
+  if (b.focus_mode) return "Đang bật Focus / Không làm phiền";
+  if (b.idle_seconds == null) return null;
+  if (b.idle_seconds >= IDLE_POSTPONE_SECONDS) return "Bạn đang không dùng máy";
+  if (b.idle_seconds < NATURAL_BREAK_SECONDS && waitedMs < MAX_WAIT_FOR_BREAK_MS) {
+    return "Bạn đang thao tác, chờ lúc tạm dừng";
+  }
+  return null;
+}
+
+/**
+ * Why the review reminder should wait right now, or null when it is fine to show it.
  * Detection is done natively (macOS); on other platforms or on error nothing blocks.
  */
-export async function getPopupBlockReason(): Promise<string | null> {
+export async function getPopupBlockReason(waitedMs: number = Infinity): Promise<string | null> {
   try {
-    const b = await invoke<PopupBlockers>("get_popup_blockers");
-    if (!b) return null;
-    if (b.screen_sharing_app) return `Đang chia sẻ màn hình (${b.screen_sharing_app})`;
-    if (b.fullscreen_app) return `Đang dùng ${b.fullscreen_app} ở chế độ toàn màn hình`;
-    if (b.focus_mode) return "Đang bật Focus / Không làm phiền";
-    if (b.idle_seconds >= IDLE_POSTPONE_SECONDS) return "Bạn đang không dùng máy";
-    return null;
+    return popupBlockReasonFrom(await invoke<PopupBlockers>("get_popup_blockers"), waitedMs);
   } catch {
     return null;
   }
@@ -586,6 +602,8 @@ class SRSBackgroundWorker {
   private unlistenPopupOpened: (() => void) | null = null;
   private isTicking = false;
   private lastBlockReason: string | null = null;
+  /** When the reminder first became due and started waiting for a good moment */
+  private readySince: number | null = null;
 
   public async start() {
     this.stop();
@@ -670,7 +688,9 @@ class SRSBackgroundWorker {
         // Don't cover the screen while presenting, sharing, in Focus mode or away from the computer.
         // The popup stays pending and is retried on the next tick (every 15-30s).
         if (settings.respectFocus) {
-          const reason = await getPopupBlockReason();
+          const now = Date.now();
+          if (this.readySince === null) this.readySince = now;
+          const reason = await getPopupBlockReason(now - this.readySince);
           if (reason) {
             if (reason !== this.lastBlockReason) console.info(`[SRS] Hoãn popup ôn tập: ${reason}`);
             this.lastBlockReason = reason;
@@ -678,11 +698,19 @@ class SRSBackgroundWorker {
           }
         }
         this.lastBlockReason = null;
+        this.readySince = null;
       }
 
-      // Kích hoạt Focus Review Modal toàn màn hình
-      // (triggerReviewPopup tự động gọi recordPopupDisplayed để ghi nhận mốc hiển thị mới)
-      await triggerReviewPopup();
+      if (forceTrigger) {
+        // Manual trigger (tray / test button): open the full review directly
+        await triggerReviewPopup();
+        return;
+      }
+
+      // Gentle start: a small corner card that doesn't take focus; it opens the review on its own
+      // after a countdown unless the user snoozes it (triggerReviewNudge records the display time)
+      const dueCount = await countDueWords();
+      await triggerReviewNudge(dueCount);
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
     } finally {

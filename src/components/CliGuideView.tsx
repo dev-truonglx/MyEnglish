@@ -992,7 +992,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                     <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
                       Tự hoãn pop-up khi có ứng dụng toàn màn hình (trình chiếu, video, họp), khi đang chia sẻ màn
                       hình Zoom, khi bật Focus/Không làm phiền (nếu macOS cho phép đọc) hoặc khi bạn rời máy quá 5
-                      phút. Pop-up sẽ hiện ngay khi bạn rảnh.
+                      phút. Khi đến giờ, một thẻ nhỏ hiện ở góc màn hình (không chiếm bàn phím) lúc bạn tạm dừng
+                      thao tác; bỏ qua thì bài ôn tự mở sau 20 giây, bấm Hoãn để dời lại.
                     </span>
                   </span>
                   <input
@@ -1000,6 +1001,22 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                     className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
                     checked={reminderSettings.respectFocus}
                     onChange={(e) => handleUpdateReminder({ respectFocus: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Luôn hiện trên màn hình chính
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Mặc định nhắc nhở hiện trên màn hình bạn đang làm việc (nơi có con trỏ chuột).
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.preferPrimaryMonitor}
+                    onChange={(e) => handleUpdateReminder({ preferPrimaryMonitor: e.target.checked })}
                   />
                 </label>
               </div>

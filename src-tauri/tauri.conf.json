@@ -51,6 +51,22 @@
         "resizable": true,
         "shadow": false,
         "skipTaskbar": true
+      },
+      {
+        "label": "review-nudge",
+        "title": "MyEnglish Reminder",
+        "width": 380,
+        "height": 132,
+        "visible": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "shadow": false,
+        "skipTaskbar": true,
+        "focus": false,
+        "focusable": false,
+        "acceptFirstMouse": true
       }
     ],
     "security": {

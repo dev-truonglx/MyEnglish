@@ -22,6 +22,7 @@ export interface ReminderSettings {
   includeGrammar: boolean; // whether to review grammar in popup alongside vocabulary
   grammarLevels: GrammarLevel[]; // selected grammar levels (multi-select)
   respectFocus: boolean; // postpone the popup while full screen, sharing the screen, in Focus mode or idle
+  preferPrimaryMonitor: boolean; // show the reminder on the primary monitor instead of the one under the cursor
 }
 
 const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
@@ -39,7 +40,32 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   includeGrammar: true,
   grammarLevels: ["A1", "A2", "B1"],
   respectFocus: true,
+  preferPrimaryMonitor: false,
 };
+
+/** Seconds the corner reminder waits before opening the review by itself */
+export const NUDGE_AUTO_OPEN_SECONDS = 20;
+/** Rough time per popup question, used for the "~N phút" estimate */
+const SECONDS_PER_QUESTION = 20;
+
+export interface ReviewNudgePayload {
+  dueCount: number;
+  sessionSize: number;
+  estimatedMinutes: number;
+  autoOpenSeconds: number;
+  snoozeMinutes: number;
+}
+
+export function buildNudgePayload(dueCount: number, settings: ReminderSettings = getReminderSettings()): ReviewNudgePayload {
+  const sessionSize = Math.max(3, settings.wordsPerSession || 3);
+  return {
+    dueCount,
+    sessionSize,
+    estimatedMinutes: Math.max(1, Math.ceil((sessionSize * SECONDS_PER_QUESTION) / 60)),
+    autoOpenSeconds: NUDGE_AUTO_OPEN_SECONDS,
+    snoozeMinutes: settings.snoozeMinutes ?? 10,
+  };
+}
 
 /**
  * Get current reminder configuration from localStorage
@@ -214,12 +240,39 @@ export async function triggerReviewPopup(): Promise<boolean> {
   // Record that the popup is being displayed right now
   recordPopupDisplayed(Date.now());
   try {
-    await invoke("show_review_popup");
+    await invoke("show_review_popup", { preferPrimary: getReminderSettings().preferPrimaryMonitor });
     return true;
   } catch (err) {
     console.warn("invoke show_review_popup failed (fallback to in-app event):", err);
     window.dispatchEvent(new CustomEvent("open-review-popup-preview"));
     return false;
+  }
+}
+
+/**
+ * Show the small corner reminder (no focus stealing). Falls back to the full popup if the
+ * reminder window is unavailable.
+ */
+export async function triggerReviewNudge(dueCount: number): Promise<boolean> {
+  recordPopupDisplayed(Date.now());
+  const settings = getReminderSettings();
+  try {
+    await invoke("show_review_nudge", {
+      payload: buildNudgePayload(dueCount, settings),
+      preferPrimary: settings.preferPrimaryMonitor,
+    });
+    return true;
+  } catch (err) {
+    console.warn("invoke show_review_nudge failed, opening the review directly:", err);
+    return triggerReviewPopup();
+  }
+}
+
+export async function hideReviewNudge(): Promise<void> {
+  try {
+    await invoke("hide_review_nudge");
+  } catch (err) {
+    console.warn("invoke hide_review_nudge failed:", err);
   }
 }
 

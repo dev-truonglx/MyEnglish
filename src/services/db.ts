@@ -4,7 +4,7 @@ import { initReviewLogsTable } from "./smartReview";
 import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -282,6 +282,11 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`ALTER TABLE review_logs ADD COLUMN direction TEXT;`);
   }
 
+  if (version < 5) {
+    // CEFR level of the term (from AI enrichment), used to keep content and assessment level-accurate
+    await tryExec(`ALTER TABLE words ADD COLUMN cefr_level TEXT;`);
+  }
+
   if (version < SCHEMA_VERSION) {
     await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION};`);
   }
@@ -449,6 +454,11 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
        ON CONFLICT(word_id) DO NOTHING`,
       [wordId, now]
     );
+  }
+
+  // CEFR level of the term (kept when a re-enrichment doesn't report one)
+  if (input.cefr_level) {
+    await db.execute(`UPDATE words SET cefr_level = $1 WHERE id = $2;`, [input.cefr_level, wordId]);
   }
 
   // Insert the new examples first, then drop the old ones, so a failed insert never leaves the word empty

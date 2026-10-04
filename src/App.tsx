@@ -4,6 +4,10 @@ import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 const QuickInput = lazy(() => import("@/components/QuickInput"));
 const MainDashboard = lazy(() => import("@/components/MainDashboard"));
 const FocusReviewModal = lazy(() => import("@/components/FocusReviewModal"));
+const ReviewNudge = lazy(() => import("@/components/ReviewNudge"));
+
+/** Floating windows rendered over other apps on a transparent background */
+const TRANSPARENT_WINDOWS = ["review-popup", "quick-input", "review-nudge"];
 import { useUpdateStore } from "@/services/updateService";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
@@ -27,7 +31,7 @@ function getInitialWindowLabel(): string {
 // Synchronously apply transparent window styles before React render
 if (typeof document !== "undefined") {
   const initialLabel = getInitialWindowLabel();
-  if (initialLabel === "review-popup" || initialLabel === "quick-input") {
+  if (TRANSPARENT_WINDOWS.includes(initialLabel)) {
     document.documentElement.classList.add("transparent-window");
     document.body.classList.add("transparent-window");
     document.documentElement.style.background = "transparent";
@@ -57,7 +61,7 @@ export default function App() {
   }, [windowLabel]);
 
   useEffect(() => {
-    if (windowLabel === "review-popup" || windowLabel === "quick-input") {
+    if (TRANSPARENT_WINDOWS.includes(windowLabel)) {
       document.documentElement.classList.add("transparent-window");
       document.body.classList.add("transparent-window");
       document.documentElement.style.background = "transparent";
@@ -94,6 +98,21 @@ export default function App() {
         />
         </Suspense>
       </div>
+    );
+  }
+
+  // When inside the corner reminder window
+  if (windowLabel === "review-nudge") {
+    return (
+      <Suspense fallback={null}>
+        <ReviewNudge
+          onDone={() => {
+            if (!("__TAURI_INTERNALS__" in window)) {
+              setWindowLabel("main");
+            }
+          }}
+        />
+      </Suspense>
     );
   }
 

@@ -88,10 +88,21 @@ fn output_with_timeout(
     })
 }
 
-/// True when the CLI rejected a command-line flag (older versions), as opposed to a real failure.
+/// Model for structured generation. MYENGLISH_AI_MODEL overrides it (testing / model retirement).
+/// Live checks (ai_prompts_live): the -low variant was ~35% faster but produced mistranslations and
+/// stray non-Vietnamese characters, so content generation stays on -medium.
+const AI_MODEL: &str = "gemini-3.6-flash-medium";
+
+fn ai_model() -> String {
+    std::env::var("MYENGLISH_AI_MODEL").unwrap_or_else(|_| AI_MODEL.to_string())
+}
+
+/// True when the CLI rejected a command-line flag or the model (older versions, retired model),
+/// as opposed to a real failure.
 fn is_unknown_flag_error(output: &std::process::Output) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-    stderr.contains("flag provided but not defined")
+    stderr.contains("invalid model")
+        || stderr.contains("flag provided but not defined")
         || stderr.contains("unknown flag")
         || stderr.contains("unknown option")
         || stderr.contains("unrecognized")
@@ -101,16 +112,24 @@ fn is_unknown_flag_error(output: &std::process::Output) -> bool {
 ///
 /// The prompt embeds stored vocabulary, so the agent must NOT get auto-approved tools:
 /// no `--dangerously-skip-permissions`, and `--sandbox` restricts terminal access.
+/// Arguments for a print-mode AI call. The reasoning effort is part of the model name
+/// (e.g. gemini-3.6-flash-medium); adding --effort makes the CLI reject the call.
+fn ai_cli_args(prompt: &str) -> Vec<String> {
+    vec![
+        "--sandbox".into(),
+        "--disable-slash-commands".into(),
+        "--model".into(),
+        ai_model(),
+        "--print-timeout".into(),
+        "35s".into(),
+        "-p".into(),
+        prompt.into(),
+    ]
+}
+
 fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, String> {
     let mut cmd = create_hidden_command(bin_path);
-    cmd.arg("--sandbox")
-        .arg("--disable-slash-commands")
-        .arg("--model")
-        .arg("gemini-3.6-flash-medium")
-        .arg("--print-timeout")
-        .arg("35s")
-        .arg("-p")
-        .arg(prompt);
+    cmd.args(ai_cli_args(prompt));
 
     let output = output_with_timeout(cmd, AI_CLI_TIMEOUT)
         .map_err(|e| format!("Failed to execute AI CLI at '{}': {}", bin_path, e))?;
@@ -123,6 +142,83 @@ fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, Stri
     fallback.arg("-p").arg(prompt);
     output_with_timeout(fallback, AI_CLI_FALLBACK_TIMEOUT)
         .map_err(|e| format!("Failed to execute AI CLI at '{}': {}", bin_path, e))
+}
+
+// ─── AI prompts ──────────────────────────────────────────────────────────────
+// Kept short to save tokens: a compact schema, strict length limits and one shared CEFR guide,
+// so every English sentence the model writes stays inside the learner's level.
+
+/// Topic list shared with the frontend (src/services/db.ts PREDEFINED_TOPICS).
+const WORD_TOPICS: &str = "System Design|Database & Storage|Concurrency & Async|Networking & APIs|Security & Auth|DevOps & Cloud|Frontend & UI|Backend & Microservices|Data Structures & Algorithms|Architecture & Patterns|Testing & QA|General Tech|Everyday Life";
+
+/// What English a learner at `level` can read: vocabulary range, allowed grammar, sentence length.
+fn cefr_guide(level: &str) -> &'static str {
+    match level {
+        "A1" => "A1: only very common everyday words (top ~1000); present simple/continuous, can, there is/are, imperatives; max 8 words per sentence; no subordinate clauses",
+        "A2" => "A2: common words (Oxford 3000 A1-A2); past simple, going to/will, comparatives, and/but/because/when; max 12 words per sentence",
+        "B1" => "B1: everyday and common work words; present perfect, 1st/2nd conditional, simple passive, relative clauses; max 16 words per sentence",
+        "B2" => "B2: work and technical vocabulary, natural collocations; mixed conditionals, passive with modals, participle clauses, reported speech; max 22 words per sentence",
+        _ => "C1: precise technical and formal vocabulary, idioms; inversion, cleft sentences, nuanced modality; natural professional register",
+    }
+}
+
+fn build_enrich_prompt(word: &str, level: &str) -> String {
+    format!(
+        "Dictionary entry for Vietnamese learners. Term: \"{word}\". Learner level {guide}.\n\
+Rules: every English sentence, collocation and synonym must stay within {level}, even if the term itself is harder. \
+Vietnamese must be natural. Keep fields short.\n\
+Return ONLY minified JSON:\n\
+{{\"cefr\":\"A1|A2|B1|B2|C1|C2 level of the term itself\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"noun|verb|adjective|adverb|phrase\",\
+\"topic\":\"one of {topics}\",\"meaning_vn\":\"max 12 words\",\"collocations\":[\"max 3\"],\
+\"code_snippet\":\"1-2 code lines only for programming terms, else empty\",\
+\"examples\":[{{\"sentence_en\":\"\",\"sentence_vn\":\"\",\"grammar_analysis\":\"[structure] max 15 Vietnamese words\"}}],\
+\"synonyms\":[{{\"word\":\"\",\"phonetic\":\"\",\"meaning_vn\":\"\",\"examples\":[{{\"sentence_en\":\"\",\"meaning_vn\":\"\"}}]}}],\"antonyms\":[]}}\n\
+Exactly 3 examples, each using a different {level} structure and a work or daily-life context. \
+Max 2 synonyms and 2 antonyms, each with 1 example; use [] when none fit {level}.",
+        word = word,
+        level = level,
+        guide = cefr_guide(level),
+        topics = WORD_TOPICS,
+    )
+}
+
+fn build_grammar_prompt(topic: &str, level: &str) -> String {
+    format!(
+        "Write 10 English grammar questions on \"{topic}\" for Vietnamese learners at {guide}.\n\
+Rules: use only {level} vocabulary and structures; workplace or daily-life contexts; \
+mix types multiple_choice (4 options, distractors = typical learner mistakes), conjugation (base verb in [brackets]), \
+error_spotting (exactly one wrong word). Explanation in Vietnamese, max 25 words, say why the answer fits.\n\
+Return ONLY a minified JSON array:\n\
+[{{\"type\":\"multiple_choice|conjugation|error_spotting\",\"prompt_en\":\"sentence with _____ or [verb]\",\"prompt_vn\":\"\",\
+\"hint\":\"max 8 words\",\"options\":[\"multiple_choice only\"],\"correct_answer\":\"\",\"error_word\":\"error_spotting only\",\"explanation\":\"\"}}]",
+        topic = topic,
+        level = level,
+        guide = cefr_guide(level),
+    )
+}
+
+fn build_recommend_prompt(level: &str, topic: &str, count: u32, known_words: &[String]) -> String {
+    let exclusions = known_words.iter().take(80).cloned().collect::<Vec<_>>().join(",");
+    let word_policy = match level {
+        "A1" | "A2" => "high-frequency everyday words that are also used at work (no technical jargon)",
+        "B1" => "common work and IT words that a non-specialist also meets",
+        _ => "professional and technical words used in real engineering work",
+    };
+    format!(
+        "Suggest {count} English words whose CEFR level is exactly {level} (English Vocabulary Profile / Oxford 3000-5000), \
+for a Vietnamese learner working in \"{topic}\". Choose {word_policy}. Learner level {guide}.\n\
+Do not suggest: [{exclusions}].\n\
+Return ONLY a minified JSON array:\n\
+[{{\"word\":\"\",\"cefr\":\"real CEFR level of the word\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"\",\"meaning_vn\":\"max 12 words\",\"topic\":\"one of {topics}\",\
+\"why_recommended\":\"max 20 Vietnamese words\",\"sample_sentence_en\":\"{level} sentence\",\"sample_sentence_vn\":\"\",\"grammar_structure\":\"\"}}]",
+        count = count,
+        level = level,
+        topic = topic,
+        word_policy = word_policy,
+        guide = cefr_guide(level),
+        exclusions = exclusions,
+        topics = WORD_TOPICS,
+    )
 }
 
 /// Vocabulary terms that may be embedded in prompts: letters/digits plus a few
@@ -663,8 +759,8 @@ struct PopupBlockers {
     screen_sharing_app: Option<String>,
     /// Focus / Do Not Disturb; None when macOS does not let us read it
     focus_mode: Option<bool>,
-    /// Seconds since the last keyboard/mouse input
-    idle_seconds: f64,
+    /// Seconds since the last keyboard/mouse input; None where it can't be measured
+    idle_seconds: Option<f64>,
 }
 
 /// Report reasons to postpone the review popup. Other platforms report no blockers.
@@ -676,7 +772,7 @@ fn get_popup_blockers() -> PopupBlockers {
             fullscreen_app: macos_focus::fullscreen_frontmost_app(),
             screen_sharing_app: macos_focus::screen_sharing_app(),
             focus_mode: macos_focus::focus_mode_active(),
-            idle_seconds: macos_focus::idle_seconds(),
+            idle_seconds: Some(macos_focus::idle_seconds()),
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -685,7 +781,7 @@ fn get_popup_blockers() -> PopupBlockers {
             fullscreen_app: None,
             screen_sharing_app: None,
             focus_mode: None,
-            idle_seconds: 0.0,
+            idle_seconds: None,
         }
     }
 }
@@ -736,24 +832,65 @@ fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor
 /// 1. If "main" window is visible, show popup on the SAME monitor the user is viewing the dashboard!
 /// 2. If "main" window is hidden/minimized, target the monitor where the cursor currently resides.
 /// 3. Fallback to primary monitor (guaranteed to be the active display with menu bar).
-fn get_target_monitor_for_popup(app: &AppHandle, popup_win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
-    if let Some(main_win) = app.get_webview_window("main") {
-        if main_win.is_visible().unwrap_or(false) {
-            if let Ok(Some(m)) = main_win.current_monitor() {
-                return Some(m);
-            }
+/// Monitor for the review popup/nudge: the one under the mouse cursor, i.e. where the user is
+/// working (not the one holding the main window). `prefer_primary` forces the primary monitor.
+fn get_target_monitor_for_popup(popup_win: &tauri::WebviewWindow, prefer_primary: bool) -> Option<tauri::Monitor> {
+    let primary = || popup_win.primary_monitor().ok().flatten();
+    if prefer_primary {
+        if let Some(m) = primary() {
+            return Some(m);
         }
     }
+    get_monitor_at_cursor(popup_win)
+        .or_else(primary)
+        .or_else(|| popup_win.current_monitor().ok().flatten())
+}
 
-    if let Some(m) = get_monitor_at_cursor(popup_win) {
-        return Some(m);
+/// Small reminder card in the top-right corner of the active monitor. It never takes keyboard
+/// focus (the window is not focusable and the app is not activated), so typing elsewhere is
+/// not interrupted. The payload (due count, countdown...) is forwarded to the card.
+#[tauri::command]
+fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary: Option<bool>) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("review-nudge")
+        .ok_or_else(|| "Review nudge window not found".to_string())?;
+    let _ = window.set_focusable(false);
+    let _ = window.set_visible_on_all_workspaces(true);
+    let _ = window.set_always_on_top(true);
+
+    if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary.unwrap_or(false)) {
+        let scale = monitor.scale_factor();
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let w_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 0, height: 0 });
+        let margin = (16.0 * scale) as i32;
+        // Leave room for the macOS menu bar / notch area
+        let top_inset = (if cfg!(target_os = "macos") { 40.0 } else { 16.0 } * scale) as i32;
+        let x = m_pos.x + (m_size.width as i32 - w_size.width as i32 - margin).max(0);
+        let y = m_pos.y + top_inset;
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
 
-    popup_win.primary_monitor().ok().flatten().or_else(|| popup_win.current_monitor().ok().flatten())
+    let _ = window.emit("review-nudge-opened", payload);
+    window.show().map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
-fn show_review_popup(app: AppHandle) -> Result<bool, String> {
+fn hide_review_nudge(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("review-nudge") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<bool, String> {
+    let prefer_primary = prefer_primary.unwrap_or(false);
+    // The nudge (if shown) is replaced by the full review
+    if let Some(nudge) = app.get_webview_window("review-nudge") {
+        let _ = nudge.hide();
+    }
     if let Some(window) = app.get_webview_window("review-popup") {
         let _ = window.set_visible_on_all_workspaces(true);
         let _ = window.set_always_on_top(true);
@@ -764,7 +901,7 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
             macos_app::activate_app_ignoring_other_apps();
         }
 
-        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
@@ -774,7 +911,7 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
         window.show().map_err(|e| e.to_string())?;
 
         // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
-        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
@@ -1133,61 +1270,7 @@ async fn enrich_word_with_gemini(
         println!("[MyEnglish AI] Bắt đầu phân tích từ '{}' (CEFR: {}) bằng binary: '{}'", clean_word, user_level, bin_path);
         let start_time = std::time::Instant::now();
 
-        let level_guideline = match user_level.as_str() {
-            "A1" => "Target audience: CEFR A1 (Starter). Use very simple, clear phrasing, common words, and direct sentence structures. Explain grammar in basic terms.",
-            "A2" => "Target audience: CEFR A2 (Elementary). Use daily workplace/tech routines, past simple/continuous, basic modals, and straightforward examples.",
-            "B1" => "Target audience: CEFR B1 (Intermediate). Use realistic technical discussions (APIs, bug reports, PR reviews), present perfect, conditionals, and standard professional vocabulary.",
-            "B2" => "Target audience: CEFR B2 (Upper-Intermediate). Use authentic software engineering debates (scalability, concurrency, system design), nuanced collocations, mixed conditionals, and passive voice.",
-            "C1" | "C2" => "Target audience: CEFR C1 (Advanced). Use advanced architectural trade-offs, inversion, participle clauses, formal technical register, and sophisticated idiomatic collocations.",
-            _ => "Target audience: CEFR B1 (Intermediate). Use clear tech workplace context.",
-        };
-
-        let prompt = format!(
-            "You are an expert English linguist and software engineering mentor. \
-            Analyze the English tech/workplace vocabulary: '{clean_word}' specifically calibrated for CEFR level {user_level}. {level_guideline} \
-            Return strictly valid JSON with no markdown formatting or backticks, matching this exact schema: \
-            {{\
-              \"phonetic\": \"/IPA/\",\
-              \"part_of_speech\": \"noun|verb|adjective|adverb\",\
-              \"topic\": \"Category (e.g. System Design, DevOps, Frontend, Database, Concurrency, Security, General Tech, Everyday Life)\",\
-              \"meaning_vn\": \"Concise, clear Vietnamese meaning in tech & daily context\",\
-              \"collocations\": [\"phrase 1\", \"phrase 2\", \"phrase 3\"],\
-              \"code_snippet\": \"// 2-3 lines realistic code illustrating '{clean_word}'\",\
-              \"examples\": [\
-                {{\
-                  \"sentence_en\": \"Practical present or habit sentence with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V... - Giải thích ngắn gọn cách dùng phù hợp trình độ {user_level}\"\
-                }},\
-                {{\
-                  \"sentence_en\": \"Past or progressive action sentence with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Thì/Cấu trúc] S + V2/ed / was doing... - Phân tích ngữ cảnh\"\
-                }},\
-                {{\
-                  \"sentence_en\": \"Compound/complex sentence (Conditional, Passive, or Relative Clause) with '{clean_word}' calibrated to {user_level}\",\
-                  \"sentence_vn\": \"Bản dịch tiếng Việt tự nhiên, chuẩn nghĩa\",\
-                  \"grammar_analysis\": \"[Cấu trúc nâng cao] Phân tích cấu trúc ngữ pháp\"\
-                }}\
-              ],\
-              \"synonyms\": [\
-                {{\
-                  \"word\": \"synonym1\",\
-                  \"phonetic\": \"/IPA/\",\
-                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
-                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
-                }}\
-              ],\
-              \"antonyms\": [\
-                {{\
-                  \"word\": \"antonym1\",\
-                  \"phonetic\": \"/IPA/\",\
-                  \"meaning_vn\": \"Nghĩa tiếng Việt ngắn\",\
-                  \"examples\": [{{\"sentence_en\": \"Short sample sentence\", \"meaning_vn\": \"Bản dịch\"}}]\
-                }}\
-              ]\
-            }}"
-        );
+        let prompt = build_enrich_prompt(&clean_word, &user_level);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1238,37 +1321,7 @@ async fn generate_grammar_exercises_ai(
         let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
         println!("[MyEnglish AI] Sinh bài tập ngữ pháp chuyên sâu cho: '{}' ({})", clean_topic, level);
 
-        let cefr_criteria = match level.as_str() {
-            "A1" => "CEFR A1: Simple sentences, basic present/past simple, singular/plural, high-frequency tech terms (code, bug, file, run, error). Avoid complex clauses.",
-            "A2" => "CEFR A2: Daily tech routines, past continuous, basic modals (can, must, should), comparisons (faster, more reliable), time clauses (when, before).",
-            "B1" => "CEFR B1: Present perfect vs past simple, first/second conditionals, passive voice, relative pronouns (which, that, who), tech communication (PRs, releases).",
-            "B2" => "CEFR B2: Mixed conditionals, passive with reporting verbs, modal deductions (must have been), participle clauses, system architecture discussions.",
-            "C1" | "C2" => "CEFR C1: Inversion with negative adverbials, cleft sentences, subjunctive mood, sophisticated architecture trade-offs, precise academic/tech tone.",
-            _ => "CEFR B1: Intermediate practical workplace communication.",
-        };
-
-        let prompt = format!(
-            "You are a master English pedagogue specializing in CEFR assessment and technical English. \
-            Generate 10 authentic, practical English grammar test questions strictly calibrated for level {level} on the topic: '{clean_topic}'. \
-            Level Benchmark: {cefr_criteria} \
-            Requirements: \
-            1. Questions must use realistic tech workplace contexts (code reviews, deployments, debugging, architecture, team collaboration). \
-            2. For 'multiple_choice', distractors must represent typical learner errors, not nonsense. \
-            3. 'explanation' must be in Vietnamese, explaining both the rule and WHY the correct answer fits the context. \
-            Output ONLY valid JSON array with NO markdown, matching: \
-            [\
-              {{\
-                \"type\": \"multiple_choice|conjugation|error_spotting\",\
-                \"prompt_en\": \"Sentence to test with blank _____ or bracketed words [word]\",\
-                \"prompt_vn\": \"Bản dịch tiếng Việt chính xác\",\
-                \"hint\": \"Gợi ý ngữ pháp ngắn gọn\",\
-                \"options\": [\"optA\", \"optB\", \"optC\", \"optD\"],\
-                \"correct_answer\": \"exact correct answer\",\
-                \"error_word\": \"wrong word if error_spotting\",\
-                \"explanation\": \"Giải thích chi tiết quy tắc ngữ pháp bằng tiếng Việt\"\
-              }}\
-            ]"
-        );
+        let prompt = build_grammar_prompt(&clean_topic, &level);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1340,35 +1393,7 @@ async fn generate_vocabulary_recommendations_ai(
         );
 
         // Take a sample of existing words to exclude (max 100 to avoid huge prompt length)
-        let sample_exclusions = if existing_words.len() > 80 {
-            existing_words[..80].join(", ")
-        } else {
-            existing_words.join(", ")
-        };
-
-        let prompt = format!(
-            "You are an expert English lexicographer and tech career coach. \
-            Recommend exactly {target_count} high-value English vocabulary words strictly calibrated for a learner at CEFR level {target_level} in the domain of '{target_topic}'. \
-            CRITICAL: DO NOT choose any of the following already known words: [{sample_exclusions}]. \
-            Selection Criteria: \
-            1. Match the exact cognitive difficulty and lexical frequency band of CEFR {target_level}. \
-            2. Authentically used in professional tech environments (code reviews, RFCs, technical docs, team standups, product discussions). \
-            3. Practical and impactful for career advancement. \
-            Output ONLY valid JSON array with NO markdown formatting, matching this exact schema: \
-            [\
-              {{\
-                \"word\": \"<english_word>\",\
-                \"phonetic\": \"/<ipa>/\",\
-                \"part_of_speech\": \"noun|verb|adjective|adverb\",\
-                \"meaning_vn\": \"<nghĩa tiếng Việt ngắn gọn, súc tích trong ngữ cảnh CNTT và đời sống>\",\
-                \"topic\": \"<chuyên mục phụ, ví dụ: System Design, Git & CI/CD, Frontend, DevOps, Daily Tech>\",\
-                \"why_recommended\": \"<Giải thích 1-2 câu tiếng Việt lý do tại sao người học ở level {target_level} cần biết từ này>\",\
-                \"sample_sentence_en\": \"<Câu ví dụ thực tế sử dụng từ này, cấu trúc ngữ pháp chuẩn level {target_level}>\",\
-                \"sample_sentence_vn\": \"<Bản dịch tiếng Việt của câu ví dụ>\",\
-                \"grammar_structure\": \"<Cấu trúc ngữ pháp áp dụng trong câu ví dụ>\"\
-              }}\
-            ]"
-        );
+        let prompt = build_recommend_prompt(&target_level, &target_topic, target_count, &existing_words);
 
         let output = run_ai_cli(&bin_path, &prompt)?;
 
@@ -1564,6 +1589,8 @@ pub fn run() {
             trigger_review_navigation,
             show_review_popup,
             hide_review_popup,
+            show_review_nudge,
+            hide_review_nudge,
             prepare_update_exit,
             cancel_update_exit,
             get_popup_blockers,
@@ -1632,6 +1659,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ai_cli_args_never_combine_model_and_effort() {
+        let args = ai_cli_args("hi");
+        assert!(args.contains(&"--model".to_string()));
+        assert!(!args.iter().any(|a| a == "--effort"));
+        assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert_eq!(args.last().map(String::as_str), Some("hi"));
+    }
+
+    #[test]
+    fn prompts_stay_compact() {
+        let known: Vec<String> = (0..120).map(|i| format!("word{}", i)).collect();
+        for level in ["A1", "A2", "B1", "B2", "C1"] {
+            // Rough budget in characters (~4 chars per token) to keep input cost low
+            assert!(build_enrich_prompt("latency", level).len() < 1500, "enrich {}", level);
+            assert!(build_grammar_prompt("Present simple", level).len() < 1100, "grammar {}", level);
+            // Exclusion list is capped at 80 words
+            let rec = build_recommend_prompt(level, "General Tech", 3, &known);
+            assert!(rec.contains("word79,") || rec.contains("word79]"));
+            assert!(!rec.contains("word80"));
+        }
+    }
+
+    #[test]
+    fn a1_prompts_never_ask_for_structures_above_a1() {
+        for prompt in [
+            build_enrich_prompt("deploy", "A1"),
+            build_grammar_prompt("Present simple", "A1"),
+            build_recommend_prompt("A1", "General Tech", 3, &[]),
+        ] {
+            assert!(prompt.contains("max 8 words per sentence"), "{}", prompt);
+            for advanced in ["conditional", "Conditional", "passive", "Passive", "relative clause", "inversion"] {
+                assert!(!prompt.contains(advanced), "A1 prompt mentions {}: {}", advanced, prompt);
+            }
+        }
+        assert!(build_recommend_prompt("A1", "DevOps", 3, &[]).contains("no technical jargon"));
+    }
+
+    #[test]
+    fn prompts_ask_for_the_real_cefr_level() {
+        assert!(build_enrich_prompt("deploy", "B1").contains("\"cefr\""));
+        assert!(build_recommend_prompt("B1", "General Tech", 3, &[]).contains("real CEFR level"));
+    }
+
+    #[test]
     fn safe_terms_accept_vocabulary_and_reject_prompt_injection() {
         for ok in ["latency", "c++", "ci/cd", "node.js", "front-end", "don't", "c#", "r&d", "event loop"] {
             assert!(is_safe_term(ok), "{} should be accepted", ok);
@@ -1679,16 +1750,49 @@ mod tests {
         assert!(!is_known_cli_binary("/tmp/agy-evil/payload"));
     }
 
+    /// Live AI check (uses the installed agy CLI and the user's quota):
+    /// `cargo test ai_prompts_live -- --ignored --nocapture --test-threads=1`
+    #[test]
+    #[ignore]
+    fn ai_prompts_live() {
+        let (bin, found) = get_cli_bin_path(None);
+        assert!(found, "AI CLI not found");
+        let cases: Vec<(&str, String)> = vec![
+            ("enrich deploy @A1", build_enrich_prompt("deploy", "A1")),
+            ("enrich latency @B2", build_enrich_prompt("latency", "B2")),
+            ("recommend @A1", build_recommend_prompt("A1", "Software Engineering & Technical Work", 3, &[])),
+            ("grammar @A1", build_grammar_prompt("Present simple", "A1")),
+        ];
+        for (name, prompt) in cases {
+            let start = std::time::Instant::now();
+            let out = run_ai_cli(&bin, &prompt).expect("CLI run failed");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let cleaned = clean_json_string(&stdout);
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&cleaned);
+            println!(
+                "=== {} | exit={:?} | {:.1}s | prompt {} chars | output {} chars | json_ok={}\n{}\n--- stderr: {}",
+                name,
+                out.status.code(),
+                start.elapsed().as_secs_f64(),
+                prompt.len(),
+                stdout.len(),
+                parsed.is_ok(),
+                cleaned,
+                truncate_for_log(&String::from_utf8_lossy(&out.stderr), 400)
+            );
+        }
+    }
+
     /// Manual smoke test on a real Mac: `cargo test popup_blockers_smoke -- --ignored --nocapture`
     #[test]
     #[ignore]
     fn popup_blockers_smoke() {
         let b = get_popup_blockers();
         println!(
-            "fullscreen={:?} sharing={:?} focus={:?} idle={:.1}s",
+            "fullscreen={:?} sharing={:?} focus={:?} idle={:?}s",
             b.fullscreen_app, b.screen_sharing_app, b.focus_mode, b.idle_seconds
         );
-        assert!(b.idle_seconds >= 0.0);
+        assert!(b.idle_seconds.unwrap_or(0.0) >= 0.0);
     }
 
     #[test]

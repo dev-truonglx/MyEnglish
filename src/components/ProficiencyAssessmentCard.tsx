@@ -261,7 +261,9 @@ export default function ProficiencyAssessmentCard({
             />
           </div>
           <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-            {profile.vocabularyStats.masteredWords}/{profile.vocabularyStats.totalWords} từ bền vững (Độ nhớ TB: {profile.vocabularyStats.avgRetrievability}%).
+            Đã thuộc {profile.levelVocab[profile.effectiveLevel].known}/{profile.levelVocab[profile.effectiveLevel].target} từ cấp độ{" "}
+            {profile.effectiveLevel} • {profile.vocabularyStats.masteredWords}/{profile.vocabularyStats.totalWords} từ bền vững (Độ nhớ TB:{" "}
+            {profile.vocabularyStats.avgRetrievability}%).
           </p>
         </div>
 
@@ -281,6 +283,7 @@ export default function ProficiencyAssessmentCard({
           </div>
           <p className="text-[11px] text-slate-500 dark:text-zinc-400">
             Chuỗi {profile.learningStats.streak} ngày liên tiếp • Cấp độ XP {profile.learningStats.xpLevel} ({profile.learningStats.rank}).
+            Không tính vào cấp độ CEFR.
           </p>
         </div>
       </div>
@@ -292,7 +295,7 @@ export default function ProficiencyAssessmentCard({
             <TrendingUp className="w-4 h-4 text-cyan-500" />
             <span>Tiến Trình Cụ Thể Từng Cấp Bậc CEFR</span>
           </h4>
-          <span className="text-[11px] text-slate-400">Mức độ hoàn thành bài học & bài tập</span>
+          <span className="text-[11px] text-slate-400">Hoàn thành một cấp độ = nắm ngữ pháp + thuộc đủ từ của cấp độ đó</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -349,6 +352,12 @@ export default function ProficiencyAssessmentCard({
                 <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500">
                   <span>Pass: {data.passedLessons}/{data.totalLessons}</span>
                   <span>{data.averageMastery}%</span>
+                </div>
+                <div
+                  className="mt-1 text-[10px] text-slate-400 dark:text-zinc-500"
+                  title="Số từ của cấp độ này bạn đã thuộc / số từ cần để hoàn thành cấp độ"
+                >
+                  Từ vựng: {profile.levelVocab[lvl].known}/{profile.levelVocab[lvl].target}
                 </div>
               </div>
             );
