@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { Volume2, CheckCircle2, HelpCircle, Snail, Music, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
+import { normalizeTypedText } from "@/services/smartReview";
 
 interface ListeningDictationExerciseProps {
   word: WordDetail;
@@ -23,6 +24,14 @@ export default function ListeningDictationExercise({
   const [shake, setShake] = useState(false);
 
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pending completion timer, cleared on unmount so a stale card is never graded
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
 
   const playAudio = (rate: number = 0.9) => {
     setIsPlaying(true);
@@ -51,16 +60,20 @@ export default function ListeningDictationExercise({
     if (e) e.preventDefault();
     if (isAnswered) return;
 
-    const cleanInput = inputVal.trim().toLowerCase();
-    const target = word.word.trim().toLowerCase();
+    // Same normalization on both sides: case, curly quotes, contractions, punctuation, whitespace
+    const cleanInput = normalizeTypedText(inputVal);
+    const target = normalizeTypedText(word.word);
 
-    if (!cleanInput) {
+    if (!inputVal.trim()) {
       setShake(true);
       setTimeout(() => setShake(false), 350);
       return;
     }
 
-    if (cleanInput === target) {
+    // Symbols matter for words like "c++" / "c#", so only loosen the match for plain words
+    const strict = (t: string) => t.trim().toLowerCase().replace(/\s+/g, " ");
+    const isPlainWord = /^[a-z\s'\u2019-]+$/i.test(word.word);
+    if (strict(inputVal) === strict(word.word) || (isPlainWord && cleanInput === target)) {
       setIsCorrect(true);
       setIsAnswered(true);
       playAudio(0.9);
@@ -70,7 +83,9 @@ export default function ListeningDictationExercise({
       else if (wrongAttempts === 1) rating = Rating.Good;
       else rating = Rating.Hard;
 
-      setTimeout(() => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      completeTimerRef.current = setTimeout(() => {
+        completeTimerRef.current = null;
         onComplete(true, wrongAttempts, rating);
       }, 1000);
     } else {

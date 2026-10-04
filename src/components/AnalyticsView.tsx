@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Trophy,
   Brain,
@@ -94,13 +94,19 @@ export default function AnalyticsView({
     });
   }, [words.length, streakStats.currentStreak, topicMastery]);
 
+  // Latest requested word id; slower generations for other words are discarded
+  const activeMnemonicRef = useRef<string | null>(null);
+
   const handleShowMnemonic = async (w: WordDetail) => {
+    activeMnemonicRef.current = w.id;
     setActiveMnemonicWordId(w.id);
-    const existing = getStoredMnemonic(w.id);
+    const existing = getStoredMnemonic(w.id, w.meaning_vn);
     if (existing) {
       setMnemonicText(existing);
     } else {
+      setMnemonicText(null);
       const generated = await generateSmartMnemonic(w);
+      if (activeMnemonicRef.current !== w.id) return;
       setMnemonicText(generated);
     }
   };

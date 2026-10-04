@@ -9,29 +9,23 @@
  * 5. XP System — gamified experience points
  */
 
-import type { WordDetail, SRSReview } from "@/types/database";
+import type { WordDetail, SRSReview, ReviewCard, CardDirection } from "@/types/database";
 import Database from "@tauri-apps/plugin-sql";
-import { getDatabase } from "./db";
+import { Rating } from "ts-fsrs";
+import { getDatabase, isPlaceholderMeaning } from "./db";
+import { getCardRetrievability, getFSRSSettings, getStudyLimits } from "./srs";
+import { directionForExercise, getDueCards } from "./cards";
 
 // ─── 1. RETRIEVABILITY ──────────────────────────────────────────────────────
 
 /**
- * Calculate memory retrievability R ∈ [0, 1] using FSRS forgetting curve.
- *   R = (1 + elapsed / (9 × stability))^(−1)
+ * Calculate memory retrievability R ∈ [0, 1] using the same FSRS model (FSRS-6 curve in ts-fsrs v5)
+ * that schedules the card, so the UI and the scheduler always agree.
  *
  * @returns A number between 0 (fully forgotten) and 1 (perfectly remembered)
  */
 export function calculateRetrievability(srs: Partial<SRSReview>, now: Date = new Date()): number {
-  const stability = srs.stability ?? 0;
-  if (stability <= 0) return 0;
-
-  const lastReview = srs.last_review ? new Date(srs.last_review).getTime() : now.getTime();
-  const elapsedMs = now.getTime() - lastReview;
-  const elapsedDays = Math.max(0, elapsedMs / (24 * 60 * 60 * 1000));
-
-  // FSRS forgetting curve: R = (1 + t / (9 * S))^(-1)
-  const R = Math.pow(1 + elapsedDays / (9 * stability), -1);
-  return Math.max(0, Math.min(1, R));
+  return getCardRetrievability(srs, now);
 }
 
 /**
@@ -156,7 +150,6 @@ export interface WordPriority {
     difficulty: number;       // FSRS difficulty 1-10
     leechBonus: number;       // Extra priority for leeches
     lapsePenalty: number;     // Extra for frequently forgotten words
-    topicDiversity: number;   // Bonus if different topic from recent reviews
   };
 }
 
@@ -166,19 +159,20 @@ export interface WordPriority {
  */
 export function calculateUrgencyScore(
   word: WordDetail,
-  recentTopics: string[] = [],
   now: Date = new Date()
 ): WordPriority {
   const srs = word.srs;
-  const R = calculateRetrievability(srs, now);
+  const isNew = (srs.state ?? 0) === 0 && (srs.reps ?? 0) === 0;
   const leechSettings = getLeechSettings();
 
-  // Factor 1: Overdueness — how much retrievability has dropped below target (0.9)
-  const targetRetention = 0.9;
+  // Factor 1: Overdueness — how far retrievability has dropped below the user's target retention.
+  // New cards have no memory yet, so they are not "overdue".
+  const targetRetention = getFSRSSettings().requestRetention;
+  const R = isNew ? targetRetention : calculateRetrievability(srs, now);
   const overdueness = Math.max(0, (targetRetention - R) * 50);
 
   // Factor 2: Difficulty — harder words get slight priority
-  const difficulty = ((srs.difficulty ?? 5) / 10) * 10;
+  const difficulty = isNew ? 0 : srs.difficulty ?? 5;
 
   // Factor 3: Leech bonus — leeches get strong priority
   const leechBonus = isLeech(srs, leechSettings) ? 25 : 0;
@@ -186,12 +180,7 @@ export function calculateUrgencyScore(
   // Factor 4: Lapse penalty — more lapses = more forgotten = more urgency
   const lapsePenalty = Math.min(15, (srs.lapses ?? 0) * 3);
 
-  // Factor 5: Topic diversity — bonus if different from recent topics
-  const wordTopic = (word.topic || "General Tech").toLowerCase();
-  const isNewTopic = recentTopics.length > 0 && !recentTopics.slice(-3).includes(wordTopic);
-  const topicDiversity = isNewTopic ? 5 : 0;
-
-  const urgencyScore = overdueness + difficulty + leechBonus + lapsePenalty + topicDiversity;
+  const urgencyScore = overdueness + difficulty + leechBonus + lapsePenalty;
 
   return {
     wordId: word.id,
@@ -202,54 +191,195 @@ export function calculateUrgencyScore(
       difficulty,
       leechBonus,
       lapsePenalty,
-      topicDiversity,
     },
   };
 }
 
+function topicOf(word: WordDetail): string {
+  return (word.topic || "General Tech").toLowerCase();
+}
+
 /**
  * Sort words for optimal review order using urgency scoring.
- * Returns a new array sorted by urgency (highest first).
+ * Returns a new array sorted by urgency (highest first), interleaved so that
+ * no more than 2 consecutive words share a topic when an alternative exists.
  */
-export function smartSortReviewQueue(
-  words: WordDetail[],
+export function smartSortReviewQueue<T extends WordDetail>(
+  words: T[],
   now: Date = new Date()
-): WordDetail[] {
-  const recentTopics: string[] = [];
-
-  // Score each word
-  const scored = words.map((w) => ({
+): T[] {
+  const scored = words.filter((w) => !isPlaceholderMeaning(w.meaning_vn)).map((w) => ({
     word: w,
-    priority: calculateUrgencyScore(w, recentTopics, now),
+    score: calculateUrgencyScore(w, now).urgencyScore,
   }));
+  scored.sort((a, b) => b.score - a.score);
 
-  // Sort by urgency score descending
-  scored.sort((a, b) => b.priority.urgencyScore - a.priority.urgencyScore);
-
-  // Apply interleaving: avoid 3+ consecutive same-topic words
-  const result: WordDetail[] = [];
+  const result: T[] = [];
   const remaining = scored.map((s) => s.word);
-  const usedTopics: string[] = [];
 
   while (remaining.length > 0) {
-    // Try to find a word with a different topic than the last 2
-    let chosen = -1;
-    for (let i = 0; i < remaining.length; i++) {
-      const topic = (remaining[i].topic || "General Tech").toLowerCase();
-      const lastTwo = usedTopics.slice(-2);
-      if (!lastTwo.every((t) => t === topic)) {
-        chosen = i;
-        break;
-      }
+    let chosen = 0;
+    const n = result.length;
+    if (n >= 2 && topicOf(result[n - 1]) === topicOf(result[n - 2])) {
+      const blocked = topicOf(result[n - 1]);
+      const alt = remaining.findIndex((w) => topicOf(w) !== blocked);
+      if (alt !== -1) chosen = alt;
     }
-    if (chosen === -1) chosen = 0; // fallback
-
-    const word = remaining.splice(chosen, 1)[0];
-    result.push(word);
-    usedTopics.push((word.topic || "General Tech").toLowerCase());
+    result.push(remaining.splice(chosen, 1)[0]);
   }
 
   return result;
+}
+
+export function isNewCard(word: WordDetail): boolean {
+  return (word.srs.state ?? 0) === 0 && (word.srs.reps ?? 0) === 0;
+}
+
+/**
+ * Number of never-seen words that received their first review today (local day).
+ */
+export async function getNewCardsIntroducedToday(): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ cnt: number }>>(
+    // Practice-only answers leave reps at 0, so they don't consume the new-card budget
+    `SELECT COUNT(*) as cnt FROM (
+       SELECT word_id, MIN(timestamp) as first_seen FROM review_logs GROUP BY word_id
+     ) f JOIN srs_reviews s ON s.word_id = f.word_id
+     WHERE f.first_seen >= $1 AND s.reps > 0`,
+    [getLocalStartOfDayIso()]
+  );
+  return rows[0]?.cnt ?? 0;
+}
+
+/**
+ * Build a study session from due words:
+ *  - every word contributes at most one due card per session (if both directions are due, the more
+ *    urgent one), so recognition and recall of the same word are never drilled back to back
+ *  - due review/learning cards first, ordered by urgency
+ *  - brand-new words (recognition card never reviewed) limited by the remaining daily new-card budget,
+ *    spread evenly through the session; new production cards are not budgeted (the word is already known)
+ *  - whole session capped at maxSessionSize
+ */
+export function buildReviewSession(
+  dueWords: WordDetail[],
+  newCardsAlreadyToday: number,
+  now: Date = new Date()
+): ReviewCard[] {
+  const limits = getStudyLimits();
+  // Words still waiting for AI analysis have no real meaning to review yet
+  const ready = dueWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
+  const cards = ready.flatMap((w) => {
+    const due = getDueCards(w, now);
+    if (due.length <= 1) return due;
+    return [due.reduce((a, b) =>
+      calculateUrgencyScore(b, now).urgencyScore > calculateUrgencyScore(a, now).urgencyScore ? b : a
+    )];
+  });
+
+  const isBudgetedNew = (c: ReviewCard) => c.direction === "recognition" && isNewCard(c);
+  const reviewCards = smartSortReviewQueue(cards.filter((c) => !isBudgetedNew(c)), now);
+  const newBudget = Math.max(0, limits.newCardsPerDay - newCardsAlreadyToday);
+  // Oldest new words first so the backlog is learned in the order it was added
+  const newCards = cards
+    .filter(isBudgetedNew)
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .slice(0, newBudget);
+
+  const reviewSlice = reviewCards.slice(0, limits.maxSessionSize);
+  const newSlice = newCards.slice(0, Math.max(0, limits.maxSessionSize - reviewSlice.length));
+  if (newSlice.length === 0) return reviewSlice;
+  if (reviewSlice.length === 0) return newSlice;
+
+  const result: ReviewCard[] = [];
+  const gap = reviewSlice.length / newSlice.length;
+  let nextNewAt = gap / 2;
+  let newIdx = 0;
+  for (let i = 0; i < reviewSlice.length; i++) {
+    result.push(reviewSlice[i]);
+    while (newIdx < newSlice.length && i + 1 >= nextNewAt) {
+      result.push(newSlice[newIdx++]);
+      nextNewAt += gap;
+    }
+  }
+  while (newIdx < newSlice.length) result.push(newSlice[newIdx++]);
+  return result;
+}
+
+// ─── 3b. RATING DERIVATION ─────────────────────────────────────────────────
+
+
+/** Fast production answers (ms) are graded Easy */
+const EASY_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
+  spelling: 6000,
+  cloze: 7000,
+  reverse_cloze: 7000,
+  listening: 8000,
+};
+
+export interface AnswerOutcome {
+  exerciseType: ExerciseType;
+  wrongAttempts: number;
+  usedHint?: boolean;
+  nearMiss?: boolean; // Accepted with a small typo
+  responseTimeMs: number;
+  srs?: Partial<SRSReview>;
+}
+
+/**
+ * Map an exercise outcome to an FSRS grade following FSRS semantics:
+ *  - any wrong attempt means the memory failed -> Again
+ *  - hint / small typo -> Hard
+ *  - correct on first try -> Good
+ *  - Easy only for fast, first-try *production* answers on cards already past the learning phase
+ *  - recognition exercises are capped at Good (choosing among options is easier than recall)
+ */
+export function deriveRating(outcome: AnswerOutcome): Rating {
+  if (outcome.wrongAttempts > 0) return Rating.Again;
+  if (outcome.usedHint || outcome.nearMiss) return Rating.Hard;
+  if (directionForExercise(outcome.exerciseType) === "recognition") return Rating.Good;
+
+  const easyMs = EASY_RESPONSE_MS[outcome.exerciseType];
+  const isReviewCard = (outcome.srs?.state ?? 0) === 2;
+  if (easyMs && isReviewCard && outcome.responseTimeMs > 0 && outcome.responseTimeMs <= easyMs) {
+    return Rating.Easy;
+  }
+  return Rating.Good;
+}
+
+/**
+ * Levenshtein distance with early exit once it exceeds `max`.
+ */
+function editDistance(a: string, b: string, max: number): number {
+  if (Math.abs(a.length - b.length) > max) return max + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    let rowMin = i;
+    for (let j = 1; j <= b.length; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      rowMin = Math.min(rowMin, cur[j]);
+    }
+    if (rowMin > max) return max + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+export type TypedAnswerMatch = "exact" | "near" | "wrong";
+
+/**
+ * Compare a typed answer with the target word.
+ * "near" = one-letter typo on words of 5+ letters, or a simple inflection (s/es/ed/d/ing) of the target.
+ */
+export function matchTypedAnswer(input: string, target: string): TypedAnswerMatch {
+  const guess = input.trim().toLowerCase().replace(/\s+/g, " ");
+  const answer = target.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!guess) return "wrong";
+  if (guess === answer) return "exact";
+  if (/^(s|es|ed|d|ing)$/.test(guess.startsWith(answer) ? guess.slice(answer.length) : "")) return "near";
+  if (answer.length >= 5 && editDistance(guess, answer, 1) <= 1) return "near";
+  return "wrong";
 }
 
 // ─── 4. REVIEW LOG ──────────────────────────────────────────────────────────
@@ -266,6 +396,8 @@ export interface ReviewLogEntry {
   rating: number;          // FSRS Rating value
   xpEarned: number;
   timestamp: string;       // ISO
+  isScheduled: boolean | null; // true = updated the FSRS schedule, false = practice only, null = legacy row
+  direction?: CardDirection | null; // card the answer was recorded on (null = legacy row, recognition)
 }
 
 /**
@@ -284,6 +416,7 @@ export async function initReviewLogsTable(existingDb?: Database): Promise<void> 
       rating INTEGER NOT NULL DEFAULT 3,
       xp_earned INTEGER NOT NULL DEFAULT 0,
       timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      is_scheduled INTEGER,
       FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
     );
   `);
@@ -300,9 +433,13 @@ export async function saveReviewLog(entry: Omit<ReviewLogEntry, "id">): Promise<
   const db = await getDatabase();
   const id = crypto.randomUUID();
   await db.execute(
-    `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
-    [id, entry.wordId, entry.exerciseType, entry.responseTimeMs, entry.isCorrect ? 1 : 0, entry.wrongAttempts, entry.rating, entry.xpEarned, entry.timestamp]
+    `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled, direction)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    [
+      id, entry.wordId, entry.exerciseType, entry.responseTimeMs, entry.isCorrect ? 1 : 0, entry.wrongAttempts,
+      entry.rating, entry.xpEarned, entry.timestamp, entry.isScheduled ? 1 : 0,
+      entry.direction ?? directionForExercise(entry.exerciseType),
+    ]
   );
   return id;
 }
@@ -322,6 +459,7 @@ export async function getWordReviewLogs(wordId: string, limit: number = 20): Pro
     rating: number;
     xp_earned: number;
     timestamp: string;
+    is_scheduled: number | null;
   }>>(
     `SELECT * FROM review_logs WHERE word_id = $1 ORDER BY timestamp DESC LIMIT $2`,
     [wordId, limit]
@@ -336,6 +474,7 @@ export async function getWordReviewLogs(wordId: string, limit: number = 20): Pro
     rating: r.rating,
     xpEarned: r.xp_earned,
     timestamp: r.timestamp,
+    isScheduled: r.is_scheduled === null || r.is_scheduled === undefined ? null : r.is_scheduled === 1,
   }));
 }
 
@@ -356,11 +495,9 @@ export async function getAverageResponseTime(wordId: string): Promise<number> {
  */
 export async function getTodayReviewCount(): Promise<number> {
   const db = await getDatabase();
-  const today = new Date();
-  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
   const rows = await db.select<Array<{ cnt: number }>>(
     `SELECT COUNT(*) as cnt FROM review_logs WHERE timestamp >= $1`,
-    [startOfDay]
+    [getLocalStartOfDayIso()]
   );
   return rows[0]?.cnt ?? 0;
 }
@@ -442,9 +579,17 @@ function getLevelFromXP(totalXP: number): { level: number; rank: string; emoji: 
   };
 }
 
-function getTodayStr(): string {
-  const d = new Date();
+function localDateKey(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function getTodayStr(): string {
+  return localDateKey(new Date());
+}
+
+function getLocalStartOfDayIso(): string {
+  const today = new Date();
+  return new Date(today.getFullYear(), today.getMonth(), today.getDate()).toISOString();
 }
 
 /**
@@ -484,8 +629,6 @@ export interface XPReward {
   totalXP: number;
   bonusReasons: string[];
 }
-
-import { Rating } from "ts-fsrs";
 
 export function calculateXPReward(
   rating: Rating,
@@ -656,48 +799,32 @@ function randomFrom<T>(items: T[]): T {
  * - State 3 (Relearning): High-urgency production (Spelling, Listening)
  * - State 2 (Review): Challenge recall (Cloze, Spelling, Reverse Cloze, Listening)
  */
-export function selectExerciseType(word: WordDetail): ExerciseType {
-  const { state = 0, lapses = 0, difficulty = 5, reps = 0 } = word.srs || {};
-  const hasExamples = word.examples && word.examples.length > 0 && word.examples[0].sentence_en.trim().length > 0;
+export function selectExerciseType(card: WordDetail & { direction?: CardDirection }): ExerciseType {
+  const { state = 0, difficulty = 5, reps = 0 } = card.srs || {};
+  const hasExamples = card.examples && card.examples.length > 0 && card.examples[0].sentence_en.trim().length > 0;
+  const withExamples = (types: ExerciseType[], fallback: ExerciseType[]): ExerciseType =>
+    randomFrom(hasExamples ? types : fallback);
 
-  // Leech word -> forces active production
-  if (lapses >= 4) {
-    return randomFrom(["spelling", "listening"]);
+  if ((card.direction ?? "recognition") === "production") {
+    // Recall the English word. Leeches and forgotten cards get the hardest drills.
+    if (isLeech(card.srs) || state === 3) return randomFrom(["spelling", "listening"]);
+    // Still learning recall: a sentence context (cloze) makes the first attempts easier
+    if (state === 0 || state === 1 || reps === 0) return withExamples(["cloze", "spelling"], ["spelling"]);
+    if (difficulty >= 7) return randomFrom(["spelling", "listening"]);
+    return withExamples(["cloze", "spelling", "listening"], ["spelling", "listening"]);
   }
 
-  // 0: New word
+  // Recognition: understand the word when reading/hearing it
   if (state === 0 || reps === 0) {
-    if (hasExamples) {
-      return randomFrom(["flip", "multiple_choice", "context_match"]);
-    }
-    return randomFrom(["flip", "multiple_choice"]);
+    return withExamples(["flip", "multiple_choice", "context_match"], ["flip", "multiple_choice"]);
   }
-
-  // 1: Learning
-  if (state === 1) {
-    if (reps <= 2) {
-      return randomFrom(["multiple_choice", hasExamples ? "sentence_builder" : "flip"]);
-    }
-    return randomFrom([hasExamples ? "cloze" : "spelling", hasExamples ? "sentence_builder" : "multiple_choice"]);
+  if (state === 1 || state === 3 || isLeech(card.srs)) {
+    return withExamples(["multiple_choice", "sentence_builder", "flip"], ["multiple_choice", "flip"]);
   }
-
-  // 3: Relearning (forgotten)
-  if (state === 3) {
-    return randomFrom(["spelling", hasExamples ? "cloze" : "spelling", "listening"]);
-  }
-
-  // 2: Review (consolidated)
-  if (state === 2) {
-    if (difficulty >= 7) {
-      return randomFrom(["spelling", "listening"]);
-    }
-    if (reps > 8 && hasExamples) {
-      return randomFrom(["listening", "reverse_cloze", "spelling"]);
-    }
-    return randomFrom([hasExamples ? "cloze" : "spelling", "spelling", hasExamples ? "reverse_cloze" : "multiple_choice"]);
-  }
-
-  return "flip";
+  return withExamples(
+    ["multiple_choice", "context_match", "reverse_cloze", "sentence_builder"],
+    ["multiple_choice", "flip"]
+  );
 }
 
 // ─── 8. EXERCISE DATA GENERATORS ────────────────────────────────────────────
@@ -756,23 +883,35 @@ export function generateMultipleChoiceQuestion(
   const shuffledSame = [...sameTopicOthers].sort(() => 0.5 - Math.random());
   const shuffledDiff = [...diffTopicOthers].sort(() => 0.5 - Math.random());
 
+  // Displayed text of an option; options that look identical to another one are skipped
+  const displayKey = (w: WordDetail) =>
+    (promptType === "en_to_vn" ? cleanMeaningForOption(w.meaning_vn) : w.word).trim().toLowerCase();
+  const usedTexts = new Set<string>([displayKey(targetWord)]);
+
   // Pick up to 2 from same topic, rest from other
   const selectedDistractors: WordDetail[] = [];
   while (selectedDistractors.length < 3) {
+    let next: WordDetail | undefined;
     if (shuffledSame.length > 0 && selectedDistractors.length < 2) {
-      selectedDistractors.push(shuffledSame.pop()!);
+      next = shuffledSame.pop()!;
     } else if (shuffledDiff.length > 0) {
-      selectedDistractors.push(shuffledDiff.pop()!);
+      next = shuffledDiff.pop()!;
     } else if (shuffledSame.length > 0) {
-      selectedDistractors.push(shuffledSame.pop()!);
+      next = shuffledSame.pop()!;
     } else {
       break;
     }
+    const key = displayKey(next);
+    if (!key || usedTexts.has(key)) continue;
+    usedTexts.add(key);
+    selectedDistractors.push(next);
   }
 
-  // Fallbacks if deck is too small
-  const fallbackVN = ["Tối ưu hoá hiệu suất", "Cấu trúc dữ liệu lồng nhau", "Xử lý bất đồng bộ", "Khả năng mở rộng hệ thống"];
-  const fallbackEN = ["refactor", "optimize", "scalability", "pipeline"];
+  // Fallbacks if deck is too small (skip ones equal to an existing option)
+  const fallbackVN = ["Tối ưu hoá hiệu suất", "Cấu trúc dữ liệu lồng nhau", "Xử lý bất đồng bộ", "Khả năng mở rộng hệ thống", "Kiểm thử tự động"]
+    .filter((t) => !usedTexts.has(t.toLowerCase()));
+  const fallbackEN = ["refactor", "optimize", "scalability", "pipeline", "deployment"]
+    .filter((t) => !usedTexts.has(t.toLowerCase()));
 
   let options: MultipleChoiceOption[] = [];
 
@@ -795,7 +934,7 @@ export function generateMultipleChoiceQuestion(
     });
 
     let fbIdx = 0;
-    while (options.length < 4) {
+    while (options.length < 4 && fbIdx < fallbackVN.length) {
       options.push({
         id: `fallback-${fbIdx}`,
         text: fallbackVN[fbIdx % fallbackVN.length],
@@ -832,7 +971,7 @@ export function generateMultipleChoiceQuestion(
     });
 
     let fbIdx = 0;
-    while (options.length < 4) {
+    while (options.length < 4 && fbIdx < fallbackEN.length) {
       options.push({
         id: `fallback-${fbIdx}`,
         text: fallbackEN[fbIdx % fallbackEN.length],
@@ -927,31 +1066,113 @@ export function prepareContextMatch(
   primaryWord: WordDetail,
   allWords: WordDetail[]
 ): ContextMatchPair[] {
-  const candidates = [primaryWord];
-  const otherWords = allWords.filter(
-    (w) => w.id !== primaryWord.id && w.examples && w.examples.length > 0 && w.examples[0].sentence_en.trim().length > 0
-  );
+  const pairs: ContextMatchPair[] = [];
+  const usedWords = new Set<string>();
+  const usedMeanings = new Set<string>();
 
-  const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
+  const tryAdd = (w: WordDetail): boolean => {
+    const wordKey = w.word.trim().toLowerCase();
+    const meaningKey = cleanMeaningForOption(w.meaning_vn || "").trim().toLowerCase();
+    if (!wordKey || usedWords.has(wordKey) || (meaningKey && usedMeanings.has(meaningKey))) return false;
+
+    // Use the first example where the word can actually be masked
+    for (const ex of w.examples || []) {
+      const sentence = ex?.sentence_en?.trim();
+      if (!sentence) continue;
+      const masked = maskWordInSentence(sentence, w.word);
+      if (!masked) continue;
+      usedWords.add(wordKey);
+      if (meaningKey) usedMeanings.add(meaningKey);
+      pairs.push({
+        wordId: w.id,
+        word: w.word,
+        maskedSentence: masked,
+        fullSentence: sentence,
+        meaningVN: w.meaning_vn,
+      });
+      return true;
+    }
+    return false;
+  };
+
+  // The card being reviewed must be part of the set
+  if (!tryAdd(primaryWord)) return [];
+
+  const shuffledOthers = allWords
+    .filter((w) => w.id !== primaryWord.id && w.examples && w.examples.length > 0)
+    .sort(() => 0.5 - Math.random());
   for (const other of shuffledOthers) {
-    if (candidates.length >= 3) break;
-    candidates.push(other);
+    if (pairs.length >= 3) break;
+    tryAdd(other);
   }
 
-  return candidates.map((w) => {
-    const rawSentence = w.examples[0]?.sentence_en || `The ${w.word} was critical for our team.`;
-    // Mask target word with blank
-    const regex = new RegExp(`\\b${w.word}(?:s|es|ed|ing|d)?\\b`, "gi");
-    const maskedSentence = rawSentence.replace(regex, "______");
+  // Caller falls back to another exercise when fewer than 3 pairs come back
+  return pairs;
+}
 
-    return {
-      wordId: w.id,
-      word: w.word,
-      maskedSentence,
-      fullSentence: rawSentence,
-      meaningVN: w.meaning_vn,
-    };
-  });
+/** Escape a string for literal use inside a RegExp. */
+export function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Whole-word regex source for `word` plus common inflections.
+ * Uses \w lookarounds instead of \b so words like "c++", "c#" or ".net" still match.
+ */
+export function wordFormsPattern(word: string): string {
+  const w = word.trim();
+  const forms = new Set<string>([escapeRegExp(w)]);
+  if (/^[a-z]+$/i.test(w)) {
+    const lower = w.toLowerCase();
+    const suffixes = ["s", "es", "ed", "d", "ing"];
+    suffixes.forEach((s) => forms.add(escapeRegExp(w + s)));
+    if (lower.endsWith("e")) {
+      forms.add(escapeRegExp(w.slice(0, -1) + "ing"));
+    }
+    if (/[^aeiou]y$/.test(lower)) {
+      forms.add(escapeRegExp(w.slice(0, -1) + "ies"));
+      forms.add(escapeRegExp(w.slice(0, -1) + "ied"));
+    }
+    if (/[^aeiou][aeiou][bdgklmnprt]$/.test(lower)) {
+      const last = w.slice(-1);
+      forms.add(escapeRegExp(w + last + "ed"));
+      forms.add(escapeRegExp(w + last + "ing"));
+    }
+  }
+  // Longest first so "stopped" wins over "stop"
+  const alts = [...forms].sort((a, b) => b.length - a.length).join("|");
+  return `(?<![\\w])(?:${alts})(?![\\w])`;
+}
+
+/** Replace the first occurrence of `word` (or an inflection) with a blank; null when not found. */
+export function maskWordInSentence(sentence: string, word: string, blank = "______"): string | null {
+  if (!word.trim()) return null;
+  const match = new RegExp(wordFormsPattern(word), "i").exec(sentence);
+  if (!match) return null;
+  return sentence.slice(0, match.index) + blank + sentence.slice(match.index + match[0].length);
+}
+
+/**
+ * Normalize a typed answer for comparison: case, curly quotes, common contractions, punctuation, whitespace.
+ * "'s" and "'d" are ambiguous (is/has, had/would) so they are left alone.
+ */
+export function normalizeTypedText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[‘’ʼ´`]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/\bwon't\b/g, "will not")
+    .replace(/\bcan't\b/g, "can not")
+    .replace(/\bshan't\b/g, "shall not")
+    .replace(/\bcannot\b/g, "can not")
+    .replace(/n't\b/g, " not")
+    .replace(/'re\b/g, " are")
+    .replace(/'ll\b/g, " will")
+    .replace(/'ve\b/g, " have")
+    .replace(/\bi'm\b/g, "i am")
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 // ─── 9. REVIEW ANALYTICS & STATS ────────────────────────────────────────────
@@ -1006,7 +1227,9 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
   };
 
   logs.forEach((log) => {
-    const dateKey = log.timestamp.split("T")[0] || log.timestamp.substring(0, 10);
+    // Group by the learner's local day, not the UTC day of the ISO timestamp
+    const parsed = new Date(log.timestamp);
+    const dateKey = isNaN(parsed.getTime()) ? log.timestamp.substring(0, 10) : localDateKey(parsed);
     if (!dayMap[dateKey]) dayMap[dateKey] = { count: 0, correct: 0 };
     dayMap[dateKey].count++;
     if (log.is_correct === 1) dayMap[dateKey].correct++;

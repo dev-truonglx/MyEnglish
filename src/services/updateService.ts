@@ -119,11 +119,14 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
   },
 
   downloadAndInstall: async () => {
-    const { update } = get();
-    if (!update) return;
+    const { update, status } = get();
+    // Ignore double clicks while a download is already running
+    if (!update || status === "downloading") return;
 
     set({ status: "downloading", downloadProgress: 0, errorMessage: null });
     try {
+      // On Windows the installer quits the app during install, so the close-to-tray guard must be off.
+      // It is restored in the catch below if the download/install fails.
       try {
         await invoke("prepare_update_exit");
       } catch (_) {}
@@ -151,6 +154,9 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
       set({ status: "downloaded", downloadProgress: 100 });
     } catch (err: any) {
       console.error("Failed to download and install update:", err);
+      try {
+        await invoke("cancel_update_exit");
+      } catch (_) {}
       set({ status: "error", errorMessage: err?.message || String(err) });
     }
   },
@@ -162,6 +168,9 @@ export const useUpdateStore = create<UpdateStoreState>((set, get) => ({
       await relaunch();
     } catch (err) {
       console.error("Failed to relaunch application:", err);
+      try {
+        await invoke("cancel_update_exit");
+      } catch (_) {}
     }
   },
 

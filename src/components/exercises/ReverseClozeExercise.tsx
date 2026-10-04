@@ -1,8 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { cleanMeaningForOption } from "@/services/smartReview";
+import { cleanMeaningForOption, wordFormsPattern } from "@/services/smartReview";
 
 interface ReverseClozeExerciseProps {
   word: WordDetail;
@@ -41,20 +41,27 @@ export default function ReverseClozeExercise({
     };
 
     const otherWords = allWords.filter(
-      (w) => w.id !== word.id && w.meaning_vn.trim().length > 0
+      (w) => w.id !== word.id && (w.meaning_vn || "").trim().length > 0
     );
     const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
 
-    const distractorOptions = shuffledOthers.slice(0, 3).map((w) => ({
-      id: w.id,
-      text: cleanMeaningForOption(w.meaning_vn),
-      isCorrect: false,
-    }));
+    // Skip distractors whose displayed text equals the correct one (or another distractor)
+    const usedTexts = new Set<string>([correctOption.text.trim().toLowerCase()]);
+    const distractorOptions: Array<{ id: string; text: string; isCorrect: boolean }> = [];
+    for (const w of shuffledOthers) {
+      if (distractorOptions.length >= 3) break;
+      const text = cleanMeaningForOption(w.meaning_vn);
+      const key = text.trim().toLowerCase();
+      if (!key || usedTexts.has(key)) continue;
+      usedTexts.add(key);
+      distractorOptions.push({ id: w.id, text, isCorrect: false });
+    }
 
     // Fallbacks
-    const generic = ["Khả năng xử lý song song", "Bộ đệm lưu trữ tạm", "Độ trễ truyền tải mạng", "Kế thừa đa hình"];
+    const generic = ["Khả năng xử lý song song", "Bộ đệm lưu trữ tạm", "Độ trễ truyền tải mạng", "Kế thừa đa hình", "Kiểm thử tự động"]
+      .filter((t) => !usedTexts.has(t.toLowerCase()));
     let fIdx = 0;
-    while (distractorOptions.length < 3) {
+    while (distractorOptions.length < 3 && fIdx < generic.length) {
       distractorOptions.push({
         id: `fb-${fIdx}`,
         text: generic[fIdx % generic.length],
@@ -73,6 +80,14 @@ export default function ReverseClozeExercise({
     setShakeIdx(null);
   }, [word]);
 
+  // Pending completion timer, cleared on unmount so a stale card is never graded
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
+
   if (!example || !example.sentence_en) return null;
 
   const handleSelect = (opt: { id: string; text: string; isCorrect: boolean }, idx: number) => {
@@ -88,7 +103,9 @@ export default function ReverseClozeExercise({
       else if (wrongAttempts === 1) rating = Rating.Good;
       else rating = Rating.Hard;
 
-      setTimeout(() => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      completeTimerRef.current = setTimeout(() => {
+        completeTimerRef.current = null;
         onComplete(true, wrongAttempts, rating);
       }, 900);
     } else {
@@ -101,11 +118,12 @@ export default function ReverseClozeExercise({
   // Highlight target word in sentence
   const renderSentenceWithHighlight = () => {
     const rawSentence = example.sentence_en;
-    const regex = new RegExp(`(\\b${word.word}(?:s|es|ed|ing|d)?\\b)`, "gi");
+    // Escaped pattern; the capture group puts matches at odd indices
+    const regex = new RegExp(`(${wordFormsPattern(word.word)})`, "gi");
     const parts = rawSentence.split(regex);
 
     return parts.map((part, i) => {
-      if (part.toLowerCase().startsWith(word.word.toLowerCase().slice(0, Math.min(word.word.length, 4)))) {
+      if (i % 2 === 1) {
         return (
           <span
             key={i}

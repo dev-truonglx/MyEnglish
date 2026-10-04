@@ -21,6 +21,7 @@ export interface ReminderSettings {
   snoozedUntil: number | null; // timestamp ms
   includeGrammar: boolean; // whether to review grammar in popup alongside vocabulary
   grammarLevels: GrammarLevel[]; // selected grammar levels (multi-select)
+  respectFocus: boolean; // postpone the popup while full screen, sharing the screen, in Focus mode or idle
 }
 
 const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
@@ -37,6 +38,7 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   snoozedUntil: null,
   includeGrammar: true,
   grammarLevels: ["A1", "A2", "B1"],
+  respectFocus: true,
 };
 
 /**
@@ -114,12 +116,8 @@ export function cancelSnooze(): void {
 export function isSnoozed(): boolean {
   const settings = getReminderSettings();
   if (!settings.snoozedUntil) return false;
-  if (Date.now() < settings.snoozedUntil) {
-    return true;
-  }
-  // Auto-clear expired snooze
-  saveReminderSettings({ snoozedUntil: null });
-  return false;
+  // Expired snooze is kept until the popup is shown, so the next popup fires at snooze end
+  return Date.now() < settings.snoozedUntil;
 }
 
 /**
@@ -129,10 +127,7 @@ export function getSnoozeRemainingMinutes(): number {
   const settings = getReminderSettings();
   if (!settings.snoozedUntil) return 0;
   const remainingMs = settings.snoozedUntil - Date.now();
-  if (remainingMs <= 0) {
-    saveReminderSettings({ snoozedUntil: null });
-    return 0;
-  }
+  if (remainingMs <= 0) return 0;
   return Math.ceil(remainingMs / (60 * 1000));
 }
 
@@ -163,6 +158,11 @@ export function getLastPopupDisplayTime(): number {
 export function recordPopupDisplayed(timestamp: number = Date.now()): void {
   try {
     localStorage.setItem(LAST_POPUP_DISPLAY_KEY, timestamp.toString());
+    // The popup consumed an expired snooze: clear it so normal interval scheduling resumes
+    const { snoozedUntil } = getReminderSettings();
+    if (snoozedUntil && snoozedUntil <= timestamp) {
+      saveReminderSettings({ snoozedUntil: null });
+    }
     window.dispatchEvent(
       new CustomEvent("myenglish-popup-displayed", { detail: { timestamp } })
     );
@@ -181,14 +181,16 @@ export function getNextReminderTime(): number {
     return 0;
   }
 
+  const intervalMs = settings.intervalMinutes * 60 * 1000;
+  const lastDisplay = getLastPopupDisplayTime();
+
   // 1. NẾU ĐANG BỊ HOÃN (SNOOZED): Thời điểm hiển thị kế tiếp CHÍNH XÁC là khi hết thời gian hoãn!
-  if (settings.snoozedUntil && settings.snoozedUntil > Date.now()) {
+  // Still applies after the snooze expired, until the popup is actually shown again.
+  if (settings.snoozedUntil && settings.snoozedUntil > lastDisplay) {
     return settings.snoozedUntil;
   }
 
   // 2. NẾU KHÔNG HOÃN: Thời gian hiển thị kế tiếp = lần cuối cùng popup hiển thị + chu kỳ cài đặt
-  const intervalMs = settings.intervalMinutes * 60 * 1000;
-  const lastDisplay = getLastPopupDisplayTime();
 
   // If popup has never been displayed yet, next time is calculated from now
   const baseTime = lastDisplay > 0 ? lastDisplay : Date.now();

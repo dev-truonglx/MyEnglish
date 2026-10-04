@@ -224,42 +224,36 @@ export function getAchievements(context?: {
   });
 }
 
-/**
- * Check achievements against current activity and trigger unlock if met
- */
-export function checkAndUnlockAchievements(context: {
-  totalWords?: number;
-  currentStreak?: number;
+export interface AchievementCheckContext {
+  totalWords?: number;        // whole collection size (not just this session)
+  currentStreak?: number;     // real day streak
   consecutiveCorrect?: number;
   sessionReviewCount?: number;
   leechesSlain?: number;
   responseTimeMs?: number;
   isCorrect?: boolean;
-  topicMasterCount?: number;
-}): AchievementBadge[] {
-  let stored: Record<string, StoredAchievement> = {};
+  topicMasterCount?: number;  // max mastered words within a single topic
+}
+
+function readStoredAchievements(): Record<string, StoredAchievement> {
   try {
     const raw = localStorage.getItem(ACHIEVEMENTS_STORAGE_KEY);
-    if (raw) stored = JSON.parse(raw);
+    if (raw) return JSON.parse(raw);
   } catch {}
+  return {};
+}
 
+/**
+ * Check achievements against current activity and trigger unlock if met
+ */
+export function checkAndUnlockAchievements(context: AchievementCheckContext = {}): AchievementBadge[] {
+  const stored = readStoredAchievements();
   const currentHour = new Date().getHours();
-  const newlyUnlocked: AchievementBadge[] = [];
+  const candidateIds: string[] = [];
 
   const evaluateBadge = (id: string, condition: boolean) => {
-    if (condition && !stored[id]) {
-      const def = BADGE_DEFINITIONS.find((b) => b.id === id);
-      if (def) {
-        stored[id] = { unlockedAt: new Date().toISOString() };
-        awardXP(def.xpBonus);
-        newlyUnlocked.push({
-          ...def,
-          isUnlocked: true,
-          unlockedAt: stored[id].unlockedAt,
-          currentValue: def.targetValue,
-          progress: 100,
-        });
-      }
+    if (condition && !stored[id] && !candidateIds.includes(id)) {
+      candidateIds.push(id);
     }
   };
 
@@ -306,19 +300,48 @@ export function checkAndUnlockAchievements(context: {
     }
   }
 
-  if (newlyUnlocked.length > 0) {
-    try {
-      localStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(stored));
-      triggerConfetti(2500);
+  if (candidateIds.length === 0) return [];
 
-      // Dispatch event
-      window.dispatchEvent(
-        new CustomEvent("myenglish-badge-unlocked", {
-          detail: { badges: newlyUnlocked },
-        })
-      );
-    } catch {}
+  // Re-read right before writing so another window's unlock isn't duplicated or clobbered
+  const latest = readStoredAchievements();
+  const newlyUnlocked: AchievementBadge[] = [];
+  const unlockedAt = new Date().toISOString();
+  for (const id of candidateIds) {
+    if (latest[id]) continue;
+    const def = BADGE_DEFINITIONS.find((b) => b.id === id);
+    if (!def) continue;
+    latest[id] = { unlockedAt };
+    newlyUnlocked.push({
+      ...def,
+      isUnlocked: true,
+      unlockedAt,
+      currentValue: def.targetValue,
+      progress: 100,
+    });
   }
+
+  if (newlyUnlocked.length === 0) return [];
+
+  // Persist first; only award XP once the unlock is safely stored
+  try {
+    localStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(latest));
+  } catch (err) {
+    console.warn("Failed to persist achievements:", err);
+    return [];
+  }
+
+  for (const badge of newlyUnlocked) {
+    awardXP(badge.xpBonus);
+  }
+
+  try {
+    triggerConfetti(2500);
+    window.dispatchEvent(
+      new CustomEvent("myenglish-badge-unlocked", {
+        detail: { badges: newlyUnlocked },
+      })
+    );
+  } catch {}
 
   return newlyUnlocked;
 }

@@ -15,7 +15,6 @@ interface HeatmapProps {
 interface DayData {
   dateStr: string; // YYYY-MM-DD
   count: number;
-  dayOfWeek: number; // 0 = Sun, 1 = Mon ...
   formattedDate: string;
 }
 
@@ -60,9 +59,11 @@ export default function Heatmap({ words }: HeatmapProps) {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    const totalDaysToShow = 20 * 7;
+    // ~20 weeks ending today; start on a Sunday so each row matches its weekday label
     const startDate = new Date(today);
-    startDate.setDate(today.getDate() - totalDaysToShow + 1);
+    startDate.setDate(today.getDate() - 20 * 7 + 1);
+    startDate.setDate(startDate.getDate() - startDate.getDay());
+    const totalDaysToShow = Math.round((today.getTime() - startDate.getTime()) / 86_400_000) + 1;
 
     let uniqueActive = 0;
     let sumTotal = 0;
@@ -78,7 +79,6 @@ export default function Heatmap({ words }: HeatmapProps) {
       days.push({
         dateStr,
         count,
-        dayOfWeek: cur.getDay(),
         formattedDate: cur.toLocaleDateString("vi-VN", {
           month: "short",
           day: "numeric",

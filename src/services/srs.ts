@@ -8,12 +8,18 @@ import {
   State,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getAllWords } from "./db";
-import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
+import { getDatabase, getAllWords, getDueWordsFromDb, countDueWords } from "./db";
+import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 
 export { Rating, State };
 
+const SRS_TABLE: Record<CardDirection, string> = {
+  recognition: "srs_reviews",
+  production: "srs_production",
+};
+
 export interface FSRSResult {
+  direction: CardDirection; // card that was actually updated
   stability: number;
   difficulty: number;
   elapsed_days: number;
@@ -21,6 +27,7 @@ export interface FSRSResult {
   reps: number;
   lapses: number;
   state: number;
+  learningSteps: number;
   lastReview?: string;
   nextReviewDate: string;
   // Backward compatibility fields with SM-2
@@ -29,10 +36,35 @@ export interface FSRSResult {
   repetitions: number;
 }
 
-export type SM2Result = FSRSResult;
-
 const FSRS_RETENTION_KEY = "myenglish_fsrs_request_retention";
 const FSRS_MAX_INTERVAL_KEY = "myenglish_fsrs_max_interval";
+const STUDY_LIMITS_KEY = "myenglish_study_limits_v1";
+
+export interface StudyLimits {
+  newCardsPerDay: number; // Max never-reviewed words introduced per day
+  maxSessionSize: number; // Max cards in one flashcard session
+}
+
+export const DEFAULT_STUDY_LIMITS: StudyLimits = {
+  newCardsPerDay: 10,
+  maxSessionSize: 30,
+};
+
+export function getStudyLimits(): StudyLimits {
+  try {
+    const raw = localStorage.getItem(STUDY_LIMITS_KEY);
+    if (!raw) return { ...DEFAULT_STUDY_LIMITS };
+    return { ...DEFAULT_STUDY_LIMITS, ...JSON.parse(raw) };
+  } catch {
+    return { ...DEFAULT_STUDY_LIMITS };
+  }
+}
+
+export function saveStudyLimits(limits: Partial<StudyLimits>): void {
+  try {
+    localStorage.setItem(STUDY_LIMITS_KEY, JSON.stringify({ ...getStudyLimits(), ...limits }));
+  } catch {}
+}
 
 export interface FSRSSettings {
   requestRetention: number; // e.g. 0.9 (90%)
@@ -72,19 +104,27 @@ export function saveFSRSSettings(settings: Partial<FSRSSettings>): void {
 /**
  * Instantiate configured FSRS scheduler instance
  */
+let cachedScheduler: { key: string; scheduler: ReturnType<typeof fsrs> } | null = null;
+
 export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
   const current = getFSRSSettings();
   const request_retention = customSettings?.requestRetention ?? current.requestRetention;
   const maximum_interval = customSettings?.maximumInterval ?? current.maximumInterval;
 
+  const key = `${request_retention}|${maximum_interval}`;
+  if (cachedScheduler?.key === key) return cachedScheduler.scheduler;
+
   const params = generatorParameters({
     request_retention,
     maximum_interval,
-    enable_fuzz: false,
+    // Fuzz spreads out cards added on the same day so reviews don't pile up on one date
+    enable_fuzz: true,
     enable_short_term: true,
   });
 
-  return fsrs(params);
+  const scheduler = fsrs(params);
+  cachedScheduler = { key, scheduler };
+  return scheduler;
 }
 
 /**
@@ -124,8 +164,28 @@ export function srsRowToCard(row?: Partial<SRSReview>): Card {
       ? State.Review
       : State.New) as State,
     last_review: row.last_review ? new Date(row.last_review) : undefined,
-    learning_steps: empty.learning_steps ?? 0,
+    learning_steps: row.learning_steps ?? 0,
   };
+}
+
+/**
+ * Memory retrievability R ∈ [0, 1] computed by the same FSRS model that schedules the card.
+ */
+export function getCardRetrievability(row: Partial<SRSReview>, now: Date = new Date()): number {
+  if (!row.stability || row.stability <= 0) return 0;
+  // Legacy rows without last_review: estimate it from the scheduled interval
+  const card = srsRowToCard(row);
+  if (!card.last_review) {
+    const scheduled = row.scheduled_days ?? row.interval ?? 0;
+    card.last_review = new Date(card.due.getTime() - scheduled * 24 * 60 * 60 * 1000);
+  }
+  if (card.last_review.getTime() > now.getTime()) return 1;
+  try {
+    const r = getFSRSScheduler().get_retrievability(card, now, false);
+    return Number.isFinite(r) ? Math.max(0, Math.min(1, r)) : 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -181,62 +241,10 @@ export function getNextIntervalPreviews(
 }
 
 /**
- * Pure SuperMemo-2 (SM-2) algorithm fallback for legacy tests / comparisons.
- */
-export function calculateSM2(
-  quality: number,
-  currentRepetitions: number,
-  currentInterval: number,
-  currentEaseFactor: number = 2.5,
-  currentLapses: number = 0
-): SM2Result {
-  const q = Math.max(0, Math.min(5, Math.round(quality)));
-  let nextRepetitions = currentRepetitions;
-  let nextInterval = currentInterval;
-
-  if (q >= 3) {
-    if (currentRepetitions === 0) {
-      nextInterval = 1;
-    } else if (currentRepetitions === 1) {
-      nextInterval = 6;
-    } else {
-      nextInterval = Math.round(currentInterval * currentEaseFactor);
-    }
-    nextRepetitions = currentRepetitions + 1;
-  } else {
-    nextRepetitions = 0;
-    nextInterval = 1;
-  }
-
-  const delta = 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02);
-  let nextEaseFactor = currentEaseFactor + delta;
-  if (nextEaseFactor < 1.3) nextEaseFactor = 1.3;
-  nextEaseFactor = Number(nextEaseFactor.toFixed(2));
-
-  const nextDate = new Date(Date.now() + nextInterval * 24 * 60 * 60 * 1000);
-
-  return {
-    stability: nextInterval,
-    difficulty: 5.0,
-    elapsed_days: 0,
-    scheduled_days: nextInterval,
-    reps: nextRepetitions,
-    lapses: q < 3 ? currentLapses + 1 : currentLapses,
-    state: nextRepetitions > 0 ? 2 : 0,
-    easeFactor: nextEaseFactor,
-    interval: nextInterval,
-    repetitions: nextRepetitions,
-    nextReviewDate: nextDate.toISOString(),
-  };
-}
-
-/**
  * Fetch all words currently due for repetition (next_review_date <= now)
  */
 export async function getDueWords(): Promise<WordDetail[]> {
-  const all = await getAllWords();
-  const now = new Date();
-  return all.filter((item) => new Date(item.srs.next_review_date) <= now);
+  return getDueWordsFromDb(new Date());
 }
 
 /**
@@ -244,16 +252,23 @@ export async function getDueWords(): Promise<WordDetail[]> {
  */
 export async function recordReview(
   wordId: string,
-  ratingOrQuality: Rating | number
+  rating: Rating,
+  requestedDirection: CardDirection = "recognition"
 ): Promise<FSRSResult> {
   const db = await getDatabase();
   const now = new Date();
 
-  // 1. Fetch existing SRS data
-  const srsRows = await db.select<SRSReview[]>(
-    `SELECT * FROM srs_reviews WHERE word_id = $1 LIMIT 1;`,
+  // 1. Fetch existing SRS data for the card. A production exercise on a word that has no
+  //    production card yet (still learning by recognition) is recorded on the recognition card.
+  let direction = requestedDirection;
+  let srsRows = await db.select<SRSReview[]>(
+    `SELECT * FROM ${SRS_TABLE[direction]} WHERE word_id = $1 LIMIT 1;`,
     [wordId]
   );
+  if (direction === "production" && srsRows.length === 0) {
+    direction = "recognition";
+    srsRows = await db.select<SRSReview[]>(`SELECT * FROM srs_reviews WHERE word_id = $1 LIMIT 1;`, [wordId]);
+  }
   const current = srsRows[0] || {
     word_id: wordId,
     ease_factor: 2.5,
@@ -268,19 +283,12 @@ export async function recordReview(
     lapses: 0,
     state: 0 as FSRSState,
     last_review: null,
+    learning_steps: 0,
   };
 
-  // 2. Normalize input to FSRS Rating
-  let fsrsRating: Rating;
-  if (ratingOrQuality === 5 || ratingOrQuality === Rating.Easy) {
-    fsrsRating = Rating.Easy;
-  } else if (ratingOrQuality === Rating.Good) {
-    fsrsRating = Rating.Good;
-  } else if (ratingOrQuality === Rating.Hard) {
-    fsrsRating = Rating.Hard;
-  } else {
-    fsrsRating = Rating.Again;
-  }
+  // 2. Normalize input to a valid FSRS grade
+  const fsrsRating: Rating =
+    rating === Rating.Easy || rating === Rating.Good || rating === Rating.Hard ? rating : Rating.Again;
 
   // 3. Compute new FSRS values
   const scheduler = getFSRSScheduler();
@@ -289,26 +297,19 @@ export async function recordReview(
 
   const updatedCard = result.card;
 
-  // Ensure lapses properly counts every failed review attempt on studied cards
-  if (fsrsRating === Rating.Again && updatedCard.lapses === (current.lapses ?? 0)) {
-    // If ts-fsrs did not increment lapses because the card was already in Relearning or Learning state,
-    // but the card has already been studied before (reps > 0 or state === State.Relearning),
-    // increment lapses so chronic difficulty (Leech) is accurately identified.
-    if ((current.reps ?? 0) > 0 || current.state === State.Relearning) {
-      updatedCard.lapses = (current.lapses ?? 0) + 1;
-    }
-  }
+  // Lapses are counted by ts-fsrs only when a Review card is forgotten (Review -> Relearning),
+  // so failing repeatedly inside one learning session does not turn a word into a leech.
 
   const nextReviewDateStr = updatedCard.due.toISOString();
   const lastReviewStr = now.toISOString();
 
   // 4. Persist back into SQLite (updating both FSRS & legacy compatibility fields)
   await db.execute(
-    `INSERT INTO srs_reviews (
+    `INSERT INTO ${SRS_TABLE[direction]} (
        word_id, ease_factor, interval, repetitions, next_review_date,
-       stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review
+       stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT(word_id) DO UPDATE SET
        ease_factor = excluded.ease_factor,
        interval = excluded.interval,
@@ -321,7 +322,8 @@ export async function recordReview(
        reps = excluded.reps,
        lapses = excluded.lapses,
        state = excluded.state,
-       last_review = excluded.last_review;`,
+       last_review = excluded.last_review,
+       learning_steps = excluded.learning_steps;`,
     [
       wordId,
       2.5, // ease_factor legacy default
@@ -336,10 +338,22 @@ export async function recordReview(
       updatedCard.lapses,
       updatedCard.state,
       lastReviewStr,
+      updatedCard.learning_steps ?? 0,
     ]
   );
 
+  // Once a word is known by recognition, start training recall with its own production card.
+  // It becomes due tomorrow so both directions are not drilled in the same session.
+  if (direction === "recognition" && updatedCard.state === State.Review) {
+    await db.execute(
+      `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
+       VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
+      [wordId, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()]
+    );
+  }
+
   return {
+    direction,
     stability: Number(updatedCard.stability.toFixed(4)),
     difficulty: Number(updatedCard.difficulty.toFixed(4)),
     elapsed_days: updatedCard.elapsed_days,
@@ -347,6 +361,7 @@ export async function recordReview(
     reps: updatedCard.reps,
     lapses: updatedCard.lapses,
     state: updatedCard.state,
+    learningSteps: updatedCard.learning_steps ?? 0,
     lastReview: lastReviewStr,
     nextReviewDate: nextReviewDateStr,
     interval: updatedCard.scheduled_days,
@@ -393,8 +408,8 @@ export async function triggerDesktopNotification(title: string, body: string): P
  */
 export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Promise<number> {
   try {
-    const dueWords = await getDueWords();
-    if (dueWords.length === 0) {
+    const dueCount = await countDueWords();
+    if (dueCount === 0) {
       if (sendIfZero) {
         await triggerDesktopNotification(
           "MyEnglish • Ôn tập từ vựng",
@@ -406,10 +421,10 @@ export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Pro
 
     await triggerDesktopNotification(
       "MyEnglish • Ôn tập từ vựng!",
-      `Bạn có ${dueWords.length} từ vựng cần ôn tập hôm nay. Dành 3 phút ôn ngay nhé!`
+      `Bạn có ${dueCount} từ vựng cần ôn tập hôm nay. Dành 3 phút ôn ngay nhé!`
     );
 
-    return dueWords.length;
+    return dueCount;
   } catch (err) {
     console.warn("Could not send system notification:", err);
     return 0;
@@ -515,11 +530,40 @@ import {
  * Listens to native Rust background heartbeat (every 30s) to bypass
  * browser timer throttling when minimized or closed to tray.
  */
+export interface PopupBlockers {
+  fullscreen_app: string | null;
+  screen_sharing_app: string | null;
+  focus_mode: boolean | null;
+  idle_seconds: number;
+}
+
+/** Away from the computer for this long: hold the popup until the user is back */
+export const IDLE_POSTPONE_SECONDS = 5 * 60;
+
+/**
+ * Why the review popup should wait right now, or null when it is fine to show it.
+ * Detection is done natively (macOS); on other platforms or on error nothing blocks.
+ */
+export async function getPopupBlockReason(): Promise<string | null> {
+  try {
+    const b = await invoke<PopupBlockers>("get_popup_blockers");
+    if (!b) return null;
+    if (b.screen_sharing_app) return `Đang chia sẻ màn hình (${b.screen_sharing_app})`;
+    if (b.fullscreen_app) return `Đang dùng ${b.fullscreen_app} ở chế độ toàn màn hình`;
+    if (b.focus_mode) return "Đang bật Focus / Không làm phiền";
+    if (b.idle_seconds >= IDLE_POSTPONE_SECONDS) return "Bạn đang không dùng máy";
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 class SRSBackgroundWorker {
   private timerId: number | null = null;
   private unlistenHeartbeat: (() => void) | null = null;
   private unlistenPopupOpened: (() => void) | null = null;
   private isTicking = false;
+  private lastBlockReason: string | null = null;
 
   public async start() {
     this.stop();
@@ -592,13 +636,26 @@ class SRSBackgroundWorker {
         }
       }
 
-      const dueWords = await getDueWords();
+      if (!forceTrigger) {
+        if (settings.triggerCondition === "due_only") {
+          if ((await countDueWords()) === 0) return;
+        } else {
+          const db = await getDatabase();
+          const rows = await db.select<{ cnt: number }[]>(`SELECT COUNT(*) as cnt FROM words;`);
+          if ((rows[0]?.cnt ?? 0) === 0) return;
+        }
 
-      if (settings.triggerCondition === "due_only") {
-        if (dueWords.length === 0 && !forceTrigger) return;
-      } else {
-        const all = await getAllWords();
-        if (all.length === 0 && !forceTrigger) return;
+        // Don't cover the screen while presenting, sharing, in Focus mode or away from the computer.
+        // The popup stays pending and is retried on the next tick (every 15-30s).
+        if (settings.respectFocus) {
+          const reason = await getPopupBlockReason();
+          if (reason) {
+            if (reason !== this.lastBlockReason) console.info(`[SRS] Hoãn popup ôn tập: ${reason}`);
+            this.lastBlockReason = reason;
+            return;
+          }
+        }
+        this.lastBlockReason = null;
       }
 
       // Kích hoạt Focus Review Modal toàn màn hình

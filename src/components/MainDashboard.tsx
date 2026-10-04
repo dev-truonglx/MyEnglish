@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef, type FormEvent } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, memo, type FormEvent } from "react";
 import {
   BookOpen,
   Sparkles,
@@ -39,9 +39,10 @@ import {
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { getAllWords, deleteWord, updateWordTopic, PREDEFINED_TOPICS } from "@/services/db";
-import { pipeline, type PipelineItem } from "@/services/pipeline";
-import { srsWorker, checkAndNotifyDueReviews } from "@/services/srs";
-import { parseTerms, parseCollocations, type WordDetail } from "@/types/database";
+import { pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
+import { srsWorker, checkAndNotifyDueReviews, getStudyLimits } from "@/services/srs";
+import { parseTerms, parseCollocations, type WordDetail, type ReviewCard } from "@/types/database";
+import { getDueCards, isWordDue, practiceCards } from "@/services/cards";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { getSavedTheme, setTheme, type ThemeMode } from "@/services/theme";
 import { CURRENT_VERSION, useUpdateStore } from "@/services/updateService";
@@ -50,6 +51,8 @@ import {
   isLeech,
   getLeechWords,
   smartSortReviewQueue,
+  buildReviewSession,
+  getNewCardsIntroducedToday,
   getXPState,
   type XPState,
 } from "@/services/smartReview";
@@ -67,6 +70,10 @@ import {
   type AutoReplenishSummary,
 } from "@/services/autoReplenish";
 import { assessUserProficiency } from "@/services/userProficiency";
+
+const GALLERY_PAGE_SIZE = 60;
+const DUE_LIST_LIMIT = 50;
+const EMPTY_TERMS: ReturnType<typeof parseTerms> = [];
 
 interface MainDashboardProps {
   onOpenQuickInputPreview?: () => void;
@@ -91,7 +98,9 @@ export default function MainDashboard({
   const [inputWord, setInputWord] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
-  const [reviewSet, setReviewSet] = useState<WordDetail[]>([]);
+  const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
+  // Practice sessions (no due cards / "Practice All") never change the FSRS schedule
+  const [isPracticeSession, setIsPracticeSession] = useState(false);
   const [wordToDelete, setWordToDelete] = useState<{ id: string; word: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [globalToast, setGlobalToast] = useState<{ title: string; body: string; target?: string } | null>(null);
@@ -192,7 +201,7 @@ export default function MainDashboard({
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
   }, []);
 
-  // Auto-replenish listener & background check
+  // Auto-replenish listener (registered once)
   useEffect(() => {
     const onAutoReplenish = (e: Event) => {
       const custom = e as CustomEvent<AutoReplenishSummary>;
@@ -202,25 +211,34 @@ export default function MainDashboard({
       }
     };
     window.addEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
-
-    if (words.length > 0 && !loading) {
-      const timer = setTimeout(() => {
-        checkAutoReplenishEligibility(words)
-          .then((eligibility) => {
-            if (eligibility.isEligible) {
-              console.log("[AutoReplenish] Đủ điều kiện tự động: Kích hoạt sinh từ vựng và bài tập mới...");
-              triggerAutoReplenish(words, false);
-            }
-          })
-          .catch((err) => console.warn("Auto-replenish eligibility check:", err));
-      }, 4000);
-      return () => {
-        clearTimeout(timer);
-        window.removeEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
-      };
-    }
-
     return () => window.removeEventListener("myenglish-auto-replenish-triggered", onAutoReplenish);
+  }, []);
+
+  // Background eligibility check: runs once after the initial load
+  const replenishCheckedRef = useRef(false);
+  const replenishTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wordsRef = useRef<WordDetail[]>(words);
+  wordsRef.current = words;
+  useEffect(() => {
+    return () => {
+      if (replenishTimerRef.current) clearTimeout(replenishTimerRef.current);
+    };
+  }, []);
+  useEffect(() => {
+    if (replenishCheckedRef.current || loading || words.length === 0) return;
+    replenishCheckedRef.current = true;
+    // Timer is only cleared on unmount so later refreshes don't cancel the one-shot check
+    replenishTimerRef.current = setTimeout(() => {
+      const current = wordsRef.current;
+      checkAutoReplenishEligibility(current)
+        .then((eligibility) => {
+          if (eligibility.isEligible) {
+            console.log("[AutoReplenish] Đủ điều kiện tự động: Kích hoạt sinh từ vựng và bài tập mới...");
+            triggerAutoReplenish(current, false);
+          }
+        })
+        .catch((err) => console.warn("Auto-replenish eligibility check:", err));
+    }, 4000);
   }, [words.length, loading]);
 
   const toggleTermExpanded = (termKey: string, e?: React.MouseEvent) => {
@@ -242,32 +260,60 @@ export default function MainDashboard({
   };
 
   // Load words from SQLite
-  const refreshWords = async () => {
-    setLoading(true);
+  // Only uses refs/setters, so it is safe to call from mount-time closures.
+  // showLoading toggles the global spinner (initial load / manual refresh only).
+  const refreshSeqRef = useRef(0);
+  const refreshWords = async (opts: { showLoading?: boolean } = {}) => {
+    const seq = ++refreshSeqRef.current;
+    if (opts.showLoading) setLoading(true);
     try {
       const list = await getAllWords();
+      // A newer refresh started meanwhile: don't let this older response overwrite it
+      if (seq !== refreshSeqRef.current) return;
       setWords(list);
-      // Update selected word if it was updated
-      if (selectedWord) {
-        const updated = list.find((w) => w.id === selectedWord.id);
-        if (updated) setSelectedWord(updated);
-      }
+      // Keep the inspector in sync with the latest data
+      setSelectedWord((prev) => (prev ? list.find((w) => w.id === prev.id) ?? prev : prev));
     } catch (err) {
       console.error("Failed to fetch words:", err);
     } finally {
-      setLoading(false);
+      if (opts.showLoading) setLoading(false);
     }
   };
 
+  // Debounced background refresh (pipeline completions)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scheduleRefresh = () => {
+    if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      refreshWords();
+    }, 300);
+  };
+
+  // Auto-start requested by "open-review-tab"; consumed once words are loaded
+  const [pendingAutoStart, setPendingAutoStart] = useState(false);
+
   useEffect(() => {
-    refreshWords();
+    refreshWords({ showLoading: true });
+    // Resume AI analysis for words left with a placeholder meaning (app closed mid-analysis / failed)
+    requeuePendingWords().catch((err) => console.warn("Requeue pending words failed:", err));
     srsWorker.start(); // Check reviews dynamically in background according to user settings
 
-    // Subscribe to AI pipeline updates
+    // Subscribe to AI pipeline updates; refresh only when an item finishes (completed/failed)
+    const prevStatuses = new Map<string, PipelineItem["status"]>();
+    let firstSnapshot = true;
     const unsubscribePipeline = pipeline.subscribe((queue) => {
       setPipelineQueue(queue);
-      // Synchronize library whenever any item state changes so newly added & updated words show up immediately
-      refreshWords();
+      let finished = false;
+      for (const item of queue) {
+        const prev = prevStatuses.get(item.word);
+        const isTerminal = item.status === "completed" || item.status === "failed";
+        if (!firstSnapshot && isTerminal && prev !== item.status) finished = true;
+      }
+      prevStatuses.clear();
+      for (const item of queue) prevStatuses.set(item.word, item.status);
+      firstSnapshot = false;
+      if (finished) scheduleRefresh();
     });
 
     // Listen to real-time word submissions from Quick Input floating bar (Cmd+Shift+E)
@@ -300,12 +346,11 @@ export default function MainDashboard({
       const autoStart = event.payload?.auto_start ?? false;
       setActiveTab("review");
       setGlobalToast(null);
-      if (autoStart) {
-        handleStartReview(true);
-      } else {
-        setIsReviewing(false);
-      }
-      refreshWords();
+      if (!autoStart) setIsReviewing(false);
+      // Start the session after fresh words land (this closure's handleStartReview would see stale words)
+      refreshWords().finally(() => {
+        if (autoStart && !isCancelled) setPendingAutoStart(true);
+      });
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -341,6 +386,7 @@ export default function MainDashboard({
       isCancelled = true;
       srsWorker.stop();
       unsubscribePipeline();
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       window.removeEventListener("open-review-popup-preview", handleOpenPreview);
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
       if (unlistenFn) unlistenFn();
@@ -349,31 +395,43 @@ export default function MainDashboard({
     };
   }, []);
 
-  const handleStartReview = (onlyDue: boolean = true, topicFilter?: string) => {
+  const handleStartReview = async (onlyDue: boolean = true, topicFilter?: string) => {
     const now = new Date();
-    let target = onlyDue
-      ? words.filter((w) => new Date(w.srs.next_review_date) <= now)
-      : words;
+    const matchesTopic = (w: WordDetail) =>
+      !topicFilter ||
+      topicFilter === "all" ||
+      (w.topic || "General Tech").trim().toLowerCase() === topicFilter.trim().toLowerCase();
 
-    if (topicFilter && topicFilter !== "all") {
-      target = target.filter(
-        (w) => (w.topic || "General Tech").trim().toLowerCase() === topicFilter.trim().toLowerCase()
-      );
-    }
-    if (target.length === 0) {
-      if (onlyDue && words.length > 0) {
-        target = words;
-      } else {
-        return;
-      }
+    const pool = words.filter(matchesTopic);
+    if (pool.length === 0) return;
+
+    let session: ReviewCard[] = [];
+    if (onlyDue) {
+      const due = pool.filter((w) => isWordDue(w, now));
+      const newToday = await getNewCardsIntroducedToday().catch(() => 0);
+      session = buildReviewSession(due, newToday, now);
     }
 
-    // Apply smart queue ordering (urgency-based + interleaving)
-    const sorted = smartSortReviewQueue(target, now);
-    setReviewSet(sorted);
+    if (session.length > 0) {
+      setIsPracticeSession(false);
+    } else {
+      // Nothing due (or new-card budget used up): extra practice on the weakest words, not recorded in FSRS
+      const { maxSessionSize } = getStudyLimits();
+      session = practiceCards(smartSortReviewQueue(pool, now).slice(0, maxSessionSize));
+      setIsPracticeSession(true);
+    }
+
+    setReviewSet(session);
     setIsReviewing(true);
     setActiveTab("review");
   };
+
+  // Consume a pending auto-start once the latest words are available
+  useEffect(() => {
+    if (!pendingAutoStart || loading) return;
+    setPendingAutoStart(false);
+    if (words.length > 0) handleStartReview(true);
+  }, [pendingAutoStart, words, loading]);
 
   const handleOpenReview = (autoStartFlashcard = false) => {
     setActiveTab("review");
@@ -434,7 +492,7 @@ export default function MainDashboard({
   };
 
   // Text-To-Speech Pronunciation
-  const handleSpeak = (text: string, e?: React.MouseEvent) => {
+  const handleSpeak = useCallback((text: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if ("speechSynthesis" in window) {
       window.speechSynthesis.cancel();
@@ -443,7 +501,7 @@ export default function MainDashboard({
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
     }
-  };
+  }, []);
 
   // Submit word manually
   const handleCaptureSubmit = (e: FormEvent) => {
@@ -457,10 +515,10 @@ export default function MainDashboard({
   };
 
   // Request delete word (opens in-app modal instead of broken window.confirm)
-  const requestDeleteWord = (wordId: string, wordText: string, e?: React.MouseEvent) => {
+  const requestDeleteWord = useCallback((wordId: string, wordText: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     setWordToDelete({ id: wordId, word: wordText });
-  };
+  }, []);
 
   const handleConfirmDelete = async () => {
     if (!wordToDelete) return;
@@ -491,8 +549,16 @@ export default function MainDashboard({
     }
   };
 
+  // Ticks every minute so "due" computations don't freeze at the last words change
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   // Filter & Search Logic
   const filteredWords = useMemo(() => {
+    const now = new Date(nowTick);
     return words.filter((item) => {
       // Search
       const q = searchQuery.toLowerCase().trim();
@@ -515,8 +581,7 @@ export default function MainDashboard({
 
       // Filter pills
       if (filterMode === "due") {
-        const nextDate = new Date(item.srs.next_review_date);
-        return nextDate <= new Date();
+        return isWordDue(item, now);
       }
       if (filterMode === "mastered") {
         return item.srs.interval >= 6;
@@ -526,13 +591,51 @@ export default function MainDashboard({
       }
       return true;
     });
-  }, [words, searchQuery, filterMode, selectedTopic]);
+  }, [words, searchQuery, filterMode, selectedTopic, nowTick]);
+
+  // Single pass over words: due/learned/leech counts and per-topic {total, due}
+  const libraryStats = useMemo(() => {
+    const now = new Date(nowTick);
+    const leechIds = new Set(getLeechWords(words).map((w) => w.id));
+    const dueWords: WordDetail[] = [];
+    const perTopic: Record<string, { total: number; due: number }> = {};
+    let learnedCount = 0;
+    for (const w of words) {
+      const isDue = isWordDue(w, now);
+      if (isDue) dueWords.push(w);
+      if (w.srs.repetitions > 0) learnedCount++;
+      const key = (w.topic || "General Tech").trim().toLowerCase();
+      const entry = perTopic[key] || (perTopic[key] = { total: 0, due: 0 });
+      entry.total++;
+      if (isDue) entry.due++;
+    }
+    return { dueWords, learnedCount, leechCount: leechIds.size, perTopic };
+  }, [words, nowTick]);
 
   // Due review count
-  const dueCount = useMemo(() => {
-    const now = new Date();
-    return words.filter((w) => new Date(w.srs.next_review_date) <= now).length;
-  }, [words]);
+  const dueCount = libraryStats.dueWords.length;
+
+  // Per-card derived data (parsed synonyms + FSRS retrievability), computed once per words change
+  const cardMeta = useMemo(() => {
+    const now = new Date(nowTick);
+    const leechIds = new Set(getLeechWords(words).map((w) => w.id));
+    const meta = new Map<string, WordCardMeta>();
+    for (const w of words) {
+      meta.set(w.id, {
+        synonyms: parseTerms(w.synonyms),
+        rInfo: getRetrievabilityInfo(w.srs, now),
+        leech: leechIds.has(w.id),
+      });
+    }
+    return meta;
+  }, [words, nowTick]);
+
+  // Gallery pagination (reset when filters/search change)
+  const [visibleCount, setVisibleCount] = useState(GALLERY_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(GALLERY_PAGE_SIZE);
+  }, [searchQuery, filterMode, selectedTopic]);
+  const visibleWords = useMemo(() => filteredWords.slice(0, visibleCount), [filteredWords, visibleCount]);
 
   // Keyboard-first Navigation
   useEffect(() => {
@@ -1022,13 +1125,13 @@ export default function MainDashboard({
               </div>
               <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
                 <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                  {words.filter((w) => w.srs.repetitions > 0).length}
+                  {libraryStats.learnedCount}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-zinc-400">Đã thuộc</div>
               </div>
               <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-                <div className={`text-base font-bold font-mono ${getLeechWords(words).length > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-zinc-500"}`}>
-                  {getLeechWords(words).length}
+                <div className={`text-base font-bold font-mono ${libraryStats.leechCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-zinc-500"}`}>
+                  {libraryStats.leechCount}
                 </div>
                 <div className="text-[10px] text-slate-500 dark:text-zinc-400">Leech</div>
               </div>
@@ -1216,7 +1319,7 @@ export default function MainDashboard({
                   }`}
               >
                 🐛 Leech
-                {getLeechWords(words).length > 0 && (
+                {libraryStats.leechCount > 0 && (
                   <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
                 )}
               </button>
@@ -1224,7 +1327,7 @@ export default function MainDashboard({
 
             {/* Refresh */}
             <button
-              onClick={refreshWords}
+              onClick={() => refreshWords({ showLoading: true })}
               disabled={loading}
               title="Refresh vocabulary"
               className="p-1.5 rounded-lg border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors shadow-sm"
@@ -1344,137 +1447,31 @@ export default function MainDashboard({
                   words={filteredWords}
                   onSelectWord={setSelectedWord}
                   onDeleteWord={requestDeleteWord}
+                  resetKey={`${searchQuery}|${filterMode}|${selectedTopic}`}
                 />
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {filteredWords.map((item) => {
-                    const synonyms = parseTerms(item.synonyms);
-                    const isSelected = selectedWord?.id === item.id;
-
-                    return (
-                      <div
-                        key={item.id}
-                        onClick={() => setSelectedWord(item)}
-                        className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${isSelected
-                          ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
-                          : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
-                          }`}
+                  {visibleWords.map((item) => (
+                    <WordCard
+                      key={item.id}
+                      item={item}
+                      meta={cardMeta.get(item.id)}
+                      isSelected={selectedWord?.id === item.id}
+                      onSelect={setSelectedWord}
+                      onSpeak={handleSpeak}
+                      onDelete={requestDeleteWord}
+                    />
+                  ))}
+                  {filteredWords.length > visibleWords.length && (
+                    <div className="col-span-full flex justify-center pt-2">
+                      <button
+                        onClick={() => setVisibleCount((c) => c + GALLERY_PAGE_SIZE)}
+                        className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors shadow-sm"
                       >
-                        <div className="space-y-3">
-                          {/* Word header & actions */}
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <h3 className="text-lg font-bold text-slate-900 dark:text-white capitalize font-mono group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
-                                  {item.word}
-                                </h3>
-                                {item.part_of_speech && (
-                                  <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 font-semibold">
-                                    {item.part_of_speech}
-                                  </span>
-                                )}
-                                <span className="text-[10px] font-medium text-cyan-800 dark:text-cyan-300 bg-cyan-100 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/40 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                  <Tag className="w-2.5 h-2.5" />
-                                  {item.topic || "General Tech"}
-                                </span>
-                                {item.phonetic && (
-                                  <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400/90 bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/60 px-2 py-0.5 rounded-md">
-                                    {item.phonetic}
-                                  </span>
-                                )}
-                                <button
-                                  onClick={(e) => handleSpeak(item.word, e)}
-                                  title="Listen pronunciation"
-                                  className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-1 rounded hover:bg-slate-100 dark:hover:bg-zinc-800/80"
-                                >
-                                  <Volume2 className="w-3.5 h-3.5" />
-                                </button>
-                              </div>
-
-                              {/* Meaning Box */}
-                              <div className="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800/80">
-                                <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-700 dark:text-cyan-400 font-semibold block mb-0.5">
-                                  Nghĩa:
-                                </span>
-                                <p className="text-xs text-slate-800 dark:text-zinc-200 font-normal line-clamp-2 leading-relaxed">
-                                  {item.meaning_vn}
-                                </p>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
-                              {/* Leech Badge */}
-                              {isLeech(item.srs) && (
-                                <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse" title={`Leech: ${item.srs.lapses ?? 0} lần quên`}>
-                                  🐛
-                                </span>
-                              )}
-                              {/* Retrievability Mini Indicator */}
-                              {(() => {
-                                const rInfo = getRetrievabilityInfo(item.srs);
-                                if (rInfo.level === "new") return null;
-                                return (
-                                  <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`} title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}>
-                                    <span className={`w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block`}>
-                                      <span className={`block h-full ${rInfo.colorClass} rounded-full`} style={{ width: `${rInfo.percent}%` }} />
-                                    </span>
-                                    {rInfo.percent}%
-                                  </span>
-                                );
-                              })()}
-                              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700/60">
-                                {item.srs.interval === 0 ? "New" : `${item.srs.interval}d`}
-                              </span>
-                              <button
-                                onClick={(e) => requestDeleteWord(item.id, item.word, e)}
-                                title="Xoá từ này"
-                                className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            </div>
-                          </div>
-
-                          {/* First Example preview */}
-                          {item.examples.length > 0 && (
-                            <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/90 p-2.5 border border-slate-200 dark:border-zinc-800/80 space-y-1">
-                              <p className="text-xs font-medium text-slate-800 dark:text-zinc-200 leading-relaxed line-clamp-2">
-                                "{item.examples[0].sentence_en}"
-                              </p>
-                              {item.examples[0].sentence_vn && (
-                                <p className="text-[11px] text-cyan-800 dark:text-cyan-300/80 italic line-clamp-1">
-                                  {item.examples[0].sentence_vn}
-                                </p>
-                              )}
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Footer tags */}
-                        <div className="mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-500">
-                          <div className="flex gap-1.5 flex-wrap max-w-[75%] overflow-hidden">
-                            {synonyms.slice(0, 2).map((s, idx) => (
-                              <span
-                                key={idx}
-                                className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800/90 text-slate-700 dark:text-zinc-300 text-[11px] font-mono border border-slate-200 dark:border-zinc-700/50"
-                              >
-                                {s.word}
-                              </span>
-                            ))}
-                            {synonyms.length > 2 && (
-                              <span className="text-[11px] text-slate-400 dark:text-zinc-500 self-center">
-                                +{synonyms.length - 2}
-                              </span>
-                            )}
-                          </div>
-
-                          <span className="flex items-center gap-0.5 text-slate-500 dark:text-zinc-400 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors font-medium">
-                            Chi tiết <ChevronRight className="w-3.5 h-3.5" />
-                          </span>
-                        </div>
-                      </div>
-                    );
-                  })}
+                        Xem thêm ({filteredWords.length - visibleWords.length} từ còn lại)
+                      </button>
+                    </div>
+                  )}
                 </div>
               )
             ) : (
@@ -2245,18 +2242,24 @@ export default function MainDashboard({
           isReviewing ? (
             <FlashcardReview
               wordsToReview={reviewSet}
+              distractorPool={words}
+              practiceMode={isPracticeSession}
               onFinish={() => {
                 setIsReviewing(false);
                 refreshWords();
               }}
-              onExit={() => setIsReviewing(false)}
+              onExit={() => {
+                setIsReviewing(false);
+                // Reviews answered before exiting were already persisted
+                refreshWords();
+              }}
             />
           ) : (
             <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full space-y-6">
               <div className="text-center space-y-2">
                 <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Spaced Repetition Review</h2>
                 <p className="text-xs text-slate-500 dark:text-zinc-400">
-                  Powered by SuperMemo-2 (SM-2). Optimal recall timing tailored to your memory strength.
+                  Powered by FSRS. Optimal recall timing tailored to your memory strength.
                 </p>
               </div>
 
@@ -2319,13 +2322,9 @@ export default function MainDashboard({
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     {availableTopics.map((top) => {
-                      const topicWords = words.filter(
-                        (w) => (w.topic || "General Tech").trim().toLowerCase() === top.toLowerCase()
-                      );
-                      const now = new Date();
-                      const dueInTopic = topicWords.filter(
-                        (w) => new Date(w.srs.next_review_date) <= now
-                      ).length;
+                      const topicEntry = libraryStats.perTopic[top.toLowerCase()] || { total: 0, due: 0 };
+                      const topicTotal = topicEntry.total;
+                      const dueInTopic = topicEntry.due;
 
                       return (
                         <div
@@ -2339,7 +2338,7 @@ export default function MainDashboard({
                                 <span className="font-semibold text-slate-900 dark:text-white text-xs">{top}</span>
                               </div>
                               <span className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1 block">
-                                {topicWords.length} từ vựng
+                                {topicTotal} từ vựng
                                 {dueInTopic > 0 && (
                                   <span className="text-orange-600 dark:text-orange-400 ml-1.5 font-medium">
                                     • {dueInTopic} đến hạn
@@ -2370,7 +2369,7 @@ export default function MainDashboard({
                               className={`${dueInTopic > 0 ? "" : "flex-1"
                                 } py-1.5 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700/60 text-xs font-medium transition-colors flex items-center justify-center gap-1 shadow-sm`}
                             >
-                              <span>Luyện tất cả ({topicWords.length})</span>
+                              <span>Luyện tất cả ({topicTotal})</span>
                             </button>
                           </div>
                         </div>
@@ -2387,8 +2386,8 @@ export default function MainDashboard({
                     <span>Due Words Waiting in Queue</span>
                     <span className="font-mono text-[11px]">Interval & Ease Factor</span>
                   </div>
-                  {words
-                    .filter((w) => new Date(w.srs.next_review_date) <= new Date())
+                  {libraryStats.dueWords
+                    .slice(0, DUE_LIST_LIMIT)
                     .map((w) => (
                       <div
                         key={w.id}
@@ -2411,6 +2410,11 @@ export default function MainDashboard({
                         </div>
                       </div>
                     ))}
+                  {dueCount > DUE_LIST_LIMIT && (
+                    <div className="text-center text-xs text-slate-500 dark:text-zinc-400 py-2">
+                      và {dueCount - DUE_LIST_LIMIT} từ khác
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="text-center py-12 space-y-3 rounded-2xl border border-slate-200 dark:border-zinc-800/60 bg-slate-50 dark:bg-zinc-900/30">
@@ -2430,7 +2434,10 @@ export default function MainDashboard({
           <AnalyticsView
             words={words}
             onStartReviewWord={(w) => {
-              setReviewSet([w]);
+              // Scheduled review only if one of the word's cards is due; otherwise practice (no FSRS change)
+              const [dueCard] = getDueCards(w);
+              setIsPracticeSession(!dueCard);
+              setReviewSet([dueCard ?? practiceCards([w])[0]]);
               setIsReviewing(true);
               setActiveTab("review");
             }}
@@ -3107,3 +3114,144 @@ export default function MainDashboard({
     </div>
   );
 }
+
+interface WordCardMeta {
+  synonyms: ReturnType<typeof parseTerms>;
+  rInfo: ReturnType<typeof getRetrievabilityInfo>;
+  leech: boolean;
+}
+
+interface WordCardProps {
+  item: WordDetail;
+  meta: WordCardMeta | undefined;
+  isSelected: boolean;
+  onSelect: (word: WordDetail) => void;
+  onSpeak: (text: string, e?: React.MouseEvent) => void;
+  onDelete: (wordId: string, wordText: string, e?: React.MouseEvent) => void;
+}
+
+// Memoized gallery card; derived data is precomputed by the parent
+const WordCard = memo(function WordCard({ item, meta, isSelected, onSelect, onSpeak, onDelete }: WordCardProps) {
+  const synonyms = meta?.synonyms ?? EMPTY_TERMS;
+  const rInfo = meta?.rInfo ?? getRetrievabilityInfo(item.srs);
+  const leech = meta?.leech ?? false;
+
+  return (
+    <div
+      onClick={() => onSelect(item)}
+      className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${isSelected
+        ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
+        : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
+        }`}
+    >
+      <div className="space-y-3">
+        {/* Word header & actions */}
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white capitalize font-mono group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
+                {item.word}
+              </h3>
+              {item.part_of_speech && (
+                <span className="text-[10px] font-mono uppercase px-1.5 py-0.5 rounded bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50 font-semibold">
+                  {item.part_of_speech}
+                </span>
+              )}
+              <span className="text-[10px] font-medium text-cyan-800 dark:text-cyan-300 bg-cyan-100 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/40 px-2 py-0.5 rounded-full flex items-center gap-1">
+                <Tag className="w-2.5 h-2.5" />
+                {item.topic || "General Tech"}
+              </span>
+              {item.phonetic && (
+                <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400/90 bg-cyan-50 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/60 px-2 py-0.5 rounded-md">
+                  {item.phonetic}
+                </span>
+              )}
+              <button
+                onClick={(e) => onSpeak(item.word, e)}
+                title="Listen pronunciation"
+                className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-1 rounded hover:bg-slate-100 dark:hover:bg-zinc-800/80"
+              >
+                <Volume2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Meaning Box */}
+            <div className="mt-2 p-2 rounded-xl bg-slate-50 dark:bg-zinc-950/70 border border-slate-200 dark:border-zinc-800/80">
+              <span className="text-[10px] font-mono uppercase tracking-wider text-cyan-700 dark:text-cyan-400 font-semibold block mb-0.5">
+                Nghĩa:
+              </span>
+              <p className="text-xs text-slate-800 dark:text-zinc-200 font-normal line-clamp-2 leading-relaxed">
+                {item.meaning_vn}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
+            {/* Leech Badge */}
+            {leech && (
+              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse" title={`Leech: ${item.srs.lapses ?? 0} lần quên`}>
+                🐛
+              </span>
+            )}
+            {/* Retrievability Mini Indicator */}
+            {rInfo.level !== "new" && (
+              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`} title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}>
+                <span className={`w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block`}>
+                  <span className={`block h-full ${rInfo.colorClass} rounded-full`} style={{ width: `${rInfo.percent}%` }} />
+                </span>
+                {rInfo.percent}%
+              </span>
+            )}
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700/60">
+              {item.srs.interval === 0 ? "New" : `${item.srs.interval}d`}
+            </span>
+            <button
+              onClick={(e) => onDelete(item.id, item.word, e)}
+              title="Xoá từ này"
+              className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* First Example preview */}
+        {item.examples.length > 0 && (
+          <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/90 p-2.5 border border-slate-200 dark:border-zinc-800/80 space-y-1">
+            <p className="text-xs font-medium text-slate-800 dark:text-zinc-200 leading-relaxed line-clamp-2">
+              "{item.examples[0].sentence_en}"
+            </p>
+            {item.examples[0].sentence_vn && (
+              <p className="text-[11px] text-cyan-800 dark:text-cyan-300/80 italic line-clamp-1">
+                {item.examples[0].sentence_vn}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer tags */}
+      <div className="mt-3 pt-3 border-t border-slate-100 dark:border-zinc-800/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-500">
+        <div className="flex gap-1.5 flex-wrap max-w-[75%] overflow-hidden">
+          {synonyms.slice(0, 2).map((s, idx) => (
+            <span
+              key={idx}
+              className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800/90 text-slate-700 dark:text-zinc-300 text-[11px] font-mono border border-slate-200 dark:border-zinc-700/50"
+            >
+              {s.word}
+            </span>
+          ))}
+          {synonyms.length > 2 && (
+            <span className="text-[11px] text-slate-400 dark:text-zinc-500 self-center">
+              +{synonyms.length - 2}
+            </span>
+          )}
+        </div>
+
+        <span className="flex items-center gap-0.5 text-slate-500 dark:text-zinc-400 group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition-colors font-medium">
+          Chi tiết <ChevronRight className="w-3.5 h-3.5" />
+        </span>
+      </div>
+    </div>
+  );
+});

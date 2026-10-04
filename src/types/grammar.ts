@@ -99,4 +99,5 @@ export interface GrammarProgress {
   lastAttemptDate?: string;
   nextReviewDate: string; // ISO date string
   streak: number;
+  firstTryBonusAwarded?: boolean; // first-try XP bonus is only given once per lesson
 }

@@ -29,8 +29,9 @@ import {
   type FSRSResult,
   type IntervalPreviews,
 } from "@/services/srs";
-import { recordDailyActivity } from "@/services/streak";
-import { parseTerms, type WordDetail } from "@/types/database";
+import { recordDailyActivity, calculateStreakAndGoal } from "@/services/streak";
+import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
+import { directionForExercise, toCard } from "@/services/cards";
 import {
   getRetrievabilityInfo,
   isLeech,
@@ -39,6 +40,8 @@ import {
   saveReviewLog,
   getXPState,
   selectExerciseType,
+  deriveRating,
+  matchTypedAnswer,
   type ExerciseType,
   type XPReward,
   type XPState,
@@ -52,8 +55,16 @@ import ListeningDictationExercise from "./exercises/ListeningDictationExercise";
 import ReverseClozeExercise from "./exercises/ReverseClozeExercise";
 import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 
+const MAX_REQUEUES_PER_WORD = 2;
+const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
+
 interface FlashcardReviewProps {
-  wordsToReview: WordDetail[];
+  /** Cards to review (plain words are treated as recognition cards) */
+  wordsToReview: Array<WordDetail | ReviewCard>;
+  /** Full vocabulary used for multiple-choice / context-match distractors */
+  distractorPool?: WordDetail[];
+  /** Extra practice outside the schedule: answers are logged but FSRS is not updated */
+  practiceMode?: boolean;
   onFinish: () => void;
   onExit: () => void;
 }
@@ -81,6 +92,8 @@ interface SessionStats {
 
 export default function FlashcardReview({
   wordsToReview,
+  distractorPool,
+  practiceMode = false,
   onFinish,
   onExit,
 }: FlashcardReviewProps) {
@@ -96,6 +109,11 @@ export default function FlashcardReview({
   const [fallbackMode, setFallbackMode] = useState<ExerciseType | null>(null);
   const [consecutiveCorrect, setConsecutiveCorrect] = useState(0);
 
+  // Session queue: words graded Again are re-inserted a few cards later for in-session relearning
+  const [queue, setQueue] = useState<ReviewCard[]>(() =>
+    wordsToReview.map((w) => ("direction" in w ? w : toCard(w, "recognition")))
+  );
+  const requeueCountRef = useRef<Map<string, number>>(new Map());
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
@@ -139,7 +157,24 @@ export default function FlashcardReview({
   const [xpState, setXpState] = useState<XPState>(getXPState);
 
   const inputRef = useRef<HTMLInputElement>(null);
-  const currentWord = wordsToReview[currentIndex];
+
+  // Whole-collection totals for achievements (the session itself is only a slice)
+  const collectionStats = useMemo(() => {
+    const collection = distractorPool && distractorPool.length > 0 ? distractorPool : wordsToReview;
+    const masteredByTopic = new Map<string, number>();
+    for (const w of collection) {
+      if (w.srs.state === 2 && (w.srs.stability ?? 0) >= 21) {
+        const topic = (w.topic || "General Tech").toLowerCase();
+        masteredByTopic.set(topic, (masteredByTopic.get(topic) ?? 0) + 1);
+      }
+    }
+    return {
+      totalWords: collection.length,
+      currentStreak: calculateStreakAndGoal(collection).currentStreak,
+      topicMasterCount: Math.max(0, ...masteredByTopic.values()),
+    };
+  }, [distractorPool, wordsToReview]);
+  const currentWord = queue[currentIndex];
 
   // Adaptive exercise type calculation
   const effectiveExerciseType: ExerciseType = useMemo(() => {
@@ -199,36 +234,53 @@ export default function FlashcardReview({
     }
   };
 
-  // Auto-speak on card switch in Spelling or Listening mode to test audio recall
+  // Auto-speak on card switch in Spelling mode (Listening plays its own audio)
   useEffect(() => {
-    if ((effectiveExerciseType === "spelling" || effectiveExerciseType === "listening") && currentWord) {
+    if (effectiveExerciseType === "spelling" && currentWord) {
       handleSpeak(currentWord.word);
     }
   }, [currentIndex, effectiveExerciseType]);
 
-  const handleGrade = async (rating: Rating, overrideExerciseType?: ExerciseType) => {
+  // Exercises report their own attempts; the FSRS grade is derived centrally.
+  // An exercise reporting Hard with 0 wrong attempts means a hint was used.
+  const gradeExercise = (exerciseType: ExerciseType, attempts: number, exerciseRating: Rating): Rating =>
+    deriveRating({
+      exerciseType,
+      wrongAttempts: attempts,
+      usedHint: attempts === 0 && exerciseRating === Rating.Hard,
+      responseTimeMs: Date.now() - cardStartTime.current,
+      srs: currentWord?.srs,
+    });
+
+  const handleGrade = async (rating: Rating, overrideExerciseType?: ExerciseType, attempts?: number) => {
     if (!currentWord || isAdvancing) return;
     setIsAdvancing(true);
 
     const activeExType = overrideExerciseType || effectiveExerciseType;
     const responseTimeMs = Date.now() - cardStartTime.current;
     const wordIsLeech = isLeech(currentWord.srs);
-    const isFirstTry = wrongAttempts === 0 && !showHint;
+    const attemptCount = attempts ?? wrongAttempts;
+    const isFirstTry = attemptCount === 0 && !showHint;
+    const isRequeuedCard = (requeueCountRef.current.get(currentWord.id) ?? 0) > 0;
 
-    // Track statistics
-    if (rating === Rating.Easy) {
-      setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
-      setConsecutiveCorrect((prev) => prev + 1);
-    } else if (rating === Rating.Good || rating === Rating.Hard) {
-      setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
-      setConsecutiveCorrect((prev) => prev + 1);
-    } else {
-      setSessionStats((prev) => ({ ...prev, revealedCount: prev.revealedCount + 1 }));
+    // Track statistics (only the first time a word is shown in this session)
+    if (!isRequeuedCard) {
+      if (rating === Rating.Again) {
+        setSessionStats((prev) => ({ ...prev, revealedCount: prev.revealedCount + 1 }));
+      } else if (isFirstTry && rating !== Rating.Hard) {
+        setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
+      } else {
+        setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
+      }
+    }
+    if (rating === Rating.Again) {
       setConsecutiveCorrect(0);
+    } else {
+      setConsecutiveCorrect((prev) => prev + 1);
     }
 
     // Calculate & award XP
-    const xpReward = calculateXPReward(rating, activeExType, wrongAttempts, responseTimeMs, wordIsLeech, isFirstTry);
+    const xpReward = calculateXPReward(rating, activeExType, attemptCount, responseTimeMs, wordIsLeech, isFirstTry);
     if (xpReward.totalXP > 0) {
       awardXP(xpReward.totalXP);
       setLastXPReward(xpReward);
@@ -243,7 +295,7 @@ export default function FlashcardReview({
 
     // Check gamification achievements
     checkAndUnlockAchievements({
-      totalWords: wordsToReview.length,
+      ...collectionStats,
       consecutiveCorrect: rating >= Rating.Good ? consecutiveCorrect + 1 : 0,
       sessionReviewCount: reviewCount + 1,
       leechesSlain: sessionStats.leechesSlain + (wordIsLeech && rating >= Rating.Good ? 1 : 0),
@@ -252,9 +304,12 @@ export default function FlashcardReview({
     });
 
     try {
-      const result = await recordReview(currentWord.id, rating);
+      // The exercise decides which memory was tested: typing/dictation trains recall (production card),
+      // choosing among options trains recognition — even when the user forced a study mode.
+      const gradedDirection = directionForExercise(activeExType);
+      const result = practiceMode ? null : await recordReview(currentWord.id, rating, gradedDirection);
       recordDailyActivity(1);
-      setLastResult(result);
+      if (result) setLastResult(result);
       setReviewCount((prev) => prev + 1);
 
       // Save review log with response time and exercise type
@@ -263,16 +318,48 @@ export default function FlashcardReview({
         exerciseType: activeExType,
         responseTimeMs,
         isCorrect: rating >= Rating.Good,
-        wrongAttempts,
+        wrongAttempts: attemptCount,
         rating,
         xpEarned: xpReward.totalXP,
         timestamp: new Date().toISOString(),
+        isScheduled: !practiceMode,
+        direction: result?.direction ?? gradedDirection,
       }).catch((err) => console.warn("Review log save failed:", err));
 
       // Update XP state for display
       setXpState(getXPState());
 
-      if (currentIndex + 1 < wordsToReview.length) {
+      // In-session relearning: show a forgotten word again a few cards later (max 2 times)
+      let nextQueueLength = queue.length;
+      const requeued = requeueCountRef.current.get(currentWord.id) ?? 0;
+      if (rating === Rating.Again && requeued < MAX_REQUEUES_PER_WORD) {
+        requeueCountRef.current.set(currentWord.id, requeued + 1);
+        // Only refresh the card's schedule when the answer was recorded on this card
+        let updatedWord: ReviewCard = currentWord;
+        if (result && result.direction === currentWord.direction) {
+          const srs: WordDetail["srs"] = {
+            ...currentWord.srs,
+            stability: result.stability,
+            difficulty: result.difficulty,
+            reps: result.reps,
+            lapses: result.lapses,
+            state: result.state as WordDetail["srs"]["state"],
+            last_review: result.lastReview ?? null,
+            next_review_date: result.nextReviewDate,
+            scheduled_days: result.scheduled_days,
+            learning_steps: result.learningSteps,
+          };
+          updatedWord =
+            currentWord.direction === "recognition"
+              ? { ...currentWord, srs, srsRecognition: srs }
+              : { ...currentWord, srs, srsProduction: srs };
+        }
+        const insertAt = Math.min(queue.length, currentIndex + 1 + REQUEUE_GAP);
+        setQueue((prev) => [...prev.slice(0, insertAt), updatedWord, ...prev.slice(insertAt)]);
+        nextQueueLength += 1;
+      }
+
+      if (currentIndex + 1 < nextQueueLength) {
         setCurrentIndex((prev) => prev + 1);
       } else {
         triggerConfetti(3000);
@@ -287,10 +374,7 @@ export default function FlashcardReview({
   // Submit Answer in Cloze or Spelling mode
   const handleCheckAnswer = () => {
     if (!currentWord || hasCheckedAnswer || isAdvancing) return;
-    const cleanGuess = userInput.trim().toLowerCase();
-    const cleanTarget = currentWord.word.trim().toLowerCase();
-
-    if (!cleanGuess) {
+    if (!userInput.trim()) {
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 350);
       setFeedbackMessage({
@@ -301,7 +385,8 @@ export default function FlashcardReview({
       return;
     }
 
-    const matched = cleanGuess === cleanTarget;
+    const match = matchTypedAnswer(userInput, currentWord.word);
+    const matched = match !== "wrong";
 
     if (matched) {
       // ---------------- CORRECT ----------------
@@ -312,32 +397,26 @@ export default function FlashcardReview({
       });
       handleSpeak(currentWord.word);
 
-      // Evaluate FSRS rating based on wrong attempts and hint usage
-      let rating: Rating = Rating.Easy;
-      if (wrongAttempts === 0 && !showHint) {
-        rating = Rating.Easy; // Easy / Perfect recall
-        setSessionStats((prev) => ({
-          ...prev,
-          firstTryCorrect: prev.firstTryCorrect + 1,
-        }));
-      } else if (wrongAttempts === 1 && !showHint) {
-        rating = Rating.Good; // Good (1 retry)
-        setSessionStats((prev) => ({
-          ...prev,
-          retryCorrect: prev.retryCorrect + 1,
-        }));
-      } else {
-        rating = Rating.Hard; // Hard (2+ retries or used hint)
-        setSessionStats((prev) => ({
-          ...prev,
-          retryCorrect: prev.retryCorrect + 1,
-        }));
+      // FSRS grade: any wrong attempt = Again, hint / typo = Hard, fast production = Easy
+      const rating = deriveRating({
+        exerciseType: effectiveExerciseType,
+        wrongAttempts,
+        usedHint: showHint,
+        nearMiss: match === "near",
+        responseTimeMs: Date.now() - cardStartTime.current,
+        srs: currentWord.srs,
+      });
+      if (match === "near") {
+        setFeedbackMessage({
+          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó).`,
+          type: "info",
+        });
       }
 
       // Smooth auto-transition to next word
       setTimeout(() => {
         handleGrade(rating);
-      }, 700);
+      }, match === "near" ? 1800 : 700);
     } else {
       // ---------------- INCORRECT ----------------
       const newAttempts = wrongAttempts + 1;
@@ -454,7 +533,7 @@ export default function FlashcardReview({
 
   // Session Completed view with Learning Evaluation Metrics
   if (sessionCompleted) {
-    const totalWords = wordsToReview.length || 1;
+    const totalWords = wordsToReview.length || 1; // unique words (re-queued cards are not double counted)
     const masteryPercent = Math.min(
       100,
       Math.round(
@@ -738,12 +817,32 @@ export default function FlashcardReview({
         {/* Progress indicator */}
         <div className="flex items-center gap-3">
           <div className="text-xs font-mono text-slate-500 dark:text-zinc-400">
-            Thẻ <span className="text-slate-900 dark:text-white font-bold">{currentIndex + 1}</span> / {wordsToReview.length}
+            Thẻ <span className="text-slate-900 dark:text-white font-bold">{currentIndex + 1}</span> / {queue.length}
+            {currentWord && (
+              <span
+                className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"
+                title={
+                  currentWord.direction === "production"
+                    ? "Thẻ nhớ lại: tự viết/nghe ra từ tiếng Anh (lịch ôn riêng)"
+                    : "Thẻ nhận diện: hiểu nghĩa khi gặp từ (lịch ôn riêng)"
+                }
+              >
+                {currentWord.direction === "production" ? "Nhớ lại" : "Nhận diện"}
+              </span>
+            )}
+            {practiceMode && (
+              <span
+                className="ml-2 px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300"
+                title="Không có từ đến hạn — phiên này không thay đổi lịch ôn FSRS"
+              >
+                Luyện thêm
+              </span>
+            )}
           </div>
           <div className="w-24 h-2 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
             <div
               className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300"
-              style={{ width: `${((currentIndex + 1) / wordsToReview.length) * 100}%` }}
+              style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}
             />
           </div>
         </div>
@@ -835,10 +934,11 @@ export default function FlashcardReview({
         {effectiveExerciseType === "multiple_choice" && (
           <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
             <MultipleChoiceExercise
+              key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              allWords={wordsToReview}
-              onComplete={(_isCorrect, _attempts, rating) => {
-                handleGrade(rating, "multiple_choice");
+              allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("multiple_choice", attempts, rating), "multiple_choice", attempts);
               }}
               onSpeak={(t) => handleSpeak(t)}
             />
@@ -849,9 +949,10 @@ export default function FlashcardReview({
         {effectiveExerciseType === "sentence_builder" && (
           <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
             <SentenceBuilderExercise
+              key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              onComplete={(_isCorrect, _attempts, rating) => {
-                handleGrade(rating, "sentence_builder");
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("sentence_builder", attempts, rating), "sentence_builder", attempts);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("flip")}
@@ -863,13 +964,14 @@ export default function FlashcardReview({
         {effectiveExerciseType === "context_match" && (
           <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
             <ContextMatchExercise
+              key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              allWords={wordsToReview}
-              onComplete={(_isCorrect, _attempts, rating) => {
-                handleGrade(rating, "context_match");
+              allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("context_match", attempts, rating), "context_match", attempts);
               }}
               onSpeak={(t) => handleSpeak(t)}
-              onFallback={() => setFallbackMode("flip")}
+              onFallback={() => setFallbackMode("multiple_choice")}
             />
           </div>
         )}
@@ -878,9 +980,10 @@ export default function FlashcardReview({
         {effectiveExerciseType === "listening" && (
           <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
             <ListeningDictationExercise
+              key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              onComplete={(_isCorrect, _attempts, rating) => {
-                handleGrade(rating, "listening");
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("listening", attempts, rating), "listening", attempts);
               }}
               onSpeak={(t, rate) => handleSpeak(t, rate)}
             />
@@ -891,10 +994,11 @@ export default function FlashcardReview({
         {effectiveExerciseType === "reverse_cloze" && (
           <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
             <ReverseClozeExercise
+              key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              allWords={wordsToReview}
-              onComplete={(_isCorrect, _attempts, rating) => {
-                handleGrade(rating, "reverse_cloze");
+              allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("reverse_cloze", attempts, rating), "reverse_cloze", attempts);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("flip")}
@@ -1562,12 +1666,12 @@ function RevealedWordContent({
 }) {
   const hasExamples = Boolean(currentWord.examples && currentWord.examples.length > 0);
   const wordIsLeech = isLeech(currentWord.srs);
-  const [mnemonic, setMnemonic] = useState<string | null>(() => getStoredMnemonic(currentWord.id));
+  const [mnemonic, setMnemonic] = useState<string | null>(() => getStoredMnemonic(currentWord.id, currentWord.meaning_vn));
   const [loadingMnemonic, setLoadingMnemonic] = useState(false);
 
   useEffect(() => {
     let mounted = true;
-    const existing = getStoredMnemonic(currentWord.id);
+    const existing = getStoredMnemonic(currentWord.id, currentWord.meaning_vn);
     if (existing) {
       setMnemonic(existing);
     } else if (wordIsLeech || (currentWord.srs?.lapses ?? 0) >= 2) {

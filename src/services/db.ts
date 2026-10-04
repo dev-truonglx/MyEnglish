@@ -4,6 +4,7 @@ import { initReviewLogsTable } from "./smartReview";
 import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
+const SCHEMA_VERSION = 4;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -79,6 +80,7 @@ export async function initSchema(db: Database): Promise<void> {
       lapses INTEGER DEFAULT 0,
       state INTEGER DEFAULT 0,
       last_review TIMESTAMP,
+      learning_steps INTEGER DEFAULT 0,
       FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
     );
   `);
@@ -118,99 +120,171 @@ export async function initSchema(db: Database): Promise<void> {
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_custom_ex_lesson ON grammar_custom_exercises(lesson_id);`);
   } catch {}
 
-  // Safe migrations for existing databases
-  try {
-    await db.execute(`ALTER TABLE words ADD COLUMN phonetic TEXT;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE words ADD COLUMN part_of_speech TEXT;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE words ADD COLUMN collocations TEXT;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE words ADD COLUMN code_snippet TEXT;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE words ADD COLUMN topic TEXT DEFAULT 'General Tech';`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE examples ADD COLUMN sentence_vn TEXT;`);
-  } catch {}
+  // 6. Key-value backup for settings/XP/streak that live in localStorage
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS app_kv (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
 
-  // FSRS safe migrations for existing databases
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN stability REAL DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN difficulty REAL DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN elapsed_days INTEGER DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN scheduled_days INTEGER DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN reps INTEGER DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN lapses INTEGER DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN state INTEGER DEFAULT 0;`);
-  } catch {}
-  try {
-    await db.execute(`ALTER TABLE srs_reviews ADD COLUMN last_review TIMESTAMP;`);
-  } catch {}
+  await runMigrations(db);
 
-  // Migrate legacy SM-2 rows to initial FSRS state if they haven't been migrated yet
+  // Repair words left without an SRS row (e.g. a write failed halfway); otherwise they would never become due
   try {
     await db.execute(`
-      UPDATE srs_reviews
-      SET
-        stability = CASE WHEN interval > 0 THEN CAST(interval AS REAL) ELSE 1.0 END,
-        difficulty = 5.0,
-        reps = repetitions,
-        scheduled_days = interval,
-        state = 2
-      WHERE (stability IS NULL OR stability = 0) AND repetitions > 0;
+      INSERT INTO srs_reviews (word_id, next_review_date)
+      SELECT id, created_at FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews);
     `);
   } catch (e) {
-    console.warn("FSRS legacy data migration notice:", e);
+    console.warn("SRS row repair notice:", e);
   }
-
-  // Safe deduplication of any existing duplicates
-  try {
-    await db.execute(`
-      DELETE FROM words WHERE id NOT IN (
-        SELECT id FROM (
-          SELECT id, ROW_NUMBER() OVER (PARTITION BY LOWER(TRIM(word)) ORDER BY created_at DESC) as rn
-          FROM words
-        ) WHERE rn = 1
-      );
-    `);
-    await db.execute(`DELETE FROM examples WHERE word_id NOT IN (SELECT id FROM words);`);
-    await db.execute(`DELETE FROM srs_reviews WHERE word_id NOT IN (SELECT id FROM words);`);
-  } catch (e) {
-    console.warn("Deduplication notice:", e);
-  }
-
-  // Unique index to prevent duplicate words from ever being saved
-  try {
-    await db.execute(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word_unique ON words(LOWER(TRIM(word)));`);
-  } catch {}
-
-  // Performance Indexes
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);`);
-  try {
-    await db.execute(`CREATE INDEX IF NOT EXISTS idx_words_topic ON words(topic);`);
-  } catch {}
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_examples_word_id ON examples(word_id);`);
-  await db.execute(`CREATE INDEX IF NOT EXISTS idx_srs_reviews_next_date ON srs_reviews(next_review_date);`);
 
   // Initialize review_logs table for response time & exercise type tracking
   await initReviewLogsTable(db);
+}
+
+/**
+ * Versioned migrations tracked with PRAGMA user_version so they run exactly once.
+ */
+async function runMigrations(db: Database): Promise<void> {
+  const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
+  const version = versionRows[0]?.user_version ?? 0;
+
+  const tryExec = async (sql: string) => {
+    try {
+      await db.execute(sql);
+    } catch {}
+  };
+
+  if (version < 1) {
+    // Columns added over time (errors mean the column already exists)
+    await tryExec(`ALTER TABLE words ADD COLUMN phonetic TEXT;`);
+    await tryExec(`ALTER TABLE words ADD COLUMN part_of_speech TEXT;`);
+    await tryExec(`ALTER TABLE words ADD COLUMN collocations TEXT;`);
+    await tryExec(`ALTER TABLE words ADD COLUMN code_snippet TEXT;`);
+    await tryExec(`ALTER TABLE words ADD COLUMN topic TEXT DEFAULT 'General Tech';`);
+    await tryExec(`ALTER TABLE examples ADD COLUMN sentence_vn TEXT;`);
+
+    // FSRS columns
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN stability REAL DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN difficulty REAL DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN elapsed_days INTEGER DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN scheduled_days INTEGER DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN reps INTEGER DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN lapses INTEGER DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN state INTEGER DEFAULT 0;`);
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN last_review TIMESTAMP;`);
+
+    // Migrate legacy SM-2 rows to initial FSRS state
+    try {
+      await db.execute(`
+        UPDATE srs_reviews
+        SET
+          stability = CASE WHEN interval > 0 THEN CAST(interval AS REAL) ELSE 1.0 END,
+          difficulty = 5.0,
+          reps = repetitions,
+          scheduled_days = interval,
+          state = 2
+        WHERE (stability IS NULL OR stability = 0) AND repetitions > 0;
+      `);
+    } catch (e) {
+      console.warn("FSRS legacy data migration notice:", e);
+    }
+
+    // Deduplicate words, keeping the copy with the most review progress
+    try {
+      await db.execute(`
+        DELETE FROM words WHERE id NOT IN (
+          SELECT id FROM (
+            SELECT w.id, ROW_NUMBER() OVER (
+              PARTITION BY LOWER(TRIM(w.word))
+              ORDER BY COALESCE(s.reps, 0) DESC, w.created_at DESC
+            ) as rn
+            FROM words w LEFT JOIN srs_reviews s ON s.word_id = w.id
+          ) WHERE rn = 1
+        );
+      `);
+      await db.execute(`DELETE FROM examples WHERE word_id NOT IN (SELECT id FROM words);`);
+      await db.execute(`DELETE FROM srs_reviews WHERE word_id NOT IN (SELECT id FROM words);`);
+    } catch (e) {
+      console.warn("Deduplication notice:", e);
+    }
+
+    await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word_unique ON words(LOWER(TRIM(word)));`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_topic ON words(topic);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_examples_word_id ON examples(word_id);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_srs_reviews_next_date ON srs_reviews(next_review_date);`);
+  }
+
+  if (version < 2) {
+    // ts-fsrs v5 needs the current learning step persisted, otherwise Learning cards never graduate
+    await tryExec(`ALTER TABLE srs_reviews ADD COLUMN learning_steps INTEGER DEFAULT 0;`);
+
+    // Normalize SQLite CURRENT_TIMESTAMP values ("YYYY-MM-DD HH:MM:SS", UTC) to ISO so that
+    // string comparisons in SQL and `new Date()` parsing in JS agree.
+    await tryExec(`UPDATE srs_reviews SET next_review_date = REPLACE(next_review_date, ' ', 'T') || 'Z' WHERE next_review_date NOT LIKE '%T%';`);
+    await tryExec(`UPDATE words SET created_at = REPLACE(created_at, ' ', 'T') || 'Z' WHERE created_at NOT LIKE '%T%';`);
+  }
+
+  if (version < 3) {
+    // 1 = scheduled FSRS review, 0 = practice outside the schedule, NULL = logged before this column existed.
+    // Only rows with is_scheduled = 1 are valid training data for the FSRS optimizer.
+    await initReviewLogsTable(db);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN is_scheduled INTEGER;`);
+  }
+
+  if (version < 4) {
+    // Production cards (recall the English word) get their own FSRS schedule, separate from recognition.
+    await db.execute(`
+      CREATE TABLE IF NOT EXISTS srs_production (
+        word_id TEXT PRIMARY KEY,
+        ease_factor REAL DEFAULT 2.5,
+        interval INTEGER DEFAULT 0,
+        repetitions INTEGER DEFAULT 0,
+        next_review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        stability REAL DEFAULT 0,
+        difficulty REAL DEFAULT 0,
+        elapsed_days INTEGER DEFAULT 0,
+        scheduled_days INTEGER DEFAULT 0,
+        reps INTEGER DEFAULT 0,
+        lapses INTEGER DEFAULT 0,
+        state INTEGER DEFAULT 0,
+        last_review TIMESTAMP,
+        learning_steps INTEGER DEFAULT 0,
+        FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
+      );
+    `);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_srs_production_next_date ON srs_production(next_review_date);`);
+
+    // Seed production cards for words already known by recognition. Recall is harder than recognition,
+    // so start from half the stability and half the interval (never later than the recognition due date).
+    await tryExec(`
+      INSERT OR IGNORE INTO srs_production (
+        word_id, ease_factor, interval, repetitions, next_review_date, stability, difficulty,
+        elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
+      )
+      SELECT
+        word_id, 2.5, MAX(1, scheduled_days / 2), reps,
+        MIN(
+          next_review_date,
+          strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(last_review, next_review_date), '+' || MAX(1, scheduled_days / 2) || ' days')
+        ),
+        stability * 0.5, difficulty, 0, MAX(1, scheduled_days / 2), reps, 0, 2, last_review, 0
+      FROM srs_reviews
+      WHERE state = 2 AND stability > 0;
+    `);
+
+    // NULL for rows logged before directions existed (treated as recognition)
+    await initReviewLogsTable(db);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN direction TEXT;`);
+  }
+
+  if (version < SCHEMA_VERSION) {
+    await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+  }
 }
 
 /**
@@ -329,8 +403,6 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
       );
     }
 
-    // Replace examples for the existing word
-    await db.execute(`DELETE FROM examples WHERE word_id = $1;`, [wordId]);
   } else {
     // New word: INSERT
     wordId = crypto.randomUUID();
@@ -379,22 +451,31 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     );
   }
 
-  // Insert examples
-  for (const example of input.examples) {
-    const exampleId = crypto.randomUUID();
-    try {
-      await db.execute(
-        `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [exampleId, wordId, example.sentence_en, example.sentence_vn || null, example.grammar_analysis]
-      );
-    } catch {
-      await db.execute(
-        `INSERT INTO examples (id, word_id, sentence_en, grammar_analysis)
-         VALUES ($1, $2, $3, $4)`,
-        [exampleId, wordId, example.sentence_en, example.grammar_analysis]
-      );
-    }
+  // Insert the new examples first, then drop the old ones, so a failed insert never leaves the word empty
+  const exampleIds: string[] = [];
+  const validExamples = input.examples.filter((ex) => ex.sentence_en?.trim());
+  if (validExamples.length > 0) {
+    const params: unknown[] = [];
+    const rows = validExamples.map((example, i) => {
+      const exampleId = crypto.randomUUID();
+      exampleIds.push(exampleId);
+      params.push(exampleId, wordId, example.sentence_en, example.sentence_vn || null, example.grammar_analysis || "");
+      const o = i * 5;
+      return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`;
+    });
+    await db.execute(
+      `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis) VALUES ${rows.join(", ")}`,
+      params
+    );
+  }
+  if (existingList.length > 0) {
+    const keepPlaceholders = exampleIds.map((_, i) => `$${i + 2}`).join(", ");
+    await db.execute(
+      exampleIds.length > 0
+        ? `DELETE FROM examples WHERE word_id = $1 AND id NOT IN (${keepPlaceholders});`
+        : `DELETE FROM examples WHERE word_id = $1;`,
+      [wordId, ...exampleIds]
+    );
   }
 
     logTerminal("DB", `Đã lưu thành công từ "${cleanWord}" vào SQLite (id: ${wordId}) ✓`);
@@ -406,47 +487,157 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
   }
 }
 
+/** Prefixes of the temporary meanings written while a word waits for (or failed) AI enrichment */
+export const PLACEHOLDER_MEANING_PREFIXES = ["Đang phân tích nghĩa", "Chờ phân tích"] as const;
+
+/**
+ * True when the stored meaning is only a pipeline placeholder (word not enriched yet).
+ */
+export function isPlaceholderMeaning(meaning: string | null | undefined): boolean {
+  const m = (meaning || "").trim();
+  if (!m) return true;
+  return PLACEHOLDER_MEANING_PREFIXES.some((p) => m.startsWith(p));
+}
+
+/**
+ * Insert a word only if it does not exist yet. Never modifies an existing row.
+ */
+export async function insertWordIfAbsent(input: CreateWordInput): Promise<{ id: string; inserted: boolean }> {
+  const cleanWord = input.word.trim().toLowerCase();
+  const db = await getDatabase();
+  const existing = await db.select<{ id: string }[]>(
+    `SELECT id FROM words WHERE LOWER(TRIM(word)) = $1 LIMIT 1;`,
+    [cleanWord]
+  );
+  if (existing.length > 0) {
+    return { id: existing[0].id, inserted: false };
+  }
+  try {
+    const id = await insertEnrichedWord(input);
+    return { id, inserted: true };
+  } catch (err) {
+    // Lost a race with another insert (unique index): treat as existing
+    const again = await db.select<{ id: string }[]>(
+      `SELECT id FROM words WHERE LOWER(TRIM(word)) = $1 LIMIT 1;`,
+      [cleanWord]
+    );
+    if (again.length > 0) return { id: again[0].id, inserted: false };
+    throw err;
+  }
+}
+
+/**
+ * Words still holding a placeholder meaning (pending or failed enrichment).
+ */
+export async function getPlaceholderWords(): Promise<{ id: string; word: string; meaning_vn: string }[]> {
+  const db = await getDatabase();
+  const clauses = PLACEHOLDER_MEANING_PREFIXES.map((_, i) => `meaning_vn LIKE $${i + 1}`).join(" OR ");
+  return db.select<{ id: string; word: string; meaning_vn: string }[]>(
+    `SELECT id, word, meaning_vn FROM words WHERE TRIM(COALESCE(meaning_vn, '')) = '' OR ${clauses};`,
+    PLACEHOLDER_MEANING_PREFIXES.map((p) => `${p}%`)
+  );
+}
+
+/**
+ * Replace the meaning of a word only while it still holds a placeholder (never touches enriched words).
+ */
+export async function replacePlaceholderMeaning(word: string, meaning: string): Promise<void> {
+  const db = await getDatabase();
+  const clauses = PLACEHOLDER_MEANING_PREFIXES.map((_, i) => `meaning_vn LIKE $${i + 3}`).join(" OR ");
+  await db.execute(
+    `UPDATE words SET meaning_vn = $1 WHERE LOWER(TRIM(word)) = $2 AND (TRIM(COALESCE(meaning_vn, '')) = '' OR ${clauses});`,
+    [meaning, word.trim().toLowerCase(), ...PLACEHOLDER_MEANING_PREFIXES.map((p) => `${p}%`)]
+  );
+}
+
+function defaultSrsFor(word: Word): SRSReview {
+  return {
+    word_id: word.id,
+    ease_factor: 2.5,
+    interval: 0,
+    repetitions: 0,
+    next_review_date: word.created_at,
+    stability: 0,
+    difficulty: 0,
+    elapsed_days: 0,
+    scheduled_days: 0,
+    reps: 0,
+    lapses: 0,
+    state: 0,
+    last_review: null,
+    learning_steps: 0,
+  };
+}
+
+/**
+ * Attach examples and SRS rows to a list of words using 2 batched queries instead of 2 per word.
+ */
+async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, params: unknown[]): Promise<WordDetail[]> {
+  if (words.length === 0) return [];
+  const [examples, srsRows, productionRows] = await Promise.all([
+    db.select<WordExample[]>(`SELECT * FROM examples WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<SRSReview[]>(`SELECT * FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<SRSReview[]>(`SELECT * FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
+  ]);
+
+  const examplesByWord = new Map<string, WordExample[]>();
+  for (const ex of examples) {
+    const list = examplesByWord.get(ex.word_id);
+    if (list) list.push(ex);
+    else examplesByWord.set(ex.word_id, [ex]);
+  }
+  const srsByWord = new Map(srsRows.map((row) => [row.word_id, row]));
+  const productionByWord = new Map(productionRows.map((row) => [row.word_id, row]));
+
+  return words.map((word) => ({
+    ...word,
+    examples: examplesByWord.get(word.id) ?? [],
+    srs: srsByWord.get(word.id) ?? defaultSrsFor(word),
+    srsProduction: productionByWord.get(word.id) ?? null,
+  }));
+}
+
 /**
  * Fetch all words with their examples and SRS metadata
  */
 export async function getAllWords(): Promise<WordDetail[]> {
   const db = await getDatabase();
   const words = await db.select<Word[]>(`SELECT * FROM words ORDER BY created_at DESC;`);
+  return hydrateWords(db, words, `SELECT id FROM words`, []);
+}
 
-  const results: WordDetail[] = [];
-  for (const word of words) {
-    const examples = await db.select<WordExample[]>(
-      `SELECT * FROM examples WHERE word_id = $1;`,
-      [word.id]
-    );
-    const srsList = await db.select<SRSReview[]>(
-      `SELECT * FROM srs_reviews WHERE word_id = $1 LIMIT 1;`,
-      [word.id]
-    );
-    const srs = srsList[0] || {
-      word_id: word.id,
-      ease_factor: 2.5,
-      interval: 0,
-      repetitions: 0,
-      next_review_date: word.created_at,
-      stability: 0,
-      difficulty: 0,
-      elapsed_days: 0,
-      scheduled_days: 0,
-      reps: 0,
-      lapses: 0,
-      state: 0,
-      last_review: null,
-    };
+/**
+ * Fetch only words whose next review is due (uses idx_srs_reviews_next_date).
+ */
+export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDetail[]> {
+  const db = await getDatabase();
+  const nowIso = now.toISOString();
+  // A word is due when either of its cards is due. Words without an SRS row are treated as new
+  // and due (same as getAllWords' default).
+  const dueFilter = `SELECT word_id FROM srs_reviews WHERE next_review_date <= $1
+    UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
+    UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)`;
+  const words = await db.select<Word[]>(
+    `SELECT * FROM words WHERE id IN (${dueFilter}) ORDER BY created_at DESC;`,
+    [nowIso]
+  );
+  return hydrateWords(db, words, dueFilter, [nowIso]);
+}
 
-    results.push({
-      ...word,
-      examples,
-      srs,
-    });
-  }
-
-  return results;
+/**
+ * Count words with at least one due card, without loading them.
+ */
+export async function countDueWords(now: Date = new Date()): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<{ cnt: number }[]>(
+    `SELECT COUNT(*) as cnt FROM (
+       SELECT word_id FROM srs_reviews WHERE next_review_date <= $1
+       UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
+       UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)
+     );`,
+    [now.toISOString()]
+  );
+  return rows[0]?.cnt ?? 0;
 }
 
 /**
@@ -454,9 +645,12 @@ export async function getAllWords(): Promise<WordDetail[]> {
  */
 export async function deleteWord(wordId: string): Promise<void> {
   const db = await getDatabase();
-  await db.execute(`DELETE FROM srs_reviews WHERE word_id = $1;`, [wordId]);
-  await db.execute(`DELETE FROM examples WHERE word_id = $1;`, [wordId]);
+  // Delete the parent row first so a partial failure never leaves a word without its SRS row
   await db.execute(`DELETE FROM words WHERE id = $1;`, [wordId]);
+  await db.execute(`DELETE FROM srs_reviews WHERE word_id = $1;`, [wordId]);
+  await db.execute(`DELETE FROM srs_production WHERE word_id = $1;`, [wordId]);
+  await db.execute(`DELETE FROM examples WHERE word_id = $1;`, [wordId]);
+  await db.execute(`DELETE FROM review_logs WHERE word_id = $1;`, [wordId]);
 }
 
 /**

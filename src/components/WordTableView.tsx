@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { getNextReviewDate, isWordDue } from "@/services/cards";
 import { Volume2, Trash2, ArrowUpDown, ChevronRight, Tag } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 
@@ -6,7 +7,11 @@ interface WordTableViewProps {
   words: WordDetail[];
   onSelectWord: (word: WordDetail) => void;
   onDeleteWord: (id: string, word: string, e: React.MouseEvent) => void;
+  // Changing this resets pagination (e.g. search/filter changed)
+  resetKey?: string;
 }
+
+const PAGE_SIZE = 60;
 
 type SortField = "word" | "topic" | "created_at" | "next_review" | "ease_factor" | "repetitions";
 type SortOrder = "asc" | "desc";
@@ -15,9 +20,15 @@ export default function WordTableView({
   words,
   onSelectWord,
   onDeleteWord,
+  resetKey,
 }: WordTableViewProps) {
   const [sortField, setSortField] = useState<SortField>("created_at");
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [resetKey, sortField, sortOrder]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -38,9 +49,7 @@ export default function WordTableView({
       } else if (sortField === "created_at") {
         cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       } else if (sortField === "next_review") {
-        cmp =
-          new Date(a.srs.next_review_date).getTime() -
-          new Date(b.srs.next_review_date).getTime();
+        cmp = getNextReviewDate(a).getTime() - getNextReviewDate(b).getTime();
       } else if (sortField === "ease_factor") {
         cmp = a.srs.ease_factor - b.srs.ease_factor;
       } else if (sortField === "repetitions") {
@@ -49,6 +58,21 @@ export default function WordTableView({
       return sortOrder === "asc" ? cmp : -cmp;
     });
   }, [words, sortField, sortOrder]);
+
+  // Per-row derived data (due flag + formatted date) computed once per list change
+  const rowMeta = useMemo(() => {
+    const now = new Date();
+    const meta = new Map<string, { isDue: boolean; nextLabel: string }>();
+    for (const item of sortedWords) {
+      // Earliest of the recognition / recall cards
+      const next = getNextReviewDate(item);
+      meta.set(item.id, { isDue: isWordDue(item, now), nextLabel: next.toLocaleDateString() });
+    }
+    return meta;
+  }, [sortedWords]);
+
+  const visibleWords = useMemo(() => sortedWords.slice(0, visibleCount), [sortedWords, visibleCount]);
+  const remaining = sortedWords.length - visibleWords.length;
 
   const handleSpeak = (text: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -64,8 +88,6 @@ export default function WordTableView({
   if (words.length === 0) {
     return null;
   }
-
-  const now = new Date();
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 overflow-hidden shadow-sm">
@@ -124,8 +146,9 @@ export default function WordTableView({
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/60">
-            {sortedWords.map((item) => {
-              const isDue = new Date(item.srs.next_review_date) <= now;
+            {visibleWords.map((item) => {
+              const meta = rowMeta.get(item.id);
+              const isDue = meta?.isDue ?? false;
 
               return (
                 <tr
@@ -199,7 +222,7 @@ export default function WordTableView({
                       </span>
                     ) : (
                       <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
-                        {new Date(item.srs.next_review_date).toLocaleDateString()}
+                        {meta?.nextLabel}
                       </span>
                     )}
                   </td>
@@ -223,6 +246,16 @@ export default function WordTableView({
           </tbody>
         </table>
       </div>
+      {remaining > 0 && (
+        <div className="p-3 border-t border-slate-200 dark:border-zinc-800 flex justify-center">
+          <button
+            onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+            className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors"
+          >
+            Xem thêm ({remaining} từ còn lại)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

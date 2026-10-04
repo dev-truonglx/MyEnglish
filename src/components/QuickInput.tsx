@@ -66,6 +66,11 @@ export default function QuickInput({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [fromClipboard, setFromClipboard] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Latest typed value for mount-time listeners
+  const wordRef = useRef("");
+  wordRef.current = word;
+  // Timestamp of the last "quick-input-opened" event (its payload already carries the clipboard)
+  const lastOpenedAtRef = useRef(0);
 
   const isMac =
     typeof navigator !== "undefined" &&
@@ -75,7 +80,7 @@ export default function QuickInput({
    * Reads clipboard text natively via Tauri (pbpaste on macOS, arboard on Windows/Linux) or fallback,
    * then automatically applies and selects valid candidate words.
    */
-  const checkAndApplyClipboard = async (customText?: string) => {
+  const checkAndApplyClipboard = async (customText?: string, opts: { onlyIfEmpty?: boolean } = {}) => {
     let clipText = customText && customText.trim().length > 0 ? customText : undefined;
 
     if (clipText === undefined) {
@@ -93,6 +98,12 @@ export default function QuickInput({
           } catch {}
         }
       }
+    }
+
+    // Don't overwrite what the user has typed (checked after the async read too)
+    if (opts.onlyIfEmpty && wordRef.current.trim().length > 0) {
+      inputRef.current?.focus();
+      return;
     }
 
     if (!clipText) {
@@ -154,6 +165,8 @@ export default function QuickInput({
     // 2. Listen to Tauri backend event "quick-input-opened" (emitted on Ctrl+Shift+E / ⌘⇧E or toggle_quick_input)
     listen<{ clipboard?: string }>("quick-input-opened", (event) => {
       if (isCancelled) return;
+      lastOpenedAtRef.current = Date.now();
+      // Rust sends the clipboard in the payload; only falls back to a native read when it's empty
       const clip = event.payload?.clipboard;
       checkAndApplyClipboard(clip);
     })
@@ -165,9 +178,12 @@ export default function QuickInput({
 
     // 3. Listen to window focus (whenever window regains focus)
     const onFocus = () => {
-      if (!isCancelled) {
-        checkAndApplyClipboard();
-        inputRef.current?.focus();
+      if (isCancelled) return;
+      inputRef.current?.focus();
+      // The open event already applied the clipboard; skip a duplicate read
+      if (Date.now() - lastOpenedAtRef.current < 1000) return;
+      if (wordRef.current.trim().length === 0) {
+        checkAndApplyClipboard(undefined, { onlyIfEmpty: true });
       }
     };
     window.addEventListener("focus", onFocus);

@@ -1,6 +1,39 @@
 import { enrichWordWithGemini, type GeminiEnrichmentResult } from "./ai";
-import { insertEnrichedWord } from "./db";
+import {
+  insertEnrichedWord,
+  insertWordIfAbsent,
+  replacePlaceholderMeaning,
+  getPlaceholderWords,
+  getAllWords,
+  isPlaceholderMeaning,
+} from "./db";
+import { recordDailyActivity } from "./streak";
 import { logTerminal } from "./logger";
+import { assessUserProficiency, getUserOverrideLevel } from "./userProficiency";
+
+export { isPlaceholderMeaning };
+
+const PENDING_MEANING = "Đang phân tích nghĩa & cấu trúc ngữ pháp...";
+const FAILED_MEANING = "Chờ phân tích (Lỗi phân tích AI - hãy nhấn Thử lại)";
+
+// Assessed CEFR level is cached so each enrichment doesn't reload the whole collection
+const LEVEL_CACHE_TTL_MS = 10 * 60 * 1000;
+let cachedLevel: { level: string; at: number } | null = null;
+
+async function getActiveCefrLevel(): Promise<string> {
+  const override = getUserOverrideLevel();
+  if (override) return override;
+  if (cachedLevel && Date.now() - cachedLevel.at < LEVEL_CACHE_TTL_MS) return cachedLevel.level;
+  try {
+    const words = await getAllWords();
+    const level = assessUserProficiency(words).effectiveLevel;
+    cachedLevel = { level, at: Date.now() };
+    return level;
+  } catch (e) {
+    console.warn("[Pipeline] Không xác định được cấp độ CEFR, dùng B1:", e);
+    return cachedLevel?.level ?? "B1";
+  }
+}
 
 export interface PipelineItem {
   word: string;
@@ -35,7 +68,7 @@ class WordProcessingPipeline {
    * Enqueue a new word for AI enrichment and SQLite storage.
    * Immediately puts the word into the queue and starts processing without blocking.
    */
-  public async enqueue(word: string): Promise<void> {
+  public async enqueue(word: string, options: { source?: "user" | "auto" } = {}): Promise<void> {
     const cleanWord = word.trim().toLowerCase();
     if (!cleanWord) return;
 
@@ -59,23 +92,28 @@ class WordProcessingPipeline {
 
     this.queue = [item, ...this.queue];
     this.notify();
+
+    // Adding a word yourself counts as study activity; AI auto-replenish does not
+    if (options.source !== "auto") {
+      recordDailyActivity(1);
+    }
     console.log(`[Pipeline] Đã thêm "${cleanWord}" vào hàng đợi. Bắt đầu xử lý...`);
 
-    // Asynchronously pre-save baseline word record into SQLite to ensure zero data loss
-    insertEnrichedWord({
-      word: cleanWord,
-      meaning_vn: "Đang phân tích nghĩa & cấu trúc ngữ pháp...",
-      topic: "General Tech",
-      synonyms: [],
-      antonyms: [],
-      examples: [],
-    })
-      .then((id) => {
-        item.wordId = id;
-      })
-      .catch((e) => {
-        console.warn("[Pipeline] Pre-saving baseline notice:", e);
+    // Pre-save a placeholder only for brand-new words, so an existing enriched word is never overwritten.
+    // Awaited so it can't race with the failure write below.
+    try {
+      const { id } = await insertWordIfAbsent({
+        word: cleanWord,
+        meaning_vn: PENDING_MEANING,
+        topic: "General Tech",
+        synonyms: [],
+        antonyms: [],
+        examples: [],
       });
+      item.wordId = id;
+    } catch (e) {
+      console.warn("[Pipeline] Pre-saving baseline notice:", e);
+    }
 
     // Start queue processing immediately
     this.processNext();
@@ -112,22 +150,8 @@ class WordProcessingPipeline {
     logTerminal("Pipeline", `Bắt đầu xử lý từ: "${pendingItem.word}"`);
 
     try {
-      // 1. Determine user's active CEFR level for tailored examples
-      let userLevel = "B1";
-      try {
-        const override = localStorage.getItem("myenglish_user_cefr_override_v1");
-        if (override) {
-          userLevel = override;
-        } else {
-          const rawReminder = localStorage.getItem("myenglish_reminder_settings_v1");
-          if (rawReminder) {
-            const parsed = JSON.parse(rawReminder);
-            if (Array.isArray(parsed.grammarLevels) && parsed.grammarLevels[0]) {
-              userLevel = parsed.grammarLevels[0];
-            }
-          }
-        }
-      } catch {}
+      // 1. Determine user's active CEFR level (override or assessed) for tailored examples
+      const userLevel = await getActiveCefrLevel();
 
       // Call Gemini CLI integration (calibrated to user's CEFR level)
       const enrichment = await enrichWordWithGemini(pendingItem.word, userLevel);
@@ -164,7 +188,8 @@ class WordProcessingPipeline {
         }));
 
         try {
-          await insertEnrichedWord({
+          // Insert-only: never overwrite a word the user already has
+          await insertWordIfAbsent({
             word: syn.word.trim().toLowerCase(),
             phonetic: syn.phonetic || null,
             topic: wordTopic,
@@ -192,7 +217,7 @@ class WordProcessingPipeline {
         }));
 
         try {
-          await insertEnrichedWord({
+          await insertWordIfAbsent({
             word: ant.word.trim().toLowerCase(),
             phonetic: ant.phonetic || null,
             topic: wordTopic,
@@ -217,16 +242,19 @@ class WordProcessingPipeline {
       pendingItem.status = "failed";
       pendingItem.error = err instanceof Error ? err.message : String(err);
 
-      // Keep word in SQLite with clear status so user never loses their vocabulary
+      // Keep word in SQLite with clear status, but never overwrite an already-enriched word
       try {
-        await insertEnrichedWord({
+        const { inserted } = await insertWordIfAbsent({
           word: pendingItem.word,
-          meaning_vn: "Chờ phân tích (Lỗi phân tích AI - hãy nhấn Thử lại)",
+          meaning_vn: FAILED_MEANING,
           topic: "General Tech",
           synonyms: [],
           antonyms: [],
           examples: [],
         });
+        if (!inserted) {
+          await replacePlaceholderMeaning(pendingItem.word, FAILED_MEANING);
+        }
       } catch (saveErr) {
         console.warn("[Pipeline] Fallback save notice:", saveErr);
       }
@@ -244,3 +272,23 @@ class WordProcessingPipeline {
 }
 
 export const pipeline = new WordProcessingPipeline();
+
+/**
+ * Re-queue words still holding a placeholder meaning (e.g. app closed mid-analysis or AI failed).
+ * Call once on main window mount. Uses source "auto" so it doesn't count as study activity.
+ */
+export async function requeuePendingWords(): Promise<number> {
+  try {
+    const pending = await getPlaceholderWords();
+    for (const w of pending) {
+      await pipeline.enqueue(w.word, { source: "auto" });
+    }
+    if (pending.length > 0) {
+      logTerminal("Pipeline", `Đã đưa lại ${pending.length} từ chưa phân tích vào hàng đợi.`);
+    }
+    return pending.length;
+  } catch (e) {
+    console.warn("[Pipeline] Re-queue pending words notice:", e);
+    return 0;
+  }
+}

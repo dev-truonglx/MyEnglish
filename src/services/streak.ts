@@ -82,6 +82,31 @@ export function setDailyGoal(goal: number): void {
 /**
  * Calculate streak and goal progress by merging word creation dates and study activity logs
  */
+const CREATED_AT_BACKFILL_KEY = "myenglish_streak_created_backfill_v1";
+
+/**
+ * One-time migration: keep streaks earned before word creation stopped counting,
+ * by copying past (not today's) word-creation days into the activity log.
+ */
+function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<string, number>): void {
+  try {
+    if (localStorage.getItem(CREATED_AT_BACKFILL_KEY) || words.length === 0) return;
+    const logs = getActivityLogs();
+    const today = getLocalDateString();
+    for (const w of words) {
+      if (!w.created_at) continue;
+      const d = new Date(w.created_at);
+      if (isNaN(d.getTime())) continue;
+      const dateStr = getLocalDateString(d);
+      if (dateStr === today || logs[dateStr]) continue;
+      logs[dateStr] = 1;
+      activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + 1);
+    }
+    localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
+    localStorage.setItem(CREATED_AT_BACKFILL_KEY, "1");
+  } catch {}
+}
+
 export function calculateStreakAndGoal(words: WordDetail[]): StreakStats {
   const logs = getActivityLogs();
   const activityMap = new Map<string, number>();
@@ -91,16 +116,9 @@ export function calculateStreakAndGoal(words: WordDetail[]): StreakStats {
     activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + count);
   }
 
-  // 2. Incorporate words created_at
-  words.forEach((w) => {
-    if (w.created_at) {
-      try {
-        const d = new Date(w.created_at);
-        const dateStr = getLocalDateString(d);
-        activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + 1);
-      } catch {}
-    }
-  });
+  // 2. Word creation is no longer counted here (AI auto-replenish would keep the streak alive
+  //    without studying). Manual adds are logged by the pipeline; past days are backfilled once.
+  backfillActivityFromWordsOnce(words, activityMap);
 
   const todayStr = getLocalDateString();
   const todayCount = activityMap.get(todayStr) || 0;

@@ -24,8 +24,18 @@ export default function LevelUpModal() {
 
     const handleBadgeUnlocked = (e: CustomEvent) => {
       if (e.detail?.badges && e.detail.badges.length > 0) {
-        setUnlockedBadges((prev) => [...prev, ...e.detail.badges]);
-        triggerConfetti(2500);
+        const incoming = e.detail.badges as AchievementBadge[];
+        // Dedupe by id (same badge may be dispatched twice); confetti is fired by achievements.ts
+        setUnlockedBadges((prev) => {
+          const seen = new Set(prev.map((b) => b.id));
+          const fresh: AchievementBadge[] = [];
+          for (const b of incoming) {
+            if (seen.has(b.id)) continue;
+            seen.add(b.id);
+            fresh.push(b);
+          }
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
       }
     };
 

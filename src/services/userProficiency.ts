@@ -5,6 +5,7 @@ import { getAllGrammarProgress } from "./grammarService";
 import { calculateRetrievability, getXPState } from "./smartReview";
 import { calculateStreakAndGoal } from "./streak";
 import { saveReminderSettings } from "./reminderSettings";
+import { isPlaceholderMeaning } from "./db";
 
 const PROFICIENCY_OVERRIDE_KEY = "myenglish_user_cefr_override_v1";
 
@@ -262,19 +263,22 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const grammarScore = Math.min(100, Math.round(weightedGrammarPoints));
 
   // 2. Analyze Vocabulary & FSRS Retention
-  const totalWords = words.length;
+  // Only words actually studied (reviewed at least once, not pending AI analysis) count
+  const studiedWords = words.filter((w) => (w.srs.reps ?? 0) > 0 && !isPlaceholderMeaning(w.meaning_vn));
+  const totalWords = studiedWords.length;
   let masteredWords = 0;
   let learningWords = 0;
   let totalRetrievability = 0;
 
-  for (const w of words) {
+  for (const w of studiedWords) {
     const srs = w.srs;
     const R = calculateRetrievability(srs);
     totalRetrievability += R;
 
-    if ((srs.stability && srs.stability >= 21) || (srs.repetitions && srs.repetitions >= 4)) {
+    // FSRS mastery: card in Review state with stability >= 21 days
+    if (srs.state === 2 && (srs.stability ?? 0) >= 21) {
       masteredWords++;
-    } else if ((srs.state && srs.state > 0) || (srs.reps && srs.reps > 0)) {
+    } else {
       learningWords++;
     }
   }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles, HelpCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
@@ -25,6 +25,14 @@ export default function MultipleChoiceExercise({
   const [isAnswered, setIsAnswered] = useState(false);
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [shakeIdx, setShakeIdx] = useState<number | null>(null);
+
+  // Pending completion timer, cleared on unmount so a stale card is never graded
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
 
   // Generate question (prompt alternates between English -> Vietnamese or Vietnamese -> English)
   const questionData: MultipleChoiceQuestion = useMemo(() => {
@@ -61,7 +69,9 @@ export default function MultipleChoiceExercise({
           rating = Rating.Hard;
         }
 
-        setTimeout(() => {
+        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+        completeTimerRef.current = setTimeout(() => {
+          completeTimerRef.current = null;
           onComplete(true, wrongAttempts, rating);
         }, 900);
       } else {

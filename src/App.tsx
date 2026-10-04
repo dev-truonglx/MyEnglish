@@ -5,6 +5,8 @@ import MainDashboard from "@/components/MainDashboard";
 import FocusReviewModal from "@/components/FocusReviewModal";
 import { useUpdateStore } from "@/services/updateService";
 
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
 function getInitialWindowLabel(): string {
   try {
     const params = new URLSearchParams(window.location.search);
@@ -36,10 +38,14 @@ export default function App() {
   const [windowLabel, setWindowLabel] = useState<string>(getInitialWindowLabel);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
 
-  // Check for updates on startup
+  // Check for updates on startup and every 6 hours, only in the main window
+  // (the popup/quick-input windows share the same app and would repeat the check)
   useEffect(() => {
+    if (windowLabel !== "main") return;
     checkForUpdates();
-  }, [checkForUpdates]);
+    const timer = window.setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [checkForUpdates, windowLabel]);
 
   useEffect(() => {
     // Fallback sync in case window label is resolved late
