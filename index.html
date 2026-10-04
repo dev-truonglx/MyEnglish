@@ -11,7 +11,8 @@
           var p = new URLSearchParams(window.location.search);
           var w = p.get('window');
           var tauriLabel = window.__TAURI_INTERNALS__?.metadata?.currentWindow?.label;
-          if (w === 'review-popup' || w === 'quick-input' || tauriLabel === 'review-popup' || tauriLabel === 'quick-input') {
+          var floating = ['review-popup', 'quick-input', 'review-nudge'];
+          if (floating.indexOf(w) !== -1 || floating.indexOf(tauriLabel) !== -1) {
             document.documentElement.classList.add('transparent-window');
             document.documentElement.style.background = 'transparent';
             document.documentElement.style.backgroundColor = 'transparent';

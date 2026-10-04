@@ -743,8 +743,8 @@ struct PopupBlockers {
     screen_sharing_app: Option<String>,
     /// Focus / Do Not Disturb; None when macOS does not let us read it
     focus_mode: Option<bool>,
-    /// Seconds since the last keyboard/mouse input
-    idle_seconds: f64,
+    /// Seconds since the last keyboard/mouse input; None where it can't be measured
+    idle_seconds: Option<f64>,
 }
 
 /// Report reasons to postpone the review popup. Other platforms report no blockers.
@@ -756,7 +756,7 @@ fn get_popup_blockers() -> PopupBlockers {
             fullscreen_app: macos_focus::fullscreen_frontmost_app(),
             screen_sharing_app: macos_focus::screen_sharing_app(),
             focus_mode: macos_focus::focus_mode_active(),
-            idle_seconds: macos_focus::idle_seconds(),
+            idle_seconds: Some(macos_focus::idle_seconds()),
         }
     }
     #[cfg(not(target_os = "macos"))]
@@ -765,7 +765,7 @@ fn get_popup_blockers() -> PopupBlockers {
             fullscreen_app: None,
             screen_sharing_app: None,
             focus_mode: None,
-            idle_seconds: 0.0,
+            idle_seconds: None,
         }
     }
 }
@@ -816,24 +816,65 @@ fn get_monitor_at_cursor(window: &tauri::WebviewWindow) -> Option<tauri::Monitor
 /// 1. If "main" window is visible, show popup on the SAME monitor the user is viewing the dashboard!
 /// 2. If "main" window is hidden/minimized, target the monitor where the cursor currently resides.
 /// 3. Fallback to primary monitor (guaranteed to be the active display with menu bar).
-fn get_target_monitor_for_popup(app: &AppHandle, popup_win: &tauri::WebviewWindow) -> Option<tauri::Monitor> {
-    if let Some(main_win) = app.get_webview_window("main") {
-        if main_win.is_visible().unwrap_or(false) {
-            if let Ok(Some(m)) = main_win.current_monitor() {
-                return Some(m);
-            }
+/// Monitor for the review popup/nudge: the one under the mouse cursor, i.e. where the user is
+/// working (not the one holding the main window). `prefer_primary` forces the primary monitor.
+fn get_target_monitor_for_popup(popup_win: &tauri::WebviewWindow, prefer_primary: bool) -> Option<tauri::Monitor> {
+    let primary = || popup_win.primary_monitor().ok().flatten();
+    if prefer_primary {
+        if let Some(m) = primary() {
+            return Some(m);
         }
     }
+    get_monitor_at_cursor(popup_win)
+        .or_else(primary)
+        .or_else(|| popup_win.current_monitor().ok().flatten())
+}
 
-    if let Some(m) = get_monitor_at_cursor(popup_win) {
-        return Some(m);
+/// Small reminder card in the top-right corner of the active monitor. It never takes keyboard
+/// focus (the window is not focusable and the app is not activated), so typing elsewhere is
+/// not interrupted. The payload (due count, countdown...) is forwarded to the card.
+#[tauri::command]
+fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary: Option<bool>) -> Result<bool, String> {
+    let window = app
+        .get_webview_window("review-nudge")
+        .ok_or_else(|| "Review nudge window not found".to_string())?;
+    let _ = window.set_focusable(false);
+    let _ = window.set_visible_on_all_workspaces(true);
+    let _ = window.set_always_on_top(true);
+
+    if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary.unwrap_or(false)) {
+        let scale = monitor.scale_factor();
+        let m_pos = monitor.position();
+        let m_size = monitor.size();
+        let w_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 0, height: 0 });
+        let margin = (16.0 * scale) as i32;
+        // Leave room for the macOS menu bar / notch area
+        let top_inset = (if cfg!(target_os = "macos") { 40.0 } else { 16.0 } * scale) as i32;
+        let x = m_pos.x + (m_size.width as i32 - w_size.width as i32 - margin).max(0);
+        let y = m_pos.y + top_inset;
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
     }
 
-    popup_win.primary_monitor().ok().flatten().or_else(|| popup_win.current_monitor().ok().flatten())
+    let _ = window.emit("review-nudge-opened", payload);
+    window.show().map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 #[tauri::command]
-fn show_review_popup(app: AppHandle) -> Result<bool, String> {
+fn hide_review_nudge(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("review-nudge") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<bool, String> {
+    let prefer_primary = prefer_primary.unwrap_or(false);
+    // The nudge (if shown) is replaced by the full review
+    if let Some(nudge) = app.get_webview_window("review-nudge") {
+        let _ = nudge.hide();
+    }
     if let Some(window) = app.get_webview_window("review-popup") {
         let _ = window.set_visible_on_all_workspaces(true);
         let _ = window.set_always_on_top(true);
@@ -844,7 +885,7 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
             macos_app::activate_app_ignoring_other_apps();
         }
 
-        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
@@ -854,7 +895,7 @@ fn show_review_popup(app: AppHandle) -> Result<bool, String> {
         window.show().map_err(|e| e.to_string())?;
 
         // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
-        if let Some(monitor) = get_target_monitor_for_popup(&app, &window) {
+        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
             let size = monitor.size();
             let pos = monitor.position();
             let _ = window.set_position(tauri::Position::Physical(*pos));
@@ -1532,6 +1573,8 @@ pub fn run() {
             trigger_review_navigation,
             show_review_popup,
             hide_review_popup,
+            show_review_nudge,
+            hide_review_nudge,
             prepare_update_exit,
             cancel_update_exit,
             get_popup_blockers,
@@ -1688,10 +1731,10 @@ mod tests {
     fn popup_blockers_smoke() {
         let b = get_popup_blockers();
         println!(
-            "fullscreen={:?} sharing={:?} focus={:?} idle={:.1}s",
+            "fullscreen={:?} sharing={:?} focus={:?} idle={:?}s",
             b.fullscreen_app, b.screen_sharing_app, b.focus_mode, b.idle_seconds
         );
-        assert!(b.idle_seconds >= 0.0);
+        assert!(b.idle_seconds.unwrap_or(0.0) >= 0.0);
     }
 
     #[test]
