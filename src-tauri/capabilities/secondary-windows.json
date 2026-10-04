@@ -1,8 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "secondary-windows",
-  "description": "Quick input and review popup: database access and notifications only (no updater, process, opener or shortcuts)",
-  "windows": ["quick-input", "review-popup"],
+  "description": "Quick input, review popup and reminder nudge: database access and notifications only (no updater, process, opener or shortcuts)",
+  "windows": [
+    "quick-input",
+    "review-popup",
+    "review-nudge"
+  ],
   "permissions": [
     "core:default",
     "sql:default",

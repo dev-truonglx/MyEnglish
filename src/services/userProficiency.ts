@@ -6,8 +6,18 @@ import { calculateRetrievability, getXPState } from "./smartReview";
 import { calculateStreakAndGoal } from "./streak";
 import { saveReminderSettings } from "./reminderSettings";
 import { isPlaceholderMeaning } from "./db";
+import { normalizeCefr } from "./cefr";
 
 const PROFICIENCY_OVERRIDE_KEY = "myenglish_user_cefr_override_v1";
+
+/** A word counts as known when its recognition card is in Review with at least this stability (days) */
+const KNOWN_WORD_MIN_STABILITY = 7;
+/** Known words of a level needed (together with its grammar) to complete that level */
+const LEVEL_VOCAB_TARGET: Record<GrammarLevel, number> = { A1: 40, A2: 60, B1: 80, B2: 100, C1: 120 };
+/** Below this many CEFR-tagged known words, fall back to total known words */
+const MIN_TAGGED_WORDS_FOR_LEVEL_VOCAB = 20;
+/** Legacy fallback: total known words needed to complete A1..C1 */
+const LEGACY_KNOWN_WORDS_TARGET = [30, 100, 250, 500, 800];
 
 export interface LevelBreakdown {
   level: GrammarLevel;
@@ -37,6 +47,8 @@ export interface UserProficiencyProfile {
   
   // Specific stats
   levelBreakdown: Record<GrammarLevel, LevelBreakdown>;
+  /** Known words of each level vs the target needed to complete it (legacy: total known words) */
+  levelVocab: Record<GrammarLevel, { known: number; target: number }>;
   vocabularyStats: {
     totalWords: number;
     masteredWords: number;
@@ -285,27 +297,33 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
 
   const avgRetrievability = totalWords > 0 ? Math.round((totalRetrievability / totalWords) * 100) : 0;
 
-  // Vocabulary points scale based on word count & retention:
-  // 30 words -> ~25 pts (A2 entry)
-  // 100 words -> ~50 pts (B1 entry)
-  // 250 words -> ~75 pts (B2 entry)
-  // 500+ words -> 90-100 pts (C1)
-  let vocabCountScore = 0;
-  if (totalWords <= 30) {
-    vocabCountScore = (totalWords / 30) * 25;
-  } else if (totalWords <= 100) {
-    vocabCountScore = 25 + ((totalWords - 30) / 70) * 25;
-  } else if (totalWords <= 250) {
-    vocabCountScore = 50 + ((totalWords - 100) / 150) * 25;
-  } else if (totalWords <= 500) {
-    vocabCountScore = 75 + ((totalWords - 250) / 250) * 15;
-  } else {
-    vocabCountScore = 90 + Math.min(10, ((totalWords - 500) / 500) * 10);
+  // Per-level vocabulary: words tagged with their CEFR level that the learner reliably recognises
+  // (recognition card in Review with >= 7 days stability). Untagged words (added before tagging)
+  // only feed a legacy fallback based on the total number of known words.
+  const isKnown = (w: WordDetail) => w.srs.state === 2 && (w.srs.stability ?? 0) >= KNOWN_WORD_MIN_STABILITY;
+  const knownByLevel: Record<GrammarLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
+  let taggedKnown = 0;
+  let totalKnown = 0;
+  for (const w of studiedWords) {
+    if (!isKnown(w)) continue;
+    totalKnown++;
+    const lvl = normalizeCefr(w.cefr_level);
+    if (lvl) {
+      // C2 words count toward C1, the highest level the app teaches
+      knownByLevel[lvl === "C2" ? "C1" : lvl]++;
+      taggedKnown++;
+    }
   }
-
-  // Weight with retention and mastery ratio
-  const retentionMultiplier = totalWords > 0 ? (avgRetrievability / 100) * 0.4 + (masteredWords / totalWords) * 0.6 : 0.5;
-  const vocabularyScore = Math.min(100, Math.round(vocabCountScore * 0.7 + retentionMultiplier * vocabCountScore * 0.3));
+  const useLegacyVocab = taggedKnown < MIN_TAGGED_WORDS_FOR_LEVEL_VOCAB;
+  const levelVocab = {} as Record<GrammarLevel, { known: number; target: number }>;
+  ALL_LEVELS.forEach((lvl, idx) => {
+    levelVocab[lvl] = useLegacyVocab
+      ? { known: totalKnown, target: LEGACY_KNOWN_WORDS_TARGET[idx] }
+      : { known: knownByLevel[lvl], target: LEVEL_VOCAB_TARGET[lvl] };
+  });
+  const vocabPercent = (lvl: GrammarLevel) =>
+    Math.min(100, Math.round((levelVocab[lvl].known / levelVocab[lvl].target) * 100));
+  const vocabularyScore = Math.round(ALL_LEVELS.reduce((sum, lvl) => sum + vocabPercent(lvl), 0) / ALL_LEVELS.length);
 
   // 3. Learning Habit & Velocity Score
   const streakPts = Math.min(30, streakStats.currentStreak * 5); // 6+ days streak = 30 pts
@@ -313,44 +331,27 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const activeLearnerPts = streakStats.goalReached ? 20 : 10;
   const habitScore = Math.min(100, Math.round(streakPts + xpPts + activeLearnerPts));
 
-  // 4. Overall Hybrid CEFR Score (0 - 100)
-  // Trọng số: 45% Ngữ pháp, 35% Vốn từ vựng, 20% Thói quen & Phản xạ
-  const overallScore = Math.min(
-    100,
-    Math.max(
-      0,
-      Math.round(grammarScore * 0.45 + vocabularyScore * 0.35 + habitScore * 0.20)
-    )
-  );
+  // 4. Assessed level = the first level the learner has not completed yet.
+  // A level is completed when its grammar is mastered AND enough of its vocabulary is known.
+  // Habit (streak/XP) is shown separately and never changes the level.
+  const grammarPercent = (lvl: GrammarLevel) => {
+    const b = levelBreakdown[lvl];
+    if (b.totalLessons === 0) return 100;
+    const passedPart = Math.min(1, b.passedLessons / Math.ceil(b.totalLessons * 0.6));
+    const masteryPart = Math.min(1, b.averageMastery / 75);
+    return Math.round((passedPart * 0.5 + masteryPart * 0.5) * 100);
+  };
+  const isLevelCompleted = (lvl: GrammarLevel) =>
+    (levelBreakdown[lvl].totalLessons === 0 || levelBreakdown[lvl].status === "mastered") && vocabPercent(lvl) >= 100;
 
-  // 5. Determine Assessed Level based on score + milestone thresholds
-  let assessedLevel: GrammarLevel = "A1";
-  if (overallScore >= 85) {
-    assessedLevel = "C1";
-  } else if (overallScore >= 70) {
-    assessedLevel = "B2";
-  } else if (overallScore >= 45) {
-    assessedLevel = "B1";
-  } else if (overallScore >= 25) {
-    assessedLevel = "A2";
-  } else {
-    assessedLevel = "A1";
-  }
+  const assessedLevel: GrammarLevel = ALL_LEVELS.find((lvl) => !isLevelCompleted(lvl)) ?? "C1";
+  const assessedProgress = Math.round((grammarPercent(assessedLevel) + vocabPercent(assessedLevel)) / 2);
 
-  // Override logic: If user mastered majority of B1 grammar despite low total vocab count, grant at least B1
-  if (levelBreakdown.B2.status === "mastered") {
-    if (assessedLevel === "A1" || assessedLevel === "A2" || assessedLevel === "B1") {
-      assessedLevel = "B2";
-    }
-  } else if (levelBreakdown.B1.status === "mastered") {
-    if (assessedLevel === "A1" || assessedLevel === "A2") {
-      assessedLevel = "B1";
-    }
-  } else if (levelBreakdown.A2.status === "mastered") {
-    if (assessedLevel === "A1") {
-      assessedLevel = "A2";
-    }
-  }
+  // Overall 0-100 score on the same scale as CEFR_LEVEL_METADATA.minScore (for display)
+  const levelMin = CEFR_LEVEL_METADATA[assessedLevel].minScore;
+  const assessedIdx = ALL_LEVELS.indexOf(assessedLevel);
+  const levelMax = assessedIdx < ALL_LEVELS.length - 1 ? CEFR_LEVEL_METADATA[ALL_LEVELS[assessedIdx + 1]].minScore : 100;
+  const overallScore = Math.round(levelMin + ((levelMax - levelMin) * assessedProgress) / 100);
 
   const effectiveLevel: GrammarLevel = userOverrideLevel || assessedLevel;
 
@@ -358,13 +359,8 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const currentIdx = ALL_LEVELS.indexOf(effectiveLevel);
   const nextLevel = currentIdx < ALL_LEVELS.length - 1 ? ALL_LEVELS[currentIdx + 1] : null;
 
-  const currentLevelMin = CEFR_LEVEL_METADATA[effectiveLevel].minScore;
-  const nextLevelMin = nextLevel ? CEFR_LEVEL_METADATA[nextLevel].minScore : 100;
-  const span = Math.max(1, nextLevelMin - currentLevelMin);
-  const progressToNextLevel = Math.min(
-    100,
-    Math.max(0, Math.round(((overallScore - currentLevelMin) / span) * 100))
-  );
+  // Progress inside the active level: half grammar, half level vocabulary
+  const progressToNextLevel = Math.round((grammarPercent(effectiveLevel) + vocabPercent(effectiveLevel)) / 2);
 
   // Confidence level
   let levelConfidence: "preliminary" | "moderate" | "high" = "preliminary";
@@ -382,9 +378,12 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
       `Hoàn thành thêm các bài kiểm tra chẩn đoán ngữ pháp cấp độ ${effectiveLevel} để củng cố nền tảng.`
     );
   }
-  if (totalWords < 50 && ["B1", "B2", "C1"].includes(effectiveLevel)) {
+  if (vocabPercent(effectiveLevel) < 100) {
+    const { known, target } = levelVocab[effectiveLevel];
     recommendations.push(
-      `Vốn từ vựng hiện tại (${totalWords} từ) còn khiêm tốn so với chuẩn ${effectiveLevel}. Hãy tận dụng tính năng tự động nạp từ mới.`
+      useLegacyVocab
+        ? `Bạn đã thuộc ${known}/${target} từ. Hãy ôn đều để đạt mốc từ vựng của cấp độ ${effectiveLevel}.`
+        : `Bạn đã thuộc ${known}/${target} từ cấp độ ${effectiveLevel}. Học thêm từ đúng cấp độ này (tự động nạp từ sẽ chỉ gợi ý từ ${effectiveLevel}).`
     );
   }
   if (avgRetrievability < 75 && totalWords > 10) {
@@ -415,6 +414,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
     vocabularyScore,
     habitScore,
     levelBreakdown,
+    levelVocab,
     vocabularyStats: {
       totalWords,
       masteredWords,

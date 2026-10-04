@@ -252,7 +252,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const playEntryAnimation = () => {
     if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
     setHasEntered(false);
-    entryTimerRef.current = setTimeout(() => setHasEntered(true), 250);
+    entryTimerRef.current = setTimeout(() => setHasEntered(true), 320);
   };
   useEffect(() => {
     playEntryAnimation();
@@ -829,7 +829,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 select-none"
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 select-none ${
+        hasEntered ? "" : "popup-backdrop-enter"
+      }`}
       style={overlayStyle}
       onClick={(e) => {
         // Clicking outside never dismisses the review: only Close, Snooze or finishing the session do.
@@ -839,7 +841,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     >
       <div
         className={`w-full max-w-xl min-h-[500px] bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col justify-between ${
-          isNudging ? "animate-shake" : hasEntered ? "" : "animate-in zoom-in-95 duration-200"
+          isNudging ? "animate-shake" : hasEntered ? "" : "popup-card-enter"
         }`}
       >
         {/* Top Header Bar */}

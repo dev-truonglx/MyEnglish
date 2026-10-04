@@ -56,7 +56,7 @@ export default function DeleteWordModal({
           <span className="font-mono font-bold text-rose-700 dark:text-rose-300 uppercase px-1.5 py-0.5 rounded bg-rose-50 dark:bg-zinc-900 border border-rose-200 dark:border-zinc-800">
             {wordToDelete.word}
           </span>{" "}
-          khỏi từ điển? Toàn bộ ví dụ, phân tích ngữ pháp và tiến độ ôn tập SM-2 sẽ bị xoá.
+          khỏi từ điển? Toàn bộ ví dụ, phân tích ngữ pháp và tiến độ ôn tập FSRS sẽ bị xoá.
         </p>
 
         <div className="flex items-center justify-end gap-3 pt-2 border-t border-slate-200 dark:border-zinc-900">
