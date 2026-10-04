@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { emit, listen } from "@tauri-apps/api/event";
 import {
   Volume2,
   Clock,
@@ -29,7 +29,10 @@ import {
   recordPracticeResult,
 } from "@/services/grammarService";
 import type { WordDetail, ReviewCard } from "@/types/database";
-import { directionForExercise, getCardSrs, practiceCards } from "@/services/cards";
+import { getCardSrs, practiceCards } from "@/services/cards";
+
+/** A wrong popup item comes back at most this many times */
+const MAX_POPUP_RETRIES = 2;
 import {
   contractionVariants,
   normalizeTypedText,
@@ -296,17 +299,34 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     itemStartRef.current = Date.now();
   }, [currentIndex, queue.length]);
 
-  // Only words that were due when the popup opened update the FSRS schedule;
-  // the rest is extra practice (logged + XP, schedule untouched).
+  // Cards already recorded in FSRS during this popup session, and retry counts of wrong items
+  const scheduledThisSessionRef = useRef<Set<string>>(new Set());
+  const retryCountRef = useRef<Map<string, number>>(new Map());
+
+  /** Put a wrong item back at the end of the queue (at most MAX_POPUP_RETRIES times) */
+  const requeueItem = (item: FocusReviewItem) => {
+    const key = item.kind === "word" ? `w:${item.word.id}:${item.word.direction}` : `g:${item.exercise.id}`;
+    const count = retryCountRef.current.get(key) ?? 0;
+    if (count >= MAX_POPUP_RETRIES) return;
+    retryCountRef.current.set(key, count + 1);
+    setQueue((prev) => [...prev, item]);
+  };
+
+  // Only the first answer to a card that was due when the popup opened updates FSRS; retries and
+  // extra words are practice (logged + XP, schedule untouched).
   const gradeWord = async (word: ReviewCard, rating: Rating, exerciseType: ExerciseType) => {
-    // Typing trains recall (production card); picking the word among options trains recognition.
-    // Without a production card yet, recordReview falls back to the recognition card.
-    const direction = directionForExercise(exerciseType);
+    // The card's own direction is graded (the question type already follows it)
+    const direction = word.direction;
+    const cardKey = `${word.id}:${direction}`;
     const cardSrs = getCardSrs(word, direction) ?? getCardSrs(word, "recognition");
-    const isScheduledReview = !!cardSrs && new Date(cardSrs.next_review_date) <= new Date();
+    const isScheduledReview =
+      !scheduledThisSessionRef.current.has(cardKey) && !!cardSrs && new Date(cardSrs.next_review_date) <= new Date();
     let recordedDirection = direction;
     if (isScheduledReview) {
+      scheduledThisSessionRef.current.add(cardKey);
       recordedDirection = (await recordReview(word.id, rating, direction)).direction;
+      // Let the dashboard (another window) refresh its due counts
+      emit("words-changed").catch(() => {});
     }
     const responseTimeMs = Date.now() - itemStartRef.current;
     const wrongAttempts = rating === Rating.Again ? 1 : 0;
@@ -431,7 +451,10 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       // Bổ sung thêm từ nếu chưa đủ wordTarget
       if (selectedWords.length < wordTarget && allWords.length > selectedWords.length) {
         const selectedIds = new Set(selectedWords.map((w) => w.id));
-        const extra = allWords.filter((w) => !selectedIds.has(w.id)).sort(() => 0.5 - Math.random());
+        // Never fill with brand-new words: that would bypass the daily new-card limit
+        const extra = allWords
+          .filter((w) => !selectedIds.has(w.id) && (w.srs.reps ?? 0) > 0)
+          .sort(() => 0.5 - Math.random());
         selectedWords = [...selectedWords, ...practiceCards(extra.slice(0, wordTarget - selectedWords.length))];
       }
 
@@ -468,6 +491,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         }
       }
 
+      // New popup session: forget which cards were graded / retried in the previous one
+      scheduledThisSessionRef.current = new Set();
+      retryCountRef.current = new Map();
       setQueue(finalQueue);
       setCurrentIndex(0);
       setIsAnswered(false);
@@ -533,6 +559,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     setIsCorrect(false);
     setTypedInput("");
     setFeedbackMsg(null);
+    // Never show (or let keys 1-4 pick) the previous item's options
+    setChoices([]);
+    let cancelled = false;
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
@@ -541,6 +570,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
       // Chuẩn bị 4 lựa chọn từ tiếng Anh
       getAllWords().then((all) => {
+        if (cancelled) return;
         const otherWords = all.filter(
           (w) => w.id !== wordObj.id && w.word.trim().toLowerCase() !== wordObj.word.trim().toLowerCase()
         );
@@ -604,6 +634,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         setChoices([]);
       }
     }
+    return () => {
+      cancelled = true;
+    };
   }, [currentIndex, currentItem]);
 
   // Focus ô input khi ở chế độ gõ
@@ -659,7 +692,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           recordDailyActivity(1);
           setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${wordObj.word}"`);
           // Cải tiến: Đẩy câu trả lời sai vào cuối hàng đợi để củng cố ngay
-          setQueue((prev) => [...prev, currentItem]);
+          requeueItem(currentItem);
         }
       } else {
         // Xử lý bài tập ngữ pháp
@@ -676,7 +709,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           await recordPracticeResult(lesson.id, 40);
           setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: ${formatAnswerForms(ex)}`);
           // Đẩy bài tập sai vào cuối hàng đợi
-          setQueue((prev) => [...prev, currentItem]);
+          requeueItem(currentItem);
         }
       }
     } catch (err) {
@@ -710,7 +743,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           await gradeWord(wordObj, Rating.Again, "spelling");
           recordDailyActivity(1);
           setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${wordObj.word}"`);
-          setQueue((prev) => [...prev, currentItem]);
+          requeueItem(currentItem);
         }
       } catch (err) {
         console.warn("Failed to record typing review:", err);
@@ -734,7 +767,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           recordGrammarExerciseAttempt(ex.id, false);
           await recordPracticeResult(lesson.id, 40);
           setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: ${formatAnswerForms(ex)}`);
-          setQueue((prev) => [...prev, currentItem]);
+          requeueItem(currentItem);
         }
       } catch (err) {
         console.warn("Failed to record grammar typing review:", err);

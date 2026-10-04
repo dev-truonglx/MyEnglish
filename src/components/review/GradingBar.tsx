@@ -13,6 +13,10 @@ interface GradingBarProps {
   intervalPreviews: IntervalPreviews;
   handleCheckAnswer: () => void;
   userInput: string;
+  /** After "Xem đáp án" the word was not recalled: only Again is a truthful grade */
+  onlyAgain: boolean;
+  /** Easy is offered only for production (recall) cards; recognition is capped at Good */
+  allowEasy: boolean;
 }
 
 /** BOTTOM ACTION BAR - Always present with fixed height (h-14) so card NEVER jumps */
@@ -27,6 +31,8 @@ export default function GradingBar({
   intervalPreviews,
   handleCheckAnswer,
   userInput,
+  onlyAgain,
+  allowEasy,
 }: GradingBarProps) {
   return (
     <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
@@ -47,7 +53,7 @@ export default function GradingBar({
           </div>
         </div>
       ) : (effectiveExerciseType === "flip" ? isFlipped : hasCheckedAnswer) ? (
-        <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150">
+        <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150 [&>button:disabled]:opacity-40 [&>button:disabled]:cursor-not-allowed">
           {/* Again: Rating.Again (1) */}
           <button
             onClick={() => handleGrade(Rating.Again)}
@@ -70,7 +76,8 @@ export default function GradingBar({
           {/* Hard: Rating.Hard (2) */}
           <button
             onClick={() => handleGrade(Rating.Hard)}
-            disabled={isAdvancing}
+            disabled={isAdvancing || onlyAgain}
+            title={onlyAgain ? "Đã xem đáp án: chỉ chấm Again" : undefined}
             className="p-2 md:p-3 rounded-2xl border border-amber-200 dark:border-amber-800/80 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
           >
             <div className="flex items-center gap-1.5">
@@ -85,7 +92,8 @@ export default function GradingBar({
           {/* Good: Rating.Good (3) */}
           <button
             onClick={() => handleGrade(Rating.Good)}
-            disabled={isAdvancing}
+            disabled={isAdvancing || onlyAgain}
+            title={onlyAgain ? "Đã xem đáp án: chỉ chấm Again" : undefined}
             className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
               isCorrect
                 ? "border-blue-400 dark:border-blue-500 bg-blue-100 dark:bg-blue-900/60 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/30 font-bold"
@@ -104,7 +112,10 @@ export default function GradingBar({
           {/* Easy: Rating.Easy (4) */}
           <button
             onClick={() => handleGrade(Rating.Easy)}
-            disabled={isAdvancing}
+            disabled={isAdvancing || onlyAgain || !allowEasy}
+            title={
+              onlyAgain ? "Đã xem đáp án: chỉ chấm Again" : !allowEasy ? "Thẻ nhận diện tối đa là Good" : undefined
+            }
             className="p-2 md:p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
           >
             <div className="flex items-center gap-1.5">

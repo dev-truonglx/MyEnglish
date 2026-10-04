@@ -106,12 +106,33 @@ describe("assessUserProficiency", () => {
     expect(profile.habitScore).toBeGreaterThan(0);
   });
 
-  it("falls back to total known words when words are not tagged yet", async () => {
+  it("counts untagged words toward the lowest unfinished levels", async () => {
     vi.resetModules();
     const { assessUserProficiency } = await import("@/services/userProficiency");
     await masterGrammar("A1");
-    const profile = assessUserProficiency(knownWords(35, null));
-    expect(profile.levelVocab.A1).toEqual({ known: 35, target: 30 });
+    expect(assessUserProficiency(knownWords(35, null)).levelVocab.A1).toEqual({ known: 35, target: 40 });
+    const profile = assessUserProficiency([...knownWords(10, "A1"), ...knownWords(35, null)]);
+    expect(profile.levelVocab.A1).toEqual({ known: 40, target: 40 });
+    expect(profile.levelVocab.A2).toEqual({ known: 5, target: 60 });
     expect(profile.assessedLevel).toBe("A2");
+  });
+
+  it("does not pass a lesson from a single lucky popup answer", async () => {
+    vi.resetModules();
+    const { GRAMMAR_LESSONS } = await import("@/data/grammarData");
+    const g = await import("@/services/grammarService");
+    const { assessUserProficiency } = await import("@/services/userProficiency");
+    for (const lesson of GRAMMAR_LESSONS.filter((l) => l.level === "A1")) {
+      await g.recordPracticeResult(lesson.id, 100);
+    }
+    const lesson = g.getLessonProgress(GRAMMAR_LESSONS[0].id);
+    expect(lesson.diagnosticStatus).toBe("unattempted");
+    expect(lesson.mastery).toBe(50);
+    expect(assessUserProficiency(knownWords(45, "A1")).assessedLevel).toBe("A1");
+    // Practiced lessons still get scheduled reviews
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date(Date.now() + 30 * 86400000));
+    expect(g.getDueGrammarLessons()).toContain(GRAMMAR_LESSONS[0].id);
+    vi.useRealTimers();
   });
 });

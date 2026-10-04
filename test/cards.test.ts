@@ -63,9 +63,9 @@ describe("selectExerciseType by direction", () => {
 });
 
 describe("buildReviewSession with two directions", () => {
-  it("adds at most one card per word and does not budget new production cards", async () => {
+  it("adds at most one card per word and budgets new cards per direction", async () => {
     await freshServices();
-    saveStudyLimits({ newCardsPerDay: 0, maxSessionSize: 30 });
+    saveStudyLimits({ newCardsPerDay: 1, maxSessionSize: 30 });
     const both = makeWord("both", { srs: reviewSrs(2, 10), srsProduction: { ...(reviewSrs(1, 10) as never), word_id: "both" } });
     const newRecall = makeWord("recall", {
       srs: { ...reviewSrs(30, 1), next_review_date: new Date(Date.now() + 20 * DAY_MS).toISOString() },
@@ -73,11 +73,15 @@ describe("buildReviewSession with two directions", () => {
     });
     const brandNew = makeWord("brand-new");
 
-    const session = buildReviewSession([both, newRecall, brandNew], 0);
+    // Today's recognition budget is used up, the recall budget is not
+    const session = buildReviewSession([both, newRecall, brandNew], { recognition: 1, production: 0 });
     expect(session.filter((c) => c.id === "both")).toHaveLength(1);
     expect(session.find((c) => c.id === "recall")?.direction).toBe("production");
-    // newCardsPerDay = 0 blocks brand-new words, not recall cards of known words
     expect(session.some((c) => c.id === "brand-new")).toBe(false);
+
+    // Recall budget used up too: the new recall card waits for tomorrow
+    const later = buildReviewSession([newRecall], { recognition: 1, production: 1 });
+    expect(later.some((c) => c.id === "recall")).toBe(false);
   });
 });
 

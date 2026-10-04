@@ -59,6 +59,13 @@ describe("popupBlockReasonFrom", () => {
     expect(popupBlockReasonFrom(typing, MAX_WAIT_FOR_BREAK_MS)).toBeNull();
   });
 
+  it("caps how long a full-screen app can postpone the reminder", async () => {
+    const { popupBlockReasonFrom, MAX_WAIT_FOR_FULLSCREEN_MS } = await import("@/services/srs");
+    const fullscreen = { ...none, fullscreen_app: "Safari" };
+    expect(popupBlockReasonFrom(fullscreen, 0)).toMatch(/toàn màn hình/);
+    expect(popupBlockReasonFrom(fullscreen, MAX_WAIT_FOR_FULLSCREEN_MS)).toBeNull();
+  });
+
   it("never blocks on idle where it can't be measured (non-macOS)", async () => {
     const { popupBlockReasonFrom } = await import("@/services/srs");
     expect(popupBlockReasonFrom({ ...none, idle_seconds: null }, 0)).toBeNull();

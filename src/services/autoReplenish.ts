@@ -1,5 +1,6 @@
 import type { WordDetail } from "@/types/database";
 import { isWordDue } from "./cards";
+import { isPlaceholderMeaning } from "./db";
 import type { GrammarLevel } from "@/types/grammar";
 import { GRAMMAR_LESSONS } from "@/data/grammarData";
 import { getAllGrammarProgress, saveCustomGrammarExercises } from "./grammarService";
@@ -172,8 +173,10 @@ export async function checkAutoReplenishEligibility(words: WordDetail[]): Promis
     };
   }
 
+  // Words still waiting for AI analysis are not "unlearned": they would block replenishment forever
   const unlearnedNewWords = words.filter(
     (w) =>
+      !isPlaceholderMeaning(w.meaning_vn) &&
       (w.srs.state === undefined || (w.srs.state as number) === 0) &&
       (!w.srs.reps || w.srs.reps === 0)
   );

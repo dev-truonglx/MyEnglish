@@ -36,6 +36,7 @@ export default function FlashcardReview({
   onExit,
 }: FlashcardReviewProps) {
   const {
+    revealedWithoutRecall,
     mode,
     handleModeChange,
     setFallbackMode,
@@ -291,6 +292,8 @@ export default function FlashcardReview({
         intervalPreviews={intervalPreviews}
         handleCheckAnswer={handleCheckAnswer}
         userInput={userInput}
+        onlyAgain={revealedWithoutRecall}
+        allowEasy={currentWord.direction === "production"}
       />
     </div>
   );

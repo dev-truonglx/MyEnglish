@@ -235,20 +235,33 @@ export function isNewCard(word: WordDetail): boolean {
   return (word.srs.state ?? 0) === 0 && (word.srs.reps ?? 0) === 0;
 }
 
+export interface NewCardCounts {
+  recognition: number; // brand-new words introduced today
+  production: number; // recall cards started today
+}
+
 /**
- * Number of never-seen words that received their first review today (local day).
+ * Cards that received their first *scheduled* review today (local day), per direction.
+ * Practice answers (is_scheduled = 0) never consume the budget, even if they came first.
  */
-export async function getNewCardsIntroducedToday(): Promise<number> {
+export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const db = await getDatabase();
-  const rows = await db.select<Array<{ cnt: number }>>(
-    // Practice-only answers leave reps at 0, so they don't consume the new-card budget
-    `SELECT COUNT(*) as cnt FROM (
-       SELECT word_id, MIN(timestamp) as first_seen FROM review_logs GROUP BY word_id
-     ) f JOIN srs_reviews s ON s.word_id = f.word_id
-     WHERE f.first_seen >= $1 AND s.reps > 0`,
+  const rows = await db.select<Array<{ direction: string | null; cnt: number }>>(
+    `SELECT COALESCE(direction, 'recognition') AS direction, COUNT(*) AS cnt FROM (
+       SELECT word_id, COALESCE(direction, 'recognition') AS direction, MIN(timestamp) AS first_seen
+       FROM review_logs
+       WHERE is_scheduled IS NULL OR is_scheduled = 1
+       GROUP BY word_id, COALESCE(direction, 'recognition')
+     ) WHERE first_seen >= $1
+     GROUP BY direction`,
     [getLocalStartOfDayIso()]
   );
-  return rows[0]?.cnt ?? 0;
+  const counts: NewCardCounts = { recognition: 0, production: 0 };
+  for (const r of rows) {
+    if (r.direction === "production") counts.production = r.cnt;
+    else counts.recognition = r.cnt;
+  }
+  return counts;
 }
 
 /**
@@ -256,16 +269,19 @@ export async function getNewCardsIntroducedToday(): Promise<number> {
  *  - every word contributes at most one due card per session (if both directions are due, the more
  *    urgent one), so recognition and recall of the same word are never drilled back to back
  *  - due review/learning cards first, ordered by urgency
- *  - brand-new words (recognition card never reviewed) limited by the remaining daily new-card budget,
- *    spread evenly through the session; new production cards are not budgeted (the word is already known)
+ *  - cards never reviewed are a separate, budgeted stage per direction (newCardsPerDay each):
+ *    brand-new words (recognition) and newly unlocked recall cards (production), oldest first,
+ *    spread evenly through the session
  *  - whole session capped at maxSessionSize
  */
 export function buildReviewSession(
   dueWords: WordDetail[],
-  newCardsAlreadyToday: number,
+  alreadyToday: NewCardCounts | number,
   now: Date = new Date()
 ): ReviewCard[] {
   const limits = getStudyLimits();
+  const introduced: NewCardCounts =
+    typeof alreadyToday === "number" ? { recognition: alreadyToday, production: 0 } : alreadyToday;
   // Words still waiting for AI analysis have no real meaning to review yet
   const ready = dueWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
   const cards = ready.flatMap((w) => {
@@ -276,14 +292,17 @@ export function buildReviewSession(
     )];
   });
 
-  const isBudgetedNew = (c: ReviewCard) => c.direction === "recognition" && isNewCard(c);
-  const reviewCards = smartSortReviewQueue(cards.filter((c) => !isBudgetedNew(c)), now);
-  const newBudget = Math.max(0, limits.newCardsPerDay - newCardsAlreadyToday);
-  // Oldest new words first so the backlog is learned in the order it was added
-  const newCards = cards
-    .filter(isBudgetedNew)
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
-    .slice(0, newBudget);
+  const reviewCards = smartSortReviewQueue(cards.filter((c) => !isNewCard(c)), now);
+  const oldestFirst = (a: ReviewCard, b: ReviewCard) =>
+    new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime() ||
+    new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const newOf = (direction: ReviewCard["direction"], used: number) =>
+    cards
+      .filter((c) => isNewCard(c) && c.direction === direction)
+      .sort(oldestFirst)
+      .slice(0, Math.max(0, limits.newCardsPerDay - used));
+  // Recall cards of known words first: they are cheaper and unlock real usage of the word
+  const newCards = [...newOf("production", introduced.production), ...newOf("recognition", introduced.recognition)];
 
   const reviewSlice = reviewCards.slice(0, limits.maxSessionSize);
   const newSlice = newCards.slice(0, Math.max(0, limits.maxSessionSize - reviewSlice.length));
@@ -308,12 +327,15 @@ export function buildReviewSession(
 // ─── 3b. RATING DERIVATION ─────────────────────────────────────────────────
 
 
-/** Fast production answers (ms) are graded Easy */
-const EASY_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
-  spelling: 6000,
-  cloze: 7000,
-  reverse_cloze: 7000,
-  listening: 8000,
+/** Correct answers slower than this (ms) are graded Hard */
+const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
+  multiple_choice: 15000,
+  context_match: 30000,
+  sentence_builder: 40000,
+  reverse_cloze: 20000,
+  spelling: 20000,
+  cloze: 25000,
+  listening: 25000,
 };
 
 export interface AnswerOutcome {
@@ -330,19 +352,17 @@ export interface AnswerOutcome {
  *  - any wrong attempt means the memory failed -> Again
  *  - hint / small typo -> Hard
  *  - correct on first try -> Good
- *  - Easy only for fast, first-try *production* answers on cards already past the learning phase
- *  - recognition exercises are capped at Good (choosing among options is easier than recall)
+ *  - a correct but very slow answer -> Hard
+ *  - automatic grading never gives Easy (Easy stays a manual choice in flip mode)
  */
 export function deriveRating(outcome: AnswerOutcome): Rating {
   if (outcome.wrongAttempts > 0) return Rating.Again;
   if (outcome.usedHint || outcome.nearMiss) return Rating.Hard;
-  if (directionForExercise(outcome.exerciseType) === "recognition") return Rating.Good;
-
-  const easyMs = EASY_RESPONSE_MS[outcome.exerciseType];
-  const isReviewCard = (outcome.srs?.state ?? 0) === 2;
-  if (easyMs && isReviewCard && outcome.responseTimeMs > 0 && outcome.responseTimeMs <= easyMs) {
-    return Rating.Easy;
-  }
+  // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
+  // (Fast answers are not upgraded to Easy: in simulation that doubled scheduled stability
+  // versus true memory strength and pushed production recall below target.)
+  const slowMs = SLOW_RESPONSE_MS[outcome.exerciseType];
+  if (slowMs && outcome.responseTimeMs > slowMs) return Rating.Hard;
   return Rating.Good;
 }
 
