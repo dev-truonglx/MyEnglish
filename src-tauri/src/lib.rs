@@ -88,10 +88,21 @@ fn output_with_timeout(
     })
 }
 
-/// True when the CLI rejected a command-line flag (older versions), as opposed to a real failure.
+/// Model for structured generation. MYENGLISH_AI_MODEL overrides it (testing / model retirement).
+/// Live checks (ai_prompts_live): the -low variant was ~35% faster but produced mistranslations and
+/// stray non-Vietnamese characters, so content generation stays on -medium.
+const AI_MODEL: &str = "gemini-3.6-flash-medium";
+
+fn ai_model() -> String {
+    std::env::var("MYENGLISH_AI_MODEL").unwrap_or_else(|_| AI_MODEL.to_string())
+}
+
+/// True when the CLI rejected a command-line flag or the model (older versions, retired model),
+/// as opposed to a real failure.
 fn is_unknown_flag_error(output: &std::process::Output) -> bool {
     let stderr = String::from_utf8_lossy(&output.stderr).to_lowercase();
-    stderr.contains("flag provided but not defined")
+    stderr.contains("invalid model")
+        || stderr.contains("flag provided but not defined")
         || stderr.contains("unknown flag")
         || stderr.contains("unknown option")
         || stderr.contains("unrecognized")
@@ -101,19 +112,24 @@ fn is_unknown_flag_error(output: &std::process::Output) -> bool {
 ///
 /// The prompt embeds stored vocabulary, so the agent must NOT get auto-approved tools:
 /// no `--dangerously-skip-permissions`, and `--sandbox` restricts terminal access.
+/// Arguments for a print-mode AI call. The reasoning effort is part of the model name
+/// (e.g. gemini-3.6-flash-medium); adding --effort makes the CLI reject the call.
+fn ai_cli_args(prompt: &str) -> Vec<String> {
+    vec![
+        "--sandbox".into(),
+        "--disable-slash-commands".into(),
+        "--model".into(),
+        ai_model(),
+        "--print-timeout".into(),
+        "35s".into(),
+        "-p".into(),
+        prompt.into(),
+    ]
+}
+
 fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, String> {
     let mut cmd = create_hidden_command(bin_path);
-    cmd.arg("--sandbox")
-        .arg("--disable-slash-commands")
-        .arg("--model")
-        .arg("gemini-3.6-flash-medium")
-        // Structured extraction needs little reasoning: low effort is faster and cheaper
-        .arg("--effort")
-        .arg("low")
-        .arg("--print-timeout")
-        .arg("35s")
-        .arg("-p")
-        .arg(prompt);
+    cmd.args(ai_cli_args(prompt));
 
     let output = output_with_timeout(cmd, AI_CLI_TIMEOUT)
         .map_err(|e| format!("Failed to execute AI CLI at '{}': {}", bin_path, e))?;
@@ -1643,6 +1659,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn ai_cli_args_never_combine_model_and_effort() {
+        let args = ai_cli_args("hi");
+        assert!(args.contains(&"--model".to_string()));
+        assert!(!args.iter().any(|a| a == "--effort"));
+        assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert_eq!(args.last().map(String::as_str), Some("hi"));
+    }
+
+    #[test]
     fn prompts_stay_compact() {
         let known: Vec<String> = (0..120).map(|i| format!("word{}", i)).collect();
         for level in ["A1", "A2", "B1", "B2", "C1"] {
@@ -1723,6 +1748,39 @@ mod tests {
         assert!(is_known_cli_binary("C:\\tools\\gemini.exe"));
         assert!(!is_known_cli_binary("/bin/sh"));
         assert!(!is_known_cli_binary("/tmp/agy-evil/payload"));
+    }
+
+    /// Live AI check (uses the installed agy CLI and the user's quota):
+    /// `cargo test ai_prompts_live -- --ignored --nocapture --test-threads=1`
+    #[test]
+    #[ignore]
+    fn ai_prompts_live() {
+        let (bin, found) = get_cli_bin_path(None);
+        assert!(found, "AI CLI not found");
+        let cases: Vec<(&str, String)> = vec![
+            ("enrich deploy @A1", build_enrich_prompt("deploy", "A1")),
+            ("enrich latency @B2", build_enrich_prompt("latency", "B2")),
+            ("recommend @A1", build_recommend_prompt("A1", "Software Engineering & Technical Work", 3, &[])),
+            ("grammar @A1", build_grammar_prompt("Present simple", "A1")),
+        ];
+        for (name, prompt) in cases {
+            let start = std::time::Instant::now();
+            let out = run_ai_cli(&bin, &prompt).expect("CLI run failed");
+            let stdout = String::from_utf8_lossy(&out.stdout);
+            let cleaned = clean_json_string(&stdout);
+            let parsed: Result<serde_json::Value, _> = serde_json::from_str(&cleaned);
+            println!(
+                "=== {} | exit={:?} | {:.1}s | prompt {} chars | output {} chars | json_ok={}\n{}\n--- stderr: {}",
+                name,
+                out.status.code(),
+                start.elapsed().as_secs_f64(),
+                prompt.len(),
+                stdout.len(),
+                parsed.is_ok(),
+                cleaned,
+                truncate_for_log(&String::from_utf8_lossy(&out.stderr), 400)
+            );
+        }
     }
 
     /// Manual smoke test on a real Mac: `cargo test popup_blockers_smoke -- --ignored --nocapture`
