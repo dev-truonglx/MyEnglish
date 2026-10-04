@@ -25,6 +25,7 @@ import {
   smartPrepareGrammarExercises,
   recordGrammarExerciseAttempt,
 } from "@/services/grammarService";
+import { normalizeTypedText } from "@/services/smartReview";
 import { generateGrammarExercisesWithGemini } from "@/services/ai";
 import SyntaxHighlighter from "./SyntaxHighlighter";
 
@@ -41,13 +42,9 @@ export default function DiagnosticChallenge({
   onViewHandbook,
   onNextLesson,
 }: DiagnosticChallengeProps) {
-  const initialExercises = useMemo(() => {
-    return isDiagnosticMode ? lesson.diagnosticExercises : lesson.practiceExercises;
-  }, [lesson, isDiagnosticMode]);
-
-  const [exerciseList, setExerciseList] = useState<GrammarExercise[]>(() =>
-    smartPrepareGrammarExercises(initialExercises)
-  );
+  const [exerciseList, setExerciseList] = useState<GrammarExercise[]>([]);
+  // False until custom exercises are merged, so the question order never changes under the user
+  const [isListReady, setIsListReady] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [typedAnswer, setTypedAnswer] = useState("");
@@ -55,53 +52,96 @@ export default function DiagnosticChallenge({
   const [isEvaluated, setIsEvaluated] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [showHint, setShowHint] = useState(false);
-  const [stats, setStats] = useState({ correct: 0, total: 0 });
+  // First-attempt outcome per exercise id; retries never change the score
+  const [outcomes, setOutcomes] = useState<Record<string, boolean>>({});
   const [isCompletedAll, setIsCompletedAll] = useState(false);
   const [earnedXP, setEarnedXP] = useState(0);
 
   // Timestamp to prevent double-skipping when submitting via Enter key
   const lastEvaluatedTime = useRef<number>(0);
+  // Guards against advancing / finishing twice (keyboard + click, double Enter)
+  const advancingRef = useRef(false);
+  const finishedRef = useRef(false);
 
   // Dynamic extension states (Sentence Mining & AI Generation)
   const [isMining, setIsMining] = useState(false);
   const [isGeneratingAI, setIsGeneratingAI] = useState(false);
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
 
-  // Reset exercise list on lesson / mode change and hydrate saved exercises from SQLite with smart algorithm
-  useEffect(() => {
-    let isCancelled = false;
-    setCurrentIndex(0);
-    setStats({ correct: 0, total: 0 });
-    setIsCompletedAll(false);
-
-    const base = isDiagnosticMode ? lesson.diagnosticExercises : lesson.practiceExercises;
-
-    // Hydrate permanently saved exercises from SQLite & apply smart algorithm (randomization, option shuffling, interleaving, error-weighting)
-    getCustomGrammarExercises(lesson.id).then((saved) => {
-      if (isCancelled) return;
-      const existingIds = new Set(base.map((e) => e.id));
-      const customToAdd = (saved || []).filter((s) => !existingIds.has(s.id));
-      const merged = [...base, ...customToAdd];
-      const randomized = smartPrepareGrammarExercises(merged);
-      setExerciseList(randomized);
-    });
-
-    return () => {
-      isCancelled = true;
-    };
-  }, [lesson.id, isDiagnosticMode, lesson.diagnosticExercises, lesson.practiceExercises]);
-
-  const currentExercise: GrammarExercise | undefined = exerciseList[currentIndex];
-
-  // Reset current question UI state on step change
-  useEffect(() => {
+  const resetQuestionState = useCallback(() => {
     setSelectedOption(null);
     setTypedAnswer("");
     setSelectedWordToken(null);
     setIsEvaluated(false);
     setIsCorrect(null);
     setShowHint(false);
-  }, [currentIndex, lesson.id]);
+  }, []);
+
+  // Build the full list (static + saved custom exercises) before showing the first question
+  const loadExerciseList = useCallback(
+    (isCancelled: () => boolean = () => false) => {
+      const base = isDiagnosticMode ? lesson.diagnosticExercises : lesson.practiceExercises;
+      setIsListReady(false);
+      setExerciseList([]);
+      setCurrentIndex(0);
+      setOutcomes({});
+      setIsCompletedAll(false);
+      setEarnedXP(0);
+      finishedRef.current = false;
+      advancingRef.current = false;
+      resetQuestionState();
+
+      getCustomGrammarExercises(lesson.id)
+        .catch(() => [] as GrammarExercise[])
+        .then((saved) => {
+          if (isCancelled()) return;
+          const existingIds = new Set(base.map((e) => e.id));
+          const customToAdd = (saved || []).filter((s) => !existingIds.has(s.id));
+          setExerciseList(smartPrepareGrammarExercises([...base, ...customToAdd]));
+          setCurrentIndex(0);
+          resetQuestionState();
+          setIsListReady(true);
+        });
+    },
+    [lesson.id, isDiagnosticMode, lesson.diagnosticExercises, lesson.practiceExercises, resetQuestionState]
+  );
+
+  // Reset everything on lesson / mode change and hydrate saved exercises with the smart algorithm
+  useEffect(() => {
+    let cancelled = false;
+    loadExerciseList(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadExerciseList]);
+
+  const currentExercise: GrammarExercise | undefined = exerciseList[currentIndex];
+
+  // Reset current question UI state on step change
+  useEffect(() => {
+    resetQuestionState();
+    advancingRef.current = false;
+  }, [currentIndex, lesson.id, resetQuestionState]);
+
+  const correctCount = useMemo(
+    () => exerciseList.reduce((n, ex) => n + (outcomes[ex.id] ? 1 : 0), 0),
+    [exerciseList, outcomes]
+  );
+
+  // Append new exercises after the current question without reshuffling what the user already saw
+  const appendExercises = useCallback(
+    (incoming: GrammarExercise[]) => {
+      setExerciseList((prev) => {
+        const existingIds = new Set(prev.map((e) => e.id));
+        const toAdd = incoming.filter((m) => !existingIds.has(m.id));
+        if (toAdd.length === 0) return prev;
+        const head = prev.slice(0, currentIndex + 1);
+        const tail = prev.slice(currentIndex + 1);
+        return [...head, ...smartPrepareGrammarExercises([...tail, ...toAdd])];
+      });
+    },
+    [currentIndex]
+  );
 
   const speakText = useCallback((text: string) => {
     try {
@@ -152,7 +192,8 @@ export default function DiagnosticChallenge({
     async (userAnswer: string) => {
       if (isEvaluated || !currentExercise) return;
 
-      const normUser = userAnswer.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "");
+      // Same normalization on both sides: case, curly quotes, contractions, punctuation, whitespace
+      const normUser = normalizeTypedText(userAnswer);
       const rawTargets: string[] = [];
       if (Array.isArray(currentExercise.correctAnswer)) {
         rawTargets.push(...currentExercise.correctAnswer);
@@ -163,27 +204,25 @@ export default function DiagnosticChallenge({
         rawTargets.push(currentExercise.errorWord);
       }
 
-      const targets = rawTargets.map((a) =>
-        a.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
-      );
+      const targets = rawTargets.map((a) => normalizeTypedText(a));
 
-      const correct = targets.some((t) => t === normUser);
+      const correct = normUser.length > 0 && targets.some((t) => t === normUser);
       setIsCorrect(correct);
       setIsEvaluated(true);
       lastEvaluatedTime.current = Date.now();
-      recordGrammarExerciseAttempt(currentExercise.id, correct);
 
-      const newStats = {
-        correct: stats.correct + (correct ? 1 : 0),
-        total: stats.total + 1,
-      };
-      setStats(newStats);
+      // Only the first attempt per exercise counts towards score and history
+      const exId = currentExercise.id;
+      if (!(exId in outcomes)) {
+        recordGrammarExerciseAttempt(exId, correct);
+        setOutcomes((prev) => (exId in prev ? prev : { ...prev, [exId]: correct }));
+      }
 
       if (correct) {
         speakText(currentExercise.promptEn.replace(/\[|\]/g, ""));
       }
     },
-    [isEvaluated, currentExercise, stats, speakText]
+    [isEvaluated, currentExercise, outcomes, speakText]
   );
 
   const handleSelectOption = (opt: string) => {
@@ -205,13 +244,21 @@ export default function DiagnosticChallenge({
   };
 
   const handleNextQuestion = useCallback(async () => {
+    if (!isEvaluated || advancingRef.current || finishedRef.current) return;
+    advancingRef.current = true;
+
     if (currentIndex + 1 < exerciseList.length) {
       setCurrentIndex((prev) => prev + 1);
-    } else {
-      setIsCompletedAll(true);
-      const scorePercent = Math.round((stats.correct / exerciseList.length) * 100);
-      const passedFirstTry = stats.correct === exerciseList.length;
+      return;
+    }
 
+    finishedRef.current = true;
+    setIsCompletedAll(true);
+    const total = exerciseList.length;
+    const scorePercent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
+    const passedFirstTry = total > 0 && correctCount === total;
+
+    try {
       if (isDiagnosticMode) {
         const res = await recordDiagnosticResult(lesson.id, passedFirstTry, scorePercent);
         setEarnedXP(res.xpEarned);
@@ -219,37 +266,28 @@ export default function DiagnosticChallenge({
         const res = await recordPracticeResult(lesson.id, scorePercent);
         setEarnedXP(res.xpEarned);
       }
+    } finally {
+      advancingRef.current = false;
     }
-  }, [currentIndex, exerciseList.length, stats.correct, isDiagnosticMode, lesson.id]);
+  }, [isEvaluated, currentIndex, exerciseList.length, correctCount, isDiagnosticMode, lesson.id]);
 
   const handleRestart = useCallback(() => {
-    const base = isDiagnosticMode ? lesson.diagnosticExercises : lesson.practiceExercises;
-    getCustomGrammarExercises(lesson.id).then((saved) => {
-      const existingIds = new Set(base.map((e) => e.id));
-      const customToAdd = (saved || []).filter((s) => !existingIds.has(s.id));
-      const merged = [...base, ...customToAdd];
-      const randomized = smartPrepareGrammarExercises(merged);
-      setExerciseList(randomized);
-      setCurrentIndex(0);
-      setStats({ correct: 0, total: 0 });
-      setIsCompletedAll(false);
-      setSelectedOption(null);
-      setTypedAnswer("");
-      setSelectedWordToken(null);
-      setIsEvaluated(false);
-      setIsCorrect(null);
-      setShowHint(false);
-    });
-  }, [lesson.id, isDiagnosticMode, lesson.diagnosticExercises, lesson.practiceExercises]);
+    loadExerciseList();
+  }, [loadExerciseList]);
 
   // Keyboard shortcuts: 1-4 for options; Enter / Space to advance question or finish
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // A focused button already handles Enter/Space via its native click
+      const target = e.target as HTMLElement | null;
+      if ((e.key === "Enter" || e.key === " ") && target?.closest?.("button")) return;
+      if (e.repeat) return;
+
       // 1. Completion screen: Enter to advance to next lesson or retry
       if (isCompletedAll) {
         if (e.key === "Enter") {
           e.preventDefault();
-          const scorePercent = exerciseList.length > 0 ? Math.round((stats.correct / exerciseList.length) * 100) : 0;
+          const scorePercent = exerciseList.length > 0 ? Math.round((correctCount / exerciseList.length) * 100) : 0;
           if (onNextLesson && scorePercent >= 70) {
             onNextLesson();
           } else {
@@ -274,7 +312,8 @@ export default function DiagnosticChallenge({
         return;
       }
 
-      // 3. Un-evaluated state: 1, 2, 3, 4 for options
+      // 3. Un-evaluated state: 1, 2, 3, 4 for options (not while typing an answer)
+      if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       if (currentExercise.options && currentExercise.options.length > 0) {
         if (["1", "2", "3", "4"].includes(e.key)) {
           const idx = parseInt(e.key, 10) - 1;
@@ -293,13 +332,14 @@ export default function DiagnosticChallenge({
     isCompletedAll,
     currentExercise,
     exerciseList.length,
-    stats.correct,
+    correctCount,
     onNextLesson,
     handleNextQuestion,
     handleRestart,
   ]);
 
   const handleRetryCurrent = () => {
+    // Lets the user try again for practice; the score keeps the first attempt
     setSelectedOption(null);
     setTypedAnswer("");
     setSelectedWordToken(null);
@@ -316,11 +356,7 @@ export default function DiagnosticChallenge({
       if (mined.length > 0) {
         // Lưu vĩnh viễn vào SQLite
         await saveCustomGrammarExercises(lesson.id, mined);
-        setExerciseList((prev) => {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const toAdd = mined.filter((m) => !existingIds.has(m.id));
-          return smartPrepareGrammarExercises([...prev, ...toAdd]);
-        });
+        appendExercises(mined);
         setSourceNotice(`✨ Đã khai thác và lưu vào database ${mined.length} câu ví dụ từ kho từ vựng của bạn! (0 token)`);
         setTimeout(() => setSourceNotice(null), 5000);
       } else {
@@ -344,11 +380,7 @@ export default function DiagnosticChallenge({
       if (aiQuestions.length > 0) {
         // Lưu vĩnh viễn vào SQLite để không phải gọi AI lại lần sau!
         await saveCustomGrammarExercises(lesson.id, aiQuestions);
-        setExerciseList((prev) => {
-          const existingIds = new Set(prev.map((e) => e.id));
-          const toAdd = aiQuestions.filter((q) => !existingIds.has(q.id));
-          return smartPrepareGrammarExercises([...prev, ...toAdd]);
-        });
+        appendExercises(aiQuestions);
         setSourceNotice(`🤖 Gemini Flash đã tạo và lưu vĩnh viễn vào database ${aiQuestions.length} câu hỏi mới!`);
         setTimeout(() => setSourceNotice(null), 5000);
       } else {
@@ -363,6 +395,15 @@ export default function DiagnosticChallenge({
     }
   };
 
+  if (!isListReady) {
+    return (
+      <div className="p-8 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-zinc-400">
+        <Loader2 className="w-4 h-4 animate-spin text-cyan-500" />
+        <span>Đang chuẩn bị bộ câu hỏi...</span>
+      </div>
+    );
+  }
+
   if (!currentExercise && !isCompletedAll) {
     return (
       <div className="p-8 text-center text-slate-500 dark:text-zinc-400">
@@ -373,7 +414,7 @@ export default function DiagnosticChallenge({
 
   // Completion Screen
   if (isCompletedAll) {
-    const scorePercent = Math.round((stats.correct / exerciseList.length) * 100);
+    const scorePercent = exerciseList.length > 0 ? Math.round((correctCount / exerciseList.length) * 100) : 0;
     const passed = scorePercent >= 70;
 
     return (
@@ -397,7 +438,7 @@ export default function DiagnosticChallenge({
           <div className="p-3 rounded-2xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-200 dark:border-zinc-700/60">
             <span className="text-xs text-slate-500 dark:text-zinc-400">Điểm số</span>
             <div className="text-xl font-bold text-slate-800 dark:text-zinc-100">
-              {stats.correct}/{exerciseList.length} ({scorePercent}%)
+              {correctCount}/{exerciseList.length} ({scorePercent}%)
             </div>
           </div>
           <div className="p-3 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/40">

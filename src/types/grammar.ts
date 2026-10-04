@@ -99,4 +99,10 @@ export interface GrammarProgress {
   lastAttemptDate?: string;
   nextReviewDate: string; // ISO date string
   streak: number;
+  firstTryBonusAwarded?: boolean; // first-try XP bonus is only given once per lesson
+  // FSRS memory state of the lesson (absent on progress saved before grammar used FSRS)
+  stability?: number;
+  difficulty?: number;
+  fsrsState?: number; // ts-fsrs State: 0 New, 1 Learning, 2 Review, 3 Relearning
+  lastReview?: string; // last attempt that updated the schedule (lastAttemptDate counts every attempt)
 }

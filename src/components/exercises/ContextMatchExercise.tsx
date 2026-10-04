@@ -12,6 +12,10 @@ interface ContextMatchExerciseProps {
   onFallback: () => void;
 }
 
+// Fewer pairs make the matching trivial; the parent falls back to another exercise
+const MIN_PAIRS = 3;
+const BLANK = "______";
+
 const PAIR_COLORS = [
   {
     badge: "bg-cyan-500 text-white",
@@ -51,8 +55,16 @@ export default function ContextMatchExercise({
     onFallbackRef.current = onFallback;
   });
 
+  // Pending completion timer, cleared on unmount so a stale card is never graded
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!pairs || pairs.length < 2) {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!pairs || pairs.length < MIN_PAIRS) {
       onFallbackRef.current();
       return;
     }
@@ -65,7 +77,7 @@ export default function ContextMatchExercise({
     setWrongAttempts(0);
   }, [pairs]);
 
-  if (!pairs || pairs.length < 2) return null;
+  if (!pairs || pairs.length < MIN_PAIRS) return null;
 
   // Click on a word
   const handleWordClick = (wordId: string) => {
@@ -121,7 +133,9 @@ export default function ContextMatchExercise({
       else if (wrongAttempts === 1) rating = Rating.Good;
       else rating = Rating.Hard;
 
-      setTimeout(() => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      completeTimerRef.current = setTimeout(() => {
+        completeTimerRef.current = null;
         onComplete(true, wrongAttempts, rating);
       }, 1000);
     } else {
@@ -221,13 +235,13 @@ export default function ContextMatchExercise({
                 }`}
               >
                 <p className="text-xs font-medium leading-relaxed">
-                  {matchedWordPair ? (
+                  {matchedWordPair && s.maskedSentence.includes(BLANK) ? (
                     <span>
-                      {s.maskedSentence.split("______")[0]}
+                      {s.maskedSentence.slice(0, s.maskedSentence.indexOf(BLANK))}
                       <span className="font-bold underline text-cyan-600 dark:text-cyan-400 mx-1">
                         {matchedWordPair.word}
                       </span>
-                      {s.maskedSentence.split("______")[1]}
+                      {s.maskedSentence.slice(s.maskedSentence.indexOf(BLANK) + BLANK.length)}
                     </span>
                   ) : (
                     <span>{s.maskedSentence}</span>

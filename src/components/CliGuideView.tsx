@@ -28,6 +28,8 @@ import {
   srsWorker,
   getFSRSSettings,
   saveFSRSSettings,
+  getStudyLimits,
+  saveStudyLimits,
 } from "@/services/srs";
 import {
   getReminderSettings,
@@ -65,6 +67,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   // Notification & Pop-up state
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
   const [fsrsSettings, setFsrsSettings] = useState(() => getFSRSSettings());
+  const [studyLimits, setStudyLimits] = useState(() => getStudyLimits());
   const [testingNotif, setTestingNotif] = useState(false);
   const [testingDueWord, setTestingDueWord] = useState(false);
   const [testingPopup, setTestingPopup] = useState(false);
@@ -961,7 +964,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                         : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
                     }`}
                   >
-                    <span className="text-xs font-bold">Chỉ khi có từ đến hạn SM-2</span>
+                    <span className="text-xs font-bold">Chỉ khi có từ đến hạn (FSRS)</span>
                     <span className="text-[10px] opacity-75">Tôn trọng chu kỳ phân bổ khoa học</span>
                   </button>
 
@@ -977,6 +980,45 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                     <span className="text-[10px] opacity-75">Duy trì phản xạ từ vựng liên tục</span>
                   </button>
                 </div>
+              </div>
+
+              {/* Field 3b: Do not disturb */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80">
+                <label className="flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Không làm phiền khi đang bận
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Tự hoãn pop-up khi có ứng dụng toàn màn hình (trình chiếu, video, họp), khi đang chia sẻ màn
+                      hình Zoom, khi bật Focus/Không làm phiền (nếu macOS cho phép đọc) hoặc khi bạn rời máy quá 5
+                      phút. Khi đến giờ, một thẻ nhỏ hiện ở góc màn hình (không chiếm bàn phím) lúc bạn tạm dừng
+                      thao tác; bỏ qua thì bài ôn tự mở sau 20 giây, bấm Hoãn để dời lại.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.respectFocus}
+                    onChange={(e) => handleUpdateReminder({ respectFocus: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Luôn hiện trên màn hình chính
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Mặc định nhắc nhở hiện trên màn hình bạn đang làm việc (nơi có con trỏ chuột).
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.preferPrimaryMonitor}
+                    onChange={(e) => handleUpdateReminder({ preferPrimaryMonitor: e.target.checked })}
+                  />
+                </label>
               </div>
 
               {/* Field 4: Words per Session */}
@@ -1231,7 +1273,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 <span>Thuật toán Spaced Repetition Thế Hệ Mới: FSRS (DSR Model)</span>
               </div>
               <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-mono font-bold">
-                FSRS v5 Active
+                FSRS-6 Active
               </span>
             </div>
 
@@ -1269,6 +1311,55 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   </button>
                 ))}
               </div>
+            </div>
+
+            {/* Daily study limits */}
+            <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
+              {([
+                {
+                  key: "newCardsPerDay" as const,
+                  title: "Số từ mới mỗi ngày",
+                  desc: "Giới hạn số từ chưa học được đưa vào ôn mỗi ngày để lượng ôn tập không dồn ứ.",
+                  options: [5, 10, 20, 30],
+                },
+                {
+                  key: "maxSessionSize" as const,
+                  title: "Số thẻ tối đa mỗi phiên",
+                  desc: "Từ đến hạn được ưu tiên trước, từ mới xen kẽ đều trong phiên.",
+                  options: [15, 30, 50, 100],
+                },
+              ]).map((cfg) => (
+                <div key={cfg.key} className="space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-bold text-slate-900 dark:text-white">{cfg.title}</div>
+                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">{cfg.desc}</p>
+                    </div>
+                    <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+                      {studyLimits[cfg.key]}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {cfg.options.map((val) => (
+                      <button
+                        key={val}
+                        onClick={() => {
+                          saveStudyLimits({ [cfg.key]: val });
+                          setStudyLimits((prev) => ({ ...prev, [cfg.key]: val }));
+                          setNotifFeedback(`Đã cập nhật "${cfg.title}" thành ${val}!`);
+                        }}
+                        className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                          studyLimits[cfg.key] === val
+                            ? "bg-cyan-600 text-white shadow-sm font-bold"
+                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
+                        }`}
+                      >
+                        {val}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
             </div>
 
             <div className="text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">

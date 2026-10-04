@@ -57,7 +57,13 @@ export default function SentenceBuilderExercise({
     setShake(false);
   }, [data]);
 
-  if (!data) return null;
+  // Pending completion timer, cleared on unmount so a stale card is never graded
+  const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    };
+  }, []);
 
   const handlePlaceToken = (token: { id: string; text: string }) => {
     if (isAnswered) return;
@@ -76,7 +82,7 @@ export default function SentenceBuilderExercise({
   };
 
   const handleReset = () => {
-    if (isAnswered) return;
+    if (isAnswered || !data) return;
     setAvailableTokens(data.tokens);
     setPlacedTokens([]);
     setIsCorrect(null);
@@ -84,7 +90,7 @@ export default function SentenceBuilderExercise({
   };
 
   const handleCheck = useCallback(() => {
-    if (isAnswered || placedTokens.length === 0) return;
+    if (!data || isAnswered || placedTokens.length === 0) return;
 
     const currentKey = placedTokens.map((t) => t.id).join("|");
     // Prevent duplicate evaluation of the exact same placement sequence
@@ -121,7 +127,9 @@ export default function SentenceBuilderExercise({
         rating = Rating.Hard;
       }
 
-      setTimeout(() => {
+      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      completeTimerRef.current = setTimeout(() => {
+        completeTimerRef.current = null;
         onCompleteRef.current(true, attempts, rating);
       }, 1000);
     } else {
@@ -147,6 +155,9 @@ export default function SentenceBuilderExercise({
       handleCheck();
     }
   }, [availableTokens.length, placedTokens.length, isAnswered, isCorrect, handleCheck]);
+
+  // Early return only after every hook so the hook count stays stable
+  if (!data) return null;
 
   const firstWordHint = data.fullSentence.trim().split(/\s+/)[0];
 

@@ -1,3 +1,5 @@
+import animate from "tailwindcss-animate";
+
 /** @type {import('tailwindcss').Config} */
 export default {
   darkMode: ["class"],
@@ -70,5 +72,6 @@ export default {
       },
     },
   },
-  plugins: [],
+  // Provides the animate-in / fade-in / zoom-in / slide-in-from-* utilities used across the UI
+  plugins: [animate],
 };

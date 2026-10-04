@@ -24,6 +24,7 @@ export interface Word {
   collocations?: string | null; // JSON array string of string[]
   code_snippet?: string | null;
   topic?: string | null;
+  cefr_level?: string | null; // CEFR level of the term (A1..C2), null for words added before tagging
   created_at: string;
 }
 
@@ -54,12 +55,32 @@ export interface SRSReview {
   lapses?: number; // Number of times forgotten
   state?: FSRSState; // 0: New, 1: Learning, 2: Review, 3: Relearning
   last_review?: string | null; // ISO timestamp of last review
+  learning_steps?: number; // Current (re)learning step index, required by ts-fsrs v5 short-term scheduling
 }
 
 export interface WordDetail extends Word {
   examples: WordExample[];
+  /** Recognition card (EN -> VN): flip, multiple choice, context match... */
   srs: SRSReview;
+  /** Production card (recall the English word): spelling, cloze, dictation. Created once recognition graduates. */
+  srsProduction?: SRSReview | null;
 }
+
+/**
+ * Which memory a card trains. Each direction has its own FSRS schedule because recognising a word
+ * among options is much easier than producing it from memory.
+ */
+export type CardDirection = "recognition" | "production";
+
+/**
+ * One reviewable card: the word with `srs` set to the schedule of `direction`.
+ * Lets per-card logic (urgency, rating, interval previews) keep reading `card.srs`.
+ */
+export type ReviewCard = WordDetail & {
+  direction: CardDirection;
+  /** The word's recognition schedule (since `srs` holds the production schedule on production cards) */
+  srsRecognition: SRSReview;
+};
 
 export interface CreateWordInput {
   word: string;
@@ -72,6 +93,7 @@ export interface CreateWordInput {
   collocations?: string[];
   code_snippet?: string | null;
   topic?: string | null;
+  cefr_level?: string | null;
   examples: Array<{
     sentence_en: string;
     sentence_vn?: string;

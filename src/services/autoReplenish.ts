@@ -1,4 +1,5 @@
 import type { WordDetail } from "@/types/database";
+import { isWordDue } from "./cards";
 import type { GrammarLevel } from "@/types/grammar";
 import { GRAMMAR_LESSONS } from "@/data/grammarData";
 import { getAllGrammarProgress, saveCustomGrammarExercises } from "./grammarService";
@@ -10,6 +11,9 @@ import { calculateStreakAndGoal } from "./streak";
 import { getTodayReviewCount } from "./smartReview";
 
 const AUTO_REPLENISH_SETTINGS_KEY = "myenglish_auto_replenish_settings_v1";
+const MAX_DUE_BACKLOG_FOR_REPLENISH = 20;
+// After a failed AI attempt, wait before trying again so each new word doesn't re-trigger an expensive call
+const FAILED_ATTEMPT_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 
 export interface AutoReplenishSummary {
   date: string;
@@ -27,6 +31,7 @@ export interface AutoReplenishSettings {
   autoGenerateGrammar: boolean;
   lastReplenishDate: string | null;   // YYYY-MM-DD
   lastReplenishSummary: AutoReplenishSummary | null;
+  lastFailedAttemptAt?: number | null; // timestamp ms of the last failed automatic attempt
 }
 
 export const DEFAULT_AUTO_REPLENISH_SETTINGS: AutoReplenishSettings = {
@@ -36,6 +41,7 @@ export const DEFAULT_AUTO_REPLENISH_SETTINGS: AutoReplenishSettings = {
   autoGenerateGrammar: true,
   lastReplenishDate: null,
   lastReplenishSummary: null,
+  lastFailedAttemptAt: null,
 };
 
 function getTodayStr(): string {
@@ -115,6 +121,19 @@ export async function checkAutoReplenishEligibility(words: WordDetail[]): Promis
     };
   }
 
+  // 2b. Cooldown after a failed attempt
+  if (settings.lastFailedAttemptAt && Date.now() - settings.lastFailedAttemptAt < FAILED_ATTEMPT_COOLDOWN_MS) {
+    const hoursLeft = Math.ceil((FAILED_ATTEMPT_COOLDOWN_MS - (Date.now() - settings.lastFailedAttemptAt)) / (60 * 60 * 1000));
+    return {
+      isEligible: false,
+      reason: `Lần tự động bổ sung trước gặp lỗi. Hệ thống sẽ thử lại sau khoảng ${hoursLeft} giờ.`,
+      effectiveLevel: profile.effectiveLevel,
+      daysSinceLastNewWord: 0,
+      streak: streakStats.currentStreak,
+      unlearnedNewWordsCount: 0,
+    };
+  }
+
   // 3. User activity check (Active learner)
   let todayReviews = 0;
   try {
@@ -137,6 +156,22 @@ export async function checkAutoReplenishEligibility(words: WordDetail[]): Promis
 
   // 4. Inactivity in adding new words check
   // Count how many words are in "New" state (state === 0 or no reps)
+  // Don't pile new words on top of an unfinished review backlog
+  const now = Date.now();
+  const dueReviewCount = words.filter(
+    (w) => (w.srs.reps ?? 0) > 0 && isWordDue(w, new Date(now))
+  ).length;
+  if (dueReviewCount > MAX_DUE_BACKLOG_FOR_REPLENISH) {
+    return {
+      isEligible: false,
+      reason: `Bạn còn ${dueReviewCount} từ đến hạn ôn tập. Hãy ôn bớt trước khi hệ thống thêm từ mới.`,
+      effectiveLevel: profile.effectiveLevel,
+      daysSinceLastNewWord: 0,
+      streak: streakStats.currentStreak,
+      unlearnedNewWordsCount: 0,
+    };
+  }
+
   const unlearnedNewWords = words.filter(
     (w) =>
       (w.srs.state === undefined || (w.srs.state as number) === 0) &&
@@ -155,8 +190,11 @@ export async function checkAutoReplenishEligibility(words: WordDetail[]): Promis
   const daysSinceLastNewWord = newestCreatedAt > 0 ? Math.floor(msSinceLastNewWord / (24 * 60 * 60 * 1000)) : 99;
 
   // Criteria: user has not added new words for >= configured days OR has 0 unlearned new words
+  // Only replenish when the new-word backlog is (almost) learned
   const isNoNewWordsAdded =
-    daysSinceLastNewWord >= settings.minDaysWithoutNewWords || unlearnedNewWords.length === 0;
+    unlearnedNewWords.length === 0 ||
+    (unlearnedNewWords.length < settings.wordsPerBatch &&
+      daysSinceLastNewWord >= settings.minDaysWithoutNewWords);
 
   if (!isNoNewWordsAdded) {
     return {
@@ -219,15 +257,24 @@ export async function triggerAutoReplenish(
       countToGenerate
     );
 
-    if (recommendations.length === 0) {
-      throw new Error("Không nhận được từ vựng đề xuất từ AI.");
+    // Rust only sends a subset of words as exclusions, so filter against the whole collection here
+    const existingSet = new Set(existingWordsList);
+    const freshRecommendations = recommendations.filter((rec) => {
+      const key = rec.word.toLowerCase().trim();
+      if (existingSet.has(key)) return false;
+      existingSet.add(key);
+      return true;
+    });
+
+    if (freshRecommendations.length === 0) {
+      throw new Error("Không nhận được từ vựng đề xuất mới từ AI.");
     }
 
     const addedWords: string[] = [];
 
     // 2. Enqueue all recommended words into processing pipeline
-    for (const rec of recommendations) {
-      await pipeline.enqueue(rec.word);
+    for (const rec of freshRecommendations) {
+      await pipeline.enqueue(rec.word, { source: "auto" });
       addedWords.push(rec.word);
     }
 
@@ -281,6 +328,7 @@ export async function triggerAutoReplenish(
     saveAutoReplenishSettings({
       lastReplenishDate: today,
       lastReplenishSummary: summary,
+      lastFailedAttemptAt: null,
     });
 
     // 5. Send Desktop Notification
@@ -305,6 +353,8 @@ export async function triggerAutoReplenish(
     };
   } catch (err) {
     console.error("[AutoReplenish] Lỗi thực thi tự động bổ sung:", err);
+    // Record the failure so automatic triggers back off (manual trigger still works)
+    saveAutoReplenishSettings({ lastFailedAttemptAt: Date.now() });
     return {
       success: false,
       message: err instanceof Error ? err.message : "Đã xảy ra lỗi khi tự động bổ sung nội dung.",

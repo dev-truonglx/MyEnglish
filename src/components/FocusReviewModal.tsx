@@ -13,7 +13,7 @@ import {
   GraduationCap,
   BookOpen,
 } from "lucide-react";
-import { getAllWords } from "@/services/db";
+import { getAllWords, isPlaceholderMeaning } from "@/services/db";
 import { getDueWords, recordReview, Rating } from "@/services/srs";
 import { recordDailyActivity } from "@/services/streak";
 import {
@@ -28,7 +28,19 @@ import {
   recordGrammarExerciseAttempt,
   recordPracticeResult,
 } from "@/services/grammarService";
-import type { WordDetail } from "@/types/database";
+import type { WordDetail, ReviewCard } from "@/types/database";
+import { directionForExercise, getCardSrs, practiceCards } from "@/services/cards";
+import {
+  awardXP,
+  buildReviewSession,
+  calculateXPReward,
+  getNewCardsIntroducedToday,
+  isLeech,
+  matchTypedAnswer,
+  saveReviewLog,
+  smartSortReviewQueue,
+  type ExerciseType,
+} from "@/services/smartReview";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
 
 interface FocusReviewModalProps {
@@ -43,7 +55,7 @@ interface ChoiceOption {
 }
 
 export type FocusReviewItem =
-  | { kind: "word"; word: WordDetail }
+  | { kind: "word"; word: ReviewCard }
   | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson };
 
 /**
@@ -231,6 +243,67 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const currentItem = queue[currentIndex];
+
+  // Shake hint on outside click (class toggle keeps the card mounted, so input focus/state survive)
+  const [isNudging, setIsNudging] = useState(false);
+  // Entry zoom plays once; afterwards removing the shake class must not replay it
+  const [hasEntered, setHasEntered] = useState(false);
+  const entryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playEntryAnimation = () => {
+    if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
+    setHasEntered(false);
+    entryTimerRef.current = setTimeout(() => setHasEntered(true), 320);
+  };
+  useEffect(() => {
+    playEntryAnimation();
+    return () => {
+      if (entryTimerRef.current) clearTimeout(entryTimerRef.current);
+    };
+  }, []);
+  const nudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nudgeCard = () => {
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+    setIsNudging(false);
+    requestAnimationFrame(() => setIsNudging(true));
+    nudgeTimerRef.current = setTimeout(() => setIsNudging(false), 400);
+  };
+  useEffect(() => () => {
+    if (nudgeTimerRef.current) clearTimeout(nudgeTimerRef.current);
+  }, []);
+  const itemStartRef = useRef<number>(Date.now());
+  useEffect(() => {
+    itemStartRef.current = Date.now();
+  }, [currentIndex, queue.length]);
+
+  // Only words that were due when the popup opened update the FSRS schedule;
+  // the rest is extra practice (logged + XP, schedule untouched).
+  const gradeWord = async (word: ReviewCard, rating: Rating, exerciseType: ExerciseType) => {
+    // Typing trains recall (production card); picking the word among options trains recognition.
+    // Without a production card yet, recordReview falls back to the recognition card.
+    const direction = directionForExercise(exerciseType);
+    const cardSrs = getCardSrs(word, direction) ?? getCardSrs(word, "recognition");
+    const isScheduledReview = !!cardSrs && new Date(cardSrs.next_review_date) <= new Date();
+    let recordedDirection = direction;
+    if (isScheduledReview) {
+      recordedDirection = (await recordReview(word.id, rating, direction)).direction;
+    }
+    const responseTimeMs = Date.now() - itemStartRef.current;
+    const wrongAttempts = rating === Rating.Again ? 1 : 0;
+    const xp = calculateXPReward(rating, exerciseType, wrongAttempts, responseTimeMs, isLeech(word.srs), wrongAttempts === 0);
+    if (xp.totalXP > 0) awardXP(xp.totalXP);
+    saveReviewLog({
+      wordId: word.id,
+      exerciseType,
+      responseTimeMs,
+      isCorrect: rating !== Rating.Again,
+      wrongAttempts,
+      rating,
+      xpEarned: xp.totalXP,
+      timestamp: new Date().toISOString(),
+      isScheduled: isScheduledReview,
+      direction: recordedDirection,
+    }).catch((err) => console.warn("Popup review log save failed:", err));
+  };
   const currentWord = currentItem?.kind === "word" ? currentItem.word : null;
   const currentGrammar = currentItem?.kind === "grammar" ? currentItem : null;
 
@@ -302,13 +375,17 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       }
 
       // 2. Nạp dữ liệu đồng thời từ database & grammar service
-      const [dueWords, allWords, grammarCandidates] = await Promise.all([
+      const [dueWordsRaw, allWordsRaw, grammarCandidates] = await Promise.all([
         getDueWords().catch(() => [] as WordDetail[]),
         getAllWords().catch(() => [] as WordDetail[]),
         includeGrammar
           ? getGrammarExercisesForReview(grammarLevels, grammarTarget + 4).catch(() => [])
           : Promise.resolve([]),
       ]);
+
+      // Words still waiting for AI analysis have no real meaning to quiz on
+      const dueWords = dueWordsRaw.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
+      const allWords = allWordsRaw.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
 
       // 3. Tuyển chọn từ vựng ưu tiên SRS (due words)
       let wordPool: WordDetail[] = [];
@@ -321,22 +398,20 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         wordPool = allWords;
       }
 
-      let selectedWords: WordDetail[] = [];
-      if (wordPool === dueWords || (wordPool.length > 0 && new Date(wordPool[0].srs?.next_review_date) <= new Date())) {
-        const sortedDue = [...wordPool].sort(
-          (a, b) => new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime()
-        );
-        selectedWords = sortedDue.slice(0, wordTarget).sort(() => 0.5 - Math.random());
+      // Due words: FSRS urgency order + daily new-card budget. Otherwise: weakest words first (practice only).
+      let selectedWords: ReviewCard[] = [];
+      if (wordPool === dueWords) {
+        const newToday = await getNewCardsIntroducedToday().catch(() => 0);
+        selectedWords = buildReviewSession(dueWords, newToday).slice(0, wordTarget);
       } else {
-        const shuffled = [...wordPool].sort(() => 0.5 - Math.random());
-        selectedWords = shuffled.slice(0, wordTarget);
+        selectedWords = practiceCards(smartSortReviewQueue(wordPool).slice(0, wordTarget));
       }
 
       // Bổ sung thêm từ nếu chưa đủ wordTarget
       if (selectedWords.length < wordTarget && allWords.length > selectedWords.length) {
         const selectedIds = new Set(selectedWords.map((w) => w.id));
         const extra = allWords.filter((w) => !selectedIds.has(w.id)).sort(() => 0.5 - Math.random());
-        selectedWords = [...selectedWords, ...extra.slice(0, wordTarget - selectedWords.length)];
+        selectedWords = [...selectedWords, ...practiceCards(extra.slice(0, wordTarget - selectedWords.length))];
       }
 
       // 4. Tuyển chọn bài tập ngữ pháp
@@ -397,6 +472,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     listen("review-popup-opened", () => {
       if (isCancelled) return;
       recordPopupDisplayed(Date.now());
+      playEntryAnimation();
       loadReviewQueue(false);
     })
       .then((fn) => {
@@ -439,8 +515,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      const isTyping = Math.random() < 0.5;
-      setActiveMode(isTyping ? "typing" : "multiple_choice");
+      // The card decides the question: recall cards are typed, recognition cards are picked among options
+      setActiveMode(wordObj.direction === "production" ? "typing" : "multiple_choice");
 
       // Chuẩn bị 4 lựa chọn từ tiếng Anh
       getAllWords().then((all) => {
@@ -554,7 +630,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       if (currentItem.kind === "word") {
         const wordObj = currentItem.word;
         if (correct) {
-          await recordReview(wordObj.id, Rating.Good);
+          await gradeWord(wordObj, Rating.Good, "multiple_choice");
           recordDailyActivity(1);
           setFeedbackMsg("Chính xác! Đã tích lũy mục tiêu hằng ngày 🎉");
 
@@ -563,7 +639,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
             advanceNextItem();
           }, 3500);
         } else {
-          await recordReview(wordObj.id, Rating.Again);
+          await gradeWord(wordObj, Rating.Again, "multiple_choice");
+          recordDailyActivity(1);
           setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${wordObj.word}"`);
           // Cải tiến: Đẩy câu trả lời sai vào cuối hàng đợi để củng cố ngay
           setQueue((prev) => [...prev, currentItem]);
@@ -606,25 +683,29 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      const trimmedInput = typedInput.trim().toLowerCase();
-      const target = wordObj.word.trim().toLowerCase();
-      const correct = trimmedInput === target;
+      const match = matchTypedAnswer(typedInput, wordObj.word);
+      const correct = match !== "wrong";
 
       setIsAnswered(true);
       setIsCorrect(correct);
 
       try {
         if (correct) {
-          await recordReview(wordObj.id, Rating.Good);
+          await gradeWord(wordObj, match === "near" ? Rating.Hard : Rating.Good, "spelling");
           recordDailyActivity(1);
-          setFeedbackMsg("Tuyệt vời! Bạn đã gõ chính xác 🚀");
+          setFeedbackMsg(
+            match === "near"
+              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️`
+              : "Tuyệt vời! Bạn đã gõ chính xác 🚀"
+          );
 
           if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
           advanceTimerRef.current = setTimeout(() => {
             advanceNextItem();
           }, 3500);
         } else {
-          await recordReview(wordObj.id, Rating.Again);
+          await gradeWord(wordObj, Rating.Again, "spelling");
+          recordDailyActivity(1);
           setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${wordObj.word}"`);
           setQueue((prev) => [...prev, currentItem]);
         }
@@ -748,13 +829,20 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 select-none"
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 select-none ${
+        hasEntered ? "" : "popup-backdrop-enter"
+      }`}
       style={overlayStyle}
-      onClick={handleClose}
+      onClick={(e) => {
+        // Clicking outside never dismisses the review: only Close, Snooze or finishing the session do.
+        // Shake the card as a hint instead.
+        if (e.target === e.currentTarget) nudgeCard();
+      }}
     >
       <div
-        className="w-full max-w-xl min-h-[500px] bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col justify-between animate-in zoom-in-95 duration-200"
-        onClick={(e) => e.stopPropagation()}
+        className={`w-full max-w-xl min-h-[500px] bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800/80 rounded-3xl shadow-2xl overflow-hidden flex flex-col justify-between ${
+          isNudging ? "animate-shake" : hasEntered ? "" : "popup-card-enter"
+        }`}
       >
         {/* Top Header Bar */}
         <div className="px-6 py-3.5 bg-slate-50/80 dark:bg-zinc-950/60 border-b border-slate-200/80 dark:border-zinc-800/80 flex items-center justify-between gap-3">
@@ -794,6 +882,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     }`}
                   >
                     {new Date(currentWord.srs.next_review_date) <= new Date() ? "Từ vựng · Đến hạn ôn" : "Từ vựng · Củng cố"}
+                    {currentWord.direction === "production" ? " · Nhớ lại" : " · Nhận diện"}
                   </span>
                 )}
 
