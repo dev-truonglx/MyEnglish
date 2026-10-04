@@ -105,6 +105,28 @@ export function saveFSRSSettings(settings: Partial<FSRSSettings>): void {
  * Instantiate configured FSRS scheduler instance
  */
 let cachedScheduler: { key: string; scheduler: ReturnType<typeof fsrs> } | null = null;
+let cachedGrammarScheduler: { key: string; scheduler: ReturnType<typeof fsrs> } | null = null;
+
+/**
+ * Scheduler for grammar lessons: same retention target, but no minute-level learning steps.
+ * A lesson is a concept reviewed over days, so every grade schedules whole days and several
+ * questions of one lesson in a single session count as one review.
+ */
+export function getGrammarScheduler() {
+  const { requestRetention, maximumInterval } = getFSRSSettings();
+  const key = `${requestRetention}|${maximumInterval}`;
+  if (cachedGrammarScheduler?.key === key) return cachedGrammarScheduler.scheduler;
+  const scheduler = fsrs(
+    generatorParameters({
+      request_retention: requestRetention,
+      maximum_interval: maximumInterval,
+      enable_fuzz: true,
+      enable_short_term: false,
+    })
+  );
+  cachedGrammarScheduler = { key, scheduler };
+  return scheduler;
+}
 
 export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
   const current = getFSRSSettings();

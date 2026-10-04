@@ -4,7 +4,8 @@
 > Kích thước: **S** = vài giờ · **M** = 1–2 ngày · **L** = ≥ 3 ngày.
 > Nên làm trước: **#11 → #1 → #6** (xem lý do ở cuối).
 >
-> **Cập nhật 2026-10-05:** ✅ #11, ✅ #1, ✅ #6 đã làm xong trên branch `fix/learning-algorithm` (ghi chú triển khai ở từng mục).
+> **Cập nhật 2026-10-05:** ✅ #11, ✅ #1, ✅ #6 xong trên branch `fix/learning-algorithm` (PR #1); ✅ #4, ✅ #12, ✅ #13 xong trên
+> branch `feat/grammar-fsrs-refactor-bundle` (tách ra từ PR #1). Ghi chú triển khai ở từng mục.
 
 ---
 
@@ -37,7 +38,13 @@
 - Chỉ dùng cho thẻ đang ở state Review, tối đa N lần mỗi ngày để giới hạn số lần gọi AI.
 - Cần thêm command Rust mới, dùng lại `run_ai_cli` và các hàm kiểm tra đầu vào hiện có.
 
-### 4. Dùng FSRS cho ngữ pháp — M
+### 4. Dùng FSRS cho ngữ pháp — M ✅
+
+> **Đã làm:** `GrammarProgress` có thêm `stability`, `difficulty`, `fsrsState`, `lastReview` (các cột SQLite được thêm bằng ALTER). Ngữ pháp dùng scheduler riêng
+> `getGrammarScheduler()` với `enable_short_term: false`, nên khoảng ôn luôn tính theo ngày. Điểm được đổi sang grade bằng `gradeFromScore`. Một bài chỉ
+> được tính lượt ôn khi đã đến hạn, hoặc khi trả lời sai (tối đa 1 lần mỗi phiên 12 giờ). Tiến độ theo lịch cố định cũ được tự quy đổi: khoảng ôn
+> cũ trở thành stability. Test nằm trong `test/grammar.test.ts`.
+
 - `grammarService.calculateNextReview` đang dùng khoảng cách cố định `[1, 3, 7, 14, 30, 60, 120]` ngày.
 - Chuyển `grammar_progress` sang các trường FSRS (stability, difficulty, state, learning_steps) và dùng chung `getFSRSScheduler()`.
 - Đổi kết quả sang grade: điểm < 60% → Again, 60–80% → Hard, > 80% → Good.
@@ -111,13 +118,25 @@
 - Mock các module `@tauri-apps/*` bằng alias, giống stub đã dùng khi kiểm tra bằng esbuild.
 - GitHub Actions chạy `npm run check`, `vitest run` và `cargo check` (cùng `cargo test` cho các test Rust có sẵn) trên mỗi PR.
 
-### 12. Tách các component quá lớn — M
+### 12. Tách các component quá lớn — M ✅
+
+> **Đã làm:** `MainDashboard` giảm từ 3.257 xuống 673 dòng. Các tab và panel được tách vào `src/components/dashboard/`. `FlashcardReview` giảm từ 1.835
+> xuống khoảng 300 dòng: logic phiên học chuyển vào `src/hooks/useReviewSession.ts`, các thẻ chuyển vào `src/components/review/`. Store zustand
+> `src/stores/wordsStore.ts` giữ words/loading/selectedWord, có `refreshWords` (bỏ qua response cũ nếu có lượt refresh mới hơn). Đây là
+> refactor chỉ di chuyển code, không đổi giao diện. Đã kiểm tra bằng script rằng mọi dòng JSX cũ đều còn trong các file mới.
+
 - `MainDashboard.tsx` (~3.100 dòng): tách theo tab (Library, Review, Analytics, Settings) và các panel (Inspector, Sidebar).
 - `FlashcardReview.tsx` (~1.700 dòng): tách hàng đợi phiên học thành hook `useReviewSession`, mỗi kiểu bài thành một component riêng.
 - Chuyển state dùng chung (words, selectedWord, isReviewing) sang store `zustand` (đã có trong dependencies), để bỏ các lỗi closure cũ (stale closure).
 - Làm sau #11, để có test bảo vệ khi refactor.
 
-### 13. Giảm bundle size — S
+### 13. Giảm bundle size — S ✅
+
+> **Đã làm:** dùng `React.lazy` cho từng cửa sổ trong `App.tsx` và cho các tab Review/Analytics/Guide/Grammar cùng popup trong `MainDashboard`.
+> Trước đây là một file JS 777 KB. Giờ phần dùng chung còn 241 KB, MainDashboard 156 KB, FlashcardReview 93 KB, QuickInput 8 KB, popup 32 KB
+> (cộng grammarService 82 KB). Cảnh báo chunk > 500 KB đã hết. `grammarData` vẫn nằm trong chunk grammarService, vì popup cần dùng ngay và các
+> hàm sync dùng tới nó.
+
 - Bundle hiện 747 KB (cảnh báo > 500 KB).
 - Dùng `import()` động cho `grammarData`, `AnalyticsView`, `CliGuideView`, `GrammarHub`.
 - Popup và Quick Input chỉ tải phần mình cần, nên mở nhanh hơn. `App.tsx` đã rẽ nhánh theo `windowLabel`; dùng `React.lazy` cho từng nhánh.

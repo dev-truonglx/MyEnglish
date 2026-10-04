@@ -1,6 +1,8 @@
 import { getDatabase, getAllWords } from "./db";
 import { awardXP, wordFormsPattern } from "./smartReview";
 import type { GrammarProgress, DiagnosticStatus } from "@/types/grammar";
+import { createEmptyCard, Rating, State, type Card, type Grade } from "ts-fsrs";
+import { getGrammarScheduler } from "./srs";
 import { GRAMMAR_LESSONS } from "@/data/grammarData";
 
 const GRAMMAR_STORAGE_KEY = "myenglish_grammar_progress_v1";
@@ -42,6 +44,10 @@ type GrammarProgressRow = {
   next_review_date: string;
   streak: number;
   first_try_bonus: number | null;
+  stability: number | null;
+  difficulty: number | null;
+  fsrs_state: number | null;
+  last_review: string | null;
 };
 
 let initPromise: Promise<void> | null = null;
@@ -61,9 +67,14 @@ async function upsertProgressRow(
 ): Promise<void> {
   await db.execute(
     `INSERT INTO grammar_progress (
-      lesson_id, diagnostic_status, score, mastery, reps, lapses, last_attempt_date, next_review_date, streak, first_try_bonus
-    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      lesson_id, diagnostic_status, score, mastery, reps, lapses, last_attempt_date, next_review_date, streak, first_try_bonus,
+      stability, difficulty, fsrs_state, last_review
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT(lesson_id) DO UPDATE SET
+      stability = excluded.stability,
+      difficulty = excluded.difficulty,
+      fsrs_state = excluded.fsrs_state,
+      last_review = excluded.last_review,
       diagnostic_status = excluded.diagnostic_status,
       score = excluded.score,
       mastery = excluded.mastery,
@@ -84,6 +95,10 @@ async function upsertProgressRow(
       progress.nextReviewDate,
       progress.streak,
       progress.firstTryBonusAwarded ? 1 : 0,
+      progress.stability ?? null,
+      progress.difficulty ?? null,
+      progress.fsrsState ?? null,
+      progress.lastReview ?? null,
     ]
   );
 }
@@ -122,10 +137,18 @@ async function runGrammarInit(): Promise<void> {
           first_try_bonus INTEGER DEFAULT 0
         );
       `);
-      try {
-        // Older databases were created without this column
-        await db.execute(`ALTER TABLE grammar_progress ADD COLUMN first_try_bonus INTEGER DEFAULT 0;`);
-      } catch {}
+      // Older databases were created without these columns (errors mean the column exists)
+      for (const column of [
+        "first_try_bonus INTEGER DEFAULT 0",
+        "stability REAL",
+        "difficulty REAL",
+        "fsrs_state INTEGER",
+        "last_review TIMESTAMP",
+      ]) {
+        try {
+          await db.execute(`ALTER TABLE grammar_progress ADD COLUMN ${column};`);
+        } catch {}
+      }
 
       const rows = await db.select<GrammarProgressRow[]>("SELECT * FROM grammar_progress");
       const fromDb: Record<string, GrammarProgress> = {};
@@ -141,6 +164,10 @@ async function runGrammarInit(): Promise<void> {
           nextReviewDate: row.next_review_date || new Date().toISOString(),
           streak: row.streak || 0,
           firstTryBonusAwarded: !!row.first_try_bonus,
+          stability: row.stability ?? undefined,
+          difficulty: row.difficulty ?? undefined,
+          fsrsState: row.fsrs_state ?? undefined,
+          lastReview: row.last_review || undefined,
         };
       }
 
@@ -247,15 +274,102 @@ export async function saveLessonProgress(progress: GrammarProgress): Promise<voi
   window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** A failed attempt soon after the last scheduled review is not counted again (same session) */
+const SAME_SESSION_MS = 12 * 60 * 60 * 1000;
+
+/** Score (%) below which a diagnostic counts as failed */
+const DIAGNOSTIC_PASS_SCORE = 60;
+
+/** Score (%) at or above which a practice attempt counts as a successful recall */
+const PRACTICE_PASS_SCORE = 60;
+
 /**
- * Calculate the next review date based on consecutive reps (SRS)
+ * FSRS grade for a lesson result: < 60% Again, < 80% Hard, otherwise Good.
+ * Easy only for a perfect diagnostic passed on the first try.
  */
-function calculateNextReview(currentReps: number): string {
-  const intervalsInDays = [1, 3, 7, 14, 30, 60, 120];
-  const days = intervalsInDays[Math.min(currentReps, intervalsInDays.length - 1)];
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString();
+export function gradeFromScore(scorePercent: number, perfectFirstTry = false): Rating {
+  if (scorePercent < PRACTICE_PASS_SCORE) return Rating.Again;
+  if (scorePercent < 80) return Rating.Hard;
+  if (perfectFirstTry && scorePercent >= 100) return Rating.Easy;
+  return Rating.Good;
+}
+
+/**
+ * FSRS card for a lesson. Progress saved by the old fixed-interval scheduler (no stability yet)
+ * is converted: its last interval becomes the stability of a Review card.
+ */
+function lessonToCard(progress: GrammarProgress, now: Date): Card {
+  const empty = createEmptyCard(now);
+  if (progress.stability && progress.stability > 0) {
+    return {
+      ...empty,
+      due: new Date(progress.nextReviewDate),
+      stability: progress.stability,
+      difficulty: progress.difficulty ?? 5,
+      reps: progress.reps,
+      lapses: progress.lapses,
+      state: (progress.fsrsState ?? State.Review) as State,
+      last_review: progress.lastReview ? new Date(progress.lastReview) : undefined,
+    };
+  }
+  if (progress.reps > 0) {
+    const due = new Date(progress.nextReviewDate);
+    const last = progress.lastAttemptDate ? new Date(progress.lastAttemptDate) : new Date(due.getTime() - DAY_MS);
+    const intervalDays = Math.max(1, (due.getTime() - last.getTime()) / DAY_MS);
+    return {
+      ...empty,
+      due,
+      stability: intervalDays,
+      difficulty: 5,
+      reps: progress.reps,
+      lapses: progress.lapses,
+      state: State.Review,
+      last_review: last,
+    };
+  }
+  return empty;
+}
+
+/**
+ * Apply one FSRS review to a lesson, but only when it counts as a review:
+ *  - the lesson is due, or it has never been scheduled: any grade is applied
+ *  - not due yet: a success changes nothing (the schedule already expects it to be remembered);
+ *    a failure is applied unless the lesson was already reviewed in this session
+ * Returns the schedule fields to merge into the progress, or null when nothing changes.
+ */
+function scheduleLessonReview(
+  current: GrammarProgress,
+  grade: Rating,
+  now: Date
+): Pick<GrammarProgress, "nextReviewDate" | "reps" | "lapses" | "stability" | "difficulty" | "fsrsState" | "lastReview"> | null {
+  const neverScheduled = !current.lastReview && current.reps === 0;
+  const isDue = new Date(current.nextReviewDate).getTime() <= now.getTime();
+  const reviewedThisSession =
+    !!current.lastReview && now.getTime() - new Date(current.lastReview).getTime() < SAME_SESSION_MS;
+
+  if (!neverScheduled && !isDue && (grade !== Rating.Again || reviewedThisSession)) {
+    return null;
+  }
+
+  const card = lessonToCard(current, now);
+  const next = getGrammarScheduler().next(card, now, grade as Grade).card;
+  return {
+    nextReviewDate: next.due.toISOString(),
+    reps: next.reps,
+    lapses: next.lapses,
+    stability: Number(next.stability.toFixed(4)),
+    difficulty: Number(next.difficulty.toFixed(4)),
+    fsrsState: next.state,
+    lastReview: now.toISOString(),
+  };
+}
+
+function movingMastery(current: GrammarProgress, scorePercent: number): number {
+  const isFirstAttempt = current.diagnosticStatus === "unattempted" && current.mastery === 0;
+  return isFirstAttempt
+    ? scorePercent
+    : Math.round(Math.min(100, Math.max(0, current.mastery * 0.7 + scorePercent * 0.3)));
 }
 
 /**
@@ -272,39 +386,13 @@ export async function recordDiagnosticResult(
   await initGrammarStorage().catch(() => {});
   const current = getLessonProgress(lessonId);
   const nowDate = new Date();
-  const now = nowDate.toISOString();
   const passed = scorePercent >= DIAGNOSTIC_PASS_SCORE;
-  const isFirstAttempt = current.diagnosticStatus === "unattempted" && current.mastery === 0;
+  const newMastery = movingMastery(current, scorePercent);
+  const schedule = scheduleLessonReview(current, gradeFromScore(scorePercent, passedFirstTry), nowDate);
 
-  // Moving average like recordPracticeResult, so mastery can also drop
-  const newMastery = isFirstAttempt
-    ? scorePercent
-    : Math.round(Math.min(100, Math.max(0, current.mastery * 0.7 + scorePercent * 0.3)));
-
-  let newStatus: DiagnosticStatus;
-  let newReps = current.reps;
-  let newStreak = current.streak;
-  let newLapses = current.lapses;
-  let nextReviewDate = current.nextReviewDate;
   let firstTryBonusAwarded = !!current.firstTryBonusAwarded;
   let xpEarned = 0;
-
-  if (!passed) {
-    // Failed: reset the interval so the lesson comes back tomorrow
-    newStatus = "needs_work";
-    newReps = 0;
-    newStreak = 0;
-    newLapses += 1;
-    nextReviewDate = calculateNextReview(0);
-  } else {
-    newStatus = passedFirstTry ? "passed_first_try" : "reviewed_and_passed";
-    // Re-passing in the same period counts as one review, not one per retake
-    const wasDue = new Date(current.nextReviewDate) <= nowDate || current.reps === 0;
-    if (wasDue) {
-      newReps = current.reps + 1;
-      newStreak = current.streak + 1;
-      nextReviewDate = calculateNextReview(newReps);
-    }
+  if (passed) {
     xpEarned = 10;
     if (passedFirstTry && !firstTryBonusAwarded) {
       xpEarned = 25; // One-time bonus for mastering on first attempt
@@ -314,14 +402,13 @@ export async function recordDiagnosticResult(
 
   const updated: GrammarProgress = {
     ...current,
-    diagnosticStatus: newStatus,
+    ...(schedule ?? {}),
+    diagnosticStatus: passed ? (passedFirstTry ? "passed_first_try" : "reviewed_and_passed") : "needs_work",
     score: scorePercent,
     mastery: newMastery,
-    streak: newStreak,
-    reps: newReps,
-    lapses: newLapses,
-    lastAttemptDate: now,
-    nextReviewDate,
+    // Consecutive successful scheduled reviews
+    streak: !passed ? 0 : schedule ? current.streak + 1 : current.streak,
+    lastAttemptDate: nowDate.toISOString(),
     firstTryBonusAwarded,
   };
 
@@ -333,20 +420,9 @@ export async function recordDiagnosticResult(
   return { xpEarned, newMastery };
 }
 
-/** Score (%) below which a diagnostic counts as failed */
-const DIAGNOSTIC_PASS_SCORE = 60;
-
-/** Score (%) at or above which a practice attempt counts as a successful recall */
-const PRACTICE_PASS_SCORE = 60;
-
 /**
- * Record practice exercise completion.
- *
- * SRS rules:
- *  - failing resets the interval (reps = 0, lapses + 1) so the lesson comes back tomorrow
- *  - passing only advances the interval when the lesson was actually due (or never scheduled),
- *    so answering several questions of one lesson in a single session counts as one review
- *  - mastery is an exponential moving average, so it can also go down
+ * Record practice exercise completion (e.g. one popup question: 100 = correct, 40 = wrong).
+ * The schedule follows FSRS (see scheduleLessonReview); mastery is an exponential moving average.
  */
 export async function recordPracticeResult(
   lessonId: string,
@@ -355,49 +431,23 @@ export async function recordPracticeResult(
   await initGrammarStorage().catch(() => {});
   const current = getLessonProgress(lessonId);
   const nowDate = new Date();
-  const now = nowDate.toISOString();
   const passed = scorePercent >= PRACTICE_PASS_SCORE;
-  const isFirstAttempt = current.diagnosticStatus === "unattempted" && current.mastery === 0;
-  // A correct retry right after failing (same session) must not advance the interval
-  const failedRecently =
-    !!current.lastAttemptDate &&
-    nowDate.getTime() - new Date(current.lastAttemptDate).getTime() < 12 * 60 * 60 * 1000 &&
-    current.score < PRACTICE_PASS_SCORE;
-  const wasDue = (new Date(current.nextReviewDate) <= nowDate || current.reps === 0) && !failedRecently;
-
-  const newMastery = isFirstAttempt
-    ? scorePercent
-    : Math.round(Math.min(100, Math.max(0, current.mastery * 0.7 + scorePercent * 0.3)));
-
-  let newReps = current.reps;
-  let newLapses = current.lapses;
-  let nextReviewDate = current.nextReviewDate;
-  if (!passed) {
-    newReps = 0;
-    newLapses += current.reps > 0 ? 1 : 0;
-    nextReviewDate = calculateNextReview(0);
-  } else if (wasDue) {
-    newReps = current.reps + 1;
-    nextReviewDate = calculateNextReview(newReps);
-  }
-
+  const schedule = scheduleLessonReview(current, gradeFromScore(scorePercent), nowDate);
   const xpEarned = passed ? 15 : 0;
 
   const updated: GrammarProgress = {
     ...current,
+    ...(schedule ?? {}),
     diagnosticStatus: current.diagnosticStatus === "unattempted" ? "reviewed_and_passed" : current.diagnosticStatus,
     score: scorePercent,
-    mastery: newMastery,
-    reps: newReps,
-    lapses: newLapses,
-    lastAttemptDate: now,
-    nextReviewDate,
+    mastery: movingMastery(current, scorePercent),
+    lastAttemptDate: nowDate.toISOString(),
   };
 
   await saveLessonProgress(updated);
   if (xpEarned > 0) awardXP(xpEarned);
 
-  return { xpEarned, newMastery };
+  return { xpEarned, newMastery: updated.mastery };
 }
 
 /**
