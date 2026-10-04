@@ -31,6 +31,8 @@ import {
 import type { WordDetail, ReviewCard } from "@/types/database";
 import { directionForExercise, getCardSrs, practiceCards } from "@/services/cards";
 import {
+  contractionVariants,
+  normalizeTypedText,
   awardXP,
   buildReviewSession,
   calculateXPReward,
@@ -185,7 +187,8 @@ function getPosLabel(pos?: string | null): string | null {
  * Kiểm tra đối soát đáp án bài tập ngữ pháp (chuẩn hóa khoảng trắng & dấu câu)
  */
 function checkGrammarOptionCorrect(option: string, ex: GrammarExercise): boolean {
-  const clean = (s: string) => s.trim().toLowerCase().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "");
+  // Contractions and their full forms are equivalent ("doesn't" = "does not"), as are curly quotes and extra spaces
+  const clean = normalizeTypedText;
   const user = clean(option);
   const targets: string[] = [];
   if (Array.isArray(ex.correctAnswer)) {
@@ -197,6 +200,24 @@ function checkGrammarOptionCorrect(option: string, ex: GrammarExercise): boolean
     targets.push(ex.errorWord);
   }
   return targets.map(clean).some((t) => t === user);
+}
+
+/** Shown after an answer: the user reads the feedback and moves on themselves */
+const NEXT_HINT = "Nhấn Enter hoặc Tiếp tục để sang câu sau.";
+
+/**
+ * Correct answer(s) for display, with equivalent contracted/full forms,
+ * e.g. "does not" / "doesn't".
+ */
+function formatAnswerForms(ex: GrammarExercise): string {
+  const answers = Array.isArray(ex.correctAnswer) ? ex.correctAnswer : [ex.correctAnswer || ex.errorWord || ""];
+  const forms: string[] = [];
+  for (const answer of answers.filter(Boolean)) {
+    for (const form of [answer, ...contractionVariants(answer)]) {
+      if (!forms.some((f) => f.toLowerCase() === form.toLowerCase())) forms.push(form);
+    }
+  }
+  return forms.map((f) => `"${f}"`).join(" / ");
 }
 
 /**
@@ -632,12 +653,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         if (correct) {
           await gradeWord(wordObj, Rating.Good, "multiple_choice");
           recordDailyActivity(1);
-          setFeedbackMsg("Chính xác! Đã tích lũy mục tiêu hằng ngày 🎉");
-
-          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-          advanceTimerRef.current = setTimeout(() => {
-            advanceNextItem();
-          }, 3500);
+          setFeedbackMsg(`Chính xác! ${NEXT_HINT}`);
         } else {
           await gradeWord(wordObj, Rating.Again, "multiple_choice");
           recordDailyActivity(1);
@@ -654,19 +670,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           recordGrammarExerciseAttempt(ex.id, true);
           await recordPracticeResult(lesson.id, 100);
           recordDailyActivity(1);
-          setFeedbackMsg("Chính xác! Bạn đã nắm vững cấu trúc ngữ pháp 🎉");
-
-          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-          advanceTimerRef.current = setTimeout(() => {
-            advanceNextItem();
-          }, 3500);
+          setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           recordGrammarExerciseAttempt(ex.id, false);
           await recordPracticeResult(lesson.id, 40);
-          const rawAns = Array.isArray(ex.correctAnswer)
-            ? ex.correctAnswer.join(" / ")
-            : (ex.correctAnswer || ex.errorWord || "");
-          setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: "${rawAns}"`);
+          setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: ${formatAnswerForms(ex)}`);
           // Đẩy bài tập sai vào cuối hàng đợi
           setQueue((prev) => [...prev, currentItem]);
         }
@@ -695,14 +703,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           recordDailyActivity(1);
           setFeedbackMsg(
             match === "near"
-              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️`
-              : "Tuyệt vời! Bạn đã gõ chính xác 🚀"
+              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️ ${NEXT_HINT}`
+              : `Tuyệt vời! Bạn đã gõ chính xác 🚀 ${NEXT_HINT}`
           );
-
-          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-          advanceTimerRef.current = setTimeout(() => {
-            advanceNextItem();
-          }, 3500);
         } else {
           await gradeWord(wordObj, Rating.Again, "spelling");
           recordDailyActivity(1);
@@ -726,19 +729,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           recordGrammarExerciseAttempt(ex.id, true);
           await recordPracticeResult(lesson.id, 100);
           recordDailyActivity(1);
-          setFeedbackMsg("Tuyệt vời! Bạn đã chia dạng đúng cấu trúc ngữ pháp 🚀");
-
-          if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-          advanceTimerRef.current = setTimeout(() => {
-            advanceNextItem();
-          }, 3500);
+          setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           recordGrammarExerciseAttempt(ex.id, false);
           await recordPracticeResult(lesson.id, 40);
-          const rawAns = Array.isArray(ex.correctAnswer)
-            ? ex.correctAnswer.join(" / ")
-            : (ex.correctAnswer || "");
-          setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: "${rawAns}"`);
+          setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: ${formatAnswerForms(ex)}`);
           setQueue((prev) => [...prev, currentItem]);
         }
       } catch (err) {

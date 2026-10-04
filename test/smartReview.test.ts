@@ -9,6 +9,7 @@ import {
   maskWordInSentence,
   normalizeTypedText,
   prepareContextMatch,
+  contractionVariants,
 } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { makeWord, reviewSrs, freshServices } from "./helpers";
@@ -119,6 +120,26 @@ describe("text helpers", () => {
 
   it("normalizes contractions, quotes and spacing", () => {
     expect(normalizeTypedText("It  didn’t crash")).toBe(normalizeTypedText("it did not crash"));
+  });
+
+  it.each([
+    ["doesn't", "does not"],
+    ["does not", "doesn't"],
+    ["He doesn't  like it", "he does not like it"],
+    ["can't", "cannot"],
+    ["won't", "will not"],
+    ["They’re ready", "they are ready"],
+    ["didn't crash", "did not crash."],
+  ])("treats %s and %s as the same typed answer", (a, b) => {
+    expect(normalizeTypedText(a)).toBe(normalizeTypedText(b));
+  });
+
+  it("lists equivalent contracted/full answer forms", () => {
+    expect(contractionVariants("does not")).toEqual(["doesn't"]);
+    expect(contractionVariants("didn't crash")).toEqual(["did not crash"]);
+    expect(contractionVariants("Doesn't work")).toEqual(["Does not work"]);
+    expect(contractionVariants("works")).toEqual([]);
+    for (const v of contractionVariants("can't")) expect(normalizeTypedText(v)).toBe(normalizeTypedText("can't"));
   });
 
   it("builds context-match pairs without leaking the answer", async () => {

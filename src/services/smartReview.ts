@@ -1175,6 +1175,38 @@ export function normalizeTypedText(text: string): string {
     .trim();
 }
 
+/** Full form -> contraction pairs used to show equivalent answers ("does not" / "doesn't") */
+const CONTRACTIONS: Array<[string, string]> = [
+  ["do not", "don't"], ["does not", "doesn't"], ["did not", "didn't"],
+  ["is not", "isn't"], ["are not", "aren't"], ["was not", "wasn't"], ["were not", "weren't"],
+  ["have not", "haven't"], ["has not", "hasn't"], ["had not", "hadn't"],
+  ["will not", "won't"], ["would not", "wouldn't"], ["should not", "shouldn't"],
+  ["could not", "couldn't"], ["must not", "mustn't"], ["cannot", "can't"], ["can not", "can't"],
+  ["i am", "i'm"], ["you are", "you're"], ["we are", "we're"], ["they are", "they're"],
+  ["i will", "i'll"], ["you will", "you'll"], ["we will", "we'll"], ["they will", "they'll"],
+  ["i have", "i've"], ["you have", "you've"], ["we have", "we've"], ["they have", "they've"],
+];
+
+/**
+ * Other accepted spellings of an answer: contracted <-> full forms
+ * ("doesn't crash" -> ["does not crash"]). All of them pass normalizeTypedText equality.
+ */
+export function contractionVariants(answer: string): string[] {
+  const variants = new Set<string>();
+  for (const [full, short] of CONTRACTIONS) {
+    const swap = (from: string, to: string) => {
+      const re = new RegExp(`\\b${escapeRegExp(from)}\\b`, "gi");
+      if (re.test(answer)) {
+        variants.add(answer.replace(re, (m) => (m[0] === m[0].toUpperCase() ? to[0].toUpperCase() + to.slice(1) : to)));
+      }
+    };
+    swap(full, short);
+    swap(short, full);
+  }
+  variants.delete(answer);
+  return Array.from(variants);
+}
+
 // ─── 9. REVIEW ANALYTICS & STATS ────────────────────────────────────────────
 
 export interface ReviewAnalyticsData {
