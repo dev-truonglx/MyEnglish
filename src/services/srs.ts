@@ -6,6 +6,8 @@ import {
   createEmptyCard,
   Rating,
   State,
+  StrategyMode,
+  GenSeedStrategyWithCardId,
   type Card,
 } from "ts-fsrs";
 import { getDatabase, getAllWords, getDueWordsFromDb, countDueWords } from "./db";
@@ -144,7 +146,9 @@ export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
     enable_short_term: true,
   });
 
-  const scheduler = fsrs(params);
+  // Fuzz seeded per card + rep count (not the review time), so the interval shown on a grade
+  // button is exactly what the card gets when that button is pressed a few seconds later
+  const scheduler = fsrs(params).useStrategy(StrategyMode.SEED, GenSeedStrategyWithCardId("card_id"));
   cachedScheduler = { key, scheduler };
   return scheduler;
 }
@@ -187,7 +191,9 @@ export function srsRowToCard(row?: Partial<SRSReview>): Card {
       : State.New) as State,
     last_review: row.last_review ? new Date(row.last_review) : undefined,
     learning_steps: row.learning_steps ?? 0,
-  };
+    // Used by the fuzz seed strategy (see getFSRSScheduler)
+    card_id: row.word_id ?? "",
+  } as Card;
 }
 
 /**
@@ -566,6 +572,9 @@ export const IDLE_POSTPONE_SECONDS = 5 * 60;
 export const NATURAL_BREAK_SECONDS = 15;
 /** ...but never wait for a pause longer than this once the reminder is due */
 export const MAX_WAIT_FOR_BREAK_MS = 10 * 60 * 1000;
+/** A full-screen app postpones the reminder at most this long (a maximized window with an
+ *  auto-hidden menu bar looks full screen and would otherwise block reminders forever) */
+export const MAX_WAIT_FOR_FULLSCREEN_MS = 30 * 60 * 1000;
 
 /**
  * Why the reminder should wait right now (null = show it). `waitedMs` is how long the reminder
@@ -574,7 +583,9 @@ export const MAX_WAIT_FOR_BREAK_MS = 10 * 60 * 1000;
 export function popupBlockReasonFrom(b: PopupBlockers | null | undefined, waitedMs: number): string | null {
   if (!b) return null;
   if (b.screen_sharing_app) return `Đang chia sẻ màn hình (${b.screen_sharing_app})`;
-  if (b.fullscreen_app) return `Đang dùng ${b.fullscreen_app} ở chế độ toàn màn hình`;
+  if (b.fullscreen_app && waitedMs < MAX_WAIT_FOR_FULLSCREEN_MS) {
+    return `Đang dùng ${b.fullscreen_app} ở chế độ toàn màn hình`;
+  }
   if (b.focus_mode) return "Đang bật Focus / Không làm phiền";
   if (b.idle_seconds == null) return null;
   if (b.idle_seconds >= IDLE_POSTPONE_SECONDS) return "Bạn đang không dùng máy";
@@ -588,7 +599,7 @@ export function popupBlockReasonFrom(b: PopupBlockers | null | undefined, waited
  * Why the review reminder should wait right now, or null when it is fine to show it.
  * Detection is done natively (macOS); on other platforms or on error nothing blocks.
  */
-export async function getPopupBlockReason(waitedMs: number = Infinity): Promise<string | null> {
+export async function getPopupBlockReason(waitedMs: number = 0): Promise<string | null> {
   try {
     return popupBlockReasonFrom(await invoke<PopupBlockers>("get_popup_blockers"), waitedMs);
   } catch {

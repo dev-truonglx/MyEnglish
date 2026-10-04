@@ -82,6 +82,11 @@ export default function MainDashboard({
   const [inputWord, setInputWord] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
+  // Listeners registered once read this instead of a stale isReviewing
+  const isReviewingRef = useRef(false);
+  isReviewingRef.current = isReviewing;
+  // New key per session so FlashcardReview never reuses the previous queue
+  const [sessionId, setSessionId] = useState(0);
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
   // Practice sessions (no due cards / "Practice All") never change the FSRS schedule
   const [isPracticeSession, setIsPracticeSession] = useState(false);
@@ -156,8 +161,9 @@ export default function MainDashboard({
     }, 4000);
   }, [words.length, loading]);
 
-  // Debounced background refresh (pipeline completions)
+  // Debounced background refresh (pipeline completions, reviews recorded in other windows)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastRefreshAtRef = useRef(Date.now());
   const scheduleRefresh = () => {
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
@@ -165,6 +171,10 @@ export default function MainDashboard({
       refreshWords();
     }, 300);
   };
+  // Any refresh (from here or elsewhere) replaces the words array
+  useEffect(() => {
+    lastRefreshAtRef.current = Date.now();
+  }, [words]);
 
   // Auto-start requested by "open-review-tab"; consumed once words are loaded
   const [pendingAutoStart, setPendingAutoStart] = useState(false);
@@ -222,6 +232,8 @@ export default function MainDashboard({
       const autoStart = event.payload?.auto_start ?? false;
       setActiveTab("review");
       setGlobalToast(null);
+      // Never abort a session in progress: just show it
+      if (isReviewingRef.current) return;
       if (!autoStart) setIsReviewing(false);
       // Start the session after fresh words land (this closure's handleStartReview would see stale words)
       refreshWords().finally(() => {
@@ -258,6 +270,23 @@ export default function MainDashboard({
     window.addEventListener("open-review-popup-preview", handleOpenPreview);
     window.addEventListener("close-review-popup-preview", handleClosePreview);
 
+    // Reviews recorded in the popup / other windows
+    let unlistenWordsChangedFn: (() => void) | null = null;
+    listen("words-changed", () => {
+      if (!isCancelled) scheduleRefresh();
+    })
+      .then((fn) => {
+        if (isCancelled) fn();
+        else unlistenWordsChangedFn = fn;
+      })
+      .catch(() => { });
+
+    // Catch up when the window comes back after a while (missed events, day rollover)
+    const handleFocus = () => {
+      if (Date.now() - lastRefreshAtRef.current > 30_000) scheduleRefresh();
+    };
+    window.addEventListener("focus", handleFocus);
+
     return () => {
       isCancelled = true;
       srsWorker.stop();
@@ -265,6 +294,8 @@ export default function MainDashboard({
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
       window.removeEventListener("open-review-popup-preview", handleOpenPreview);
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
+      window.removeEventListener("focus", handleFocus);
+      if (unlistenWordsChangedFn) unlistenWordsChangedFn();
       if (unlistenFn) unlistenFn();
       if (unlistenReviewFn) unlistenReviewFn();
       if (unlistenNotifFn) unlistenNotifFn();
@@ -299,6 +330,7 @@ export default function MainDashboard({
     }
 
     setReviewSet(session);
+    setSessionId((id) => id + 1);
     setIsReviewing(true);
     setActiveTab("review");
   };
@@ -313,6 +345,8 @@ export default function MainDashboard({
   const handleOpenReview = (autoStartFlashcard = false) => {
     setActiveTab("review");
     setGlobalToast(null);
+    // Never abort a session in progress: just show it
+    if (isReviewing) return;
     if (autoStartFlashcard) {
       handleStartReview(true);
     } else {
@@ -593,6 +627,7 @@ export default function MainDashboard({
         {activeTab === "review" && (
           isReviewing ? (
             <FlashcardReview
+              key={sessionId}
               wordsToReview={reviewSet}
               distractorPool={words}
               practiceMode={isPracticeSession}
@@ -626,6 +661,7 @@ export default function MainDashboard({
               const [dueCard] = getDueCards(w);
               setIsPracticeSession(!dueCard);
               setReviewSet([dueCard ?? practiceCards([w])[0]]);
+              setSessionId((id) => id + 1);
               setIsReviewing(true);
               setActiveTab("review");
             }}

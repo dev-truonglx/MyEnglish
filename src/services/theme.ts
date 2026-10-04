@@ -66,5 +66,22 @@ export function initTheme(): () => void {
   };
 
   mediaQuery.addEventListener("change", handleSystemChange);
-  return () => mediaQuery.removeEventListener("change", handleSystemChange);
+
+  // Floating windows (nudge/popup/quick-input) live as long as the app: localStorage is shared
+  // across same-origin webviews, so follow theme changes made in the main window
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === THEME_STORAGE_KEY || event.key === null) applyTheme(getSavedTheme());
+  };
+  // Re-check when a hidden window is shown again
+  const handleVisibility = () => {
+    if (document.visibilityState === "visible") applyTheme(getSavedTheme());
+  };
+  window.addEventListener("storage", handleStorage);
+  document.addEventListener("visibilitychange", handleVisibility);
+
+  return () => {
+    mediaQuery.removeEventListener("change", handleSystemChange);
+    window.removeEventListener("storage", handleStorage);
+    document.removeEventListener("visibilitychange", handleVisibility);
+  };
 }

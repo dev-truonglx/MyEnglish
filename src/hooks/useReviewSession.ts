@@ -8,7 +8,7 @@ import {
 } from "@/services/srs";
 import { recordDailyActivity, calculateStreakAndGoal } from "@/services/streak";
 import type { WordDetail, ReviewCard } from "@/types/database";
-import { directionForExercise, toCard } from "@/services/cards";
+import { toCard } from "@/services/cards";
 import {
   isLeech,
   calculateXPReward,
@@ -83,6 +83,14 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     wordsToReview.map((w) => ("direction" in w ? w : toCard(w, "recognition")))
   );
   const requeueCountRef = useRef<Map<string, number>>(new Map());
+  // Cards (word + direction) already recorded in FSRS this session: retries are practice only,
+  // so one bad session can't drive difficulty to the maximum
+  const scheduledThisSessionRef = useRef<Set<string>>(new Set());
+  // Set as soon as a card is being graded or a correct typed answer is waiting to be graded
+  const gradingLockRef = useRef(false);
+  const answerLockedRef = useRef(false);
+  // Grade of a correct typed answer, applied when the user continues (Enter / "Tiếp tục")
+  const [pendingRating, setPendingRating] = useState<Rating | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
@@ -153,6 +161,9 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     return selectExerciseType(currentWord);
   }, [mode, currentWord, fallbackMode]);
 
+  // "Xem đáp án" pressed on a typed exercise: the word was not recalled
+  const revealedWithoutRecall = effectiveExerciseType !== "flip" && hasCheckedAnswer && !isCorrect;
+
   const handleModeChange = (newMode: StudyMode) => {
     setMode(newMode);
     try {
@@ -174,6 +185,9 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     setLastXPReward(null);
     setShowXPPopup(false);
     setFallbackMode(null);
+    gradingLockRef.current = false;
+    answerLockedRef.current = false;
+    setPendingRating(null);
     cardStartTime.current = Date.now(); // Reset response timer
     setTimeout(() => {
       inputRef.current?.focus();
@@ -206,9 +220,16 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       srs: currentWord?.srs,
     });
 
-  const handleGrade = async (rating: Rating, overrideExerciseType?: ExerciseType, attempts?: number) => {
-    if (!currentWord || isAdvancing) return;
+  const handleGrade = async (requestedRating: Rating, overrideExerciseType?: ExerciseType, attempts?: number) => {
+    // A ref, not state: a second grade queued from a stale render (double Enter, Skip + timer)
+    // must not record the card twice or skip the next card
+    if (!currentWord || gradingLockRef.current) return;
+    gradingLockRef.current = true;
     setIsAdvancing(true);
+
+    // The answer is recorded on this card's own schedule; recognition is capped at Good
+    const rating =
+      currentWord.direction === "recognition" && requestedRating === Rating.Easy ? Rating.Good : requestedRating;
 
     const activeExType = overrideExerciseType || effectiveExerciseType;
     const responseTimeMs = Date.now() - cardStartTime.current;
@@ -258,10 +279,11 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     });
 
     try {
-      // The exercise decides which memory was tested: typing/dictation trains recall (production card),
-      // choosing among options trains recognition — even when the user forced a study mode.
-      const gradedDirection = directionForExercise(activeExType);
-      const result = practiceMode ? null : await recordReview(currentWord.id, rating, gradedDirection);
+      // Only the first answer to a card in this session updates FSRS; retries after Again are practice
+      const cardKey = `${currentWord.id}:${currentWord.direction}`;
+      const isScheduled = !practiceMode && !scheduledThisSessionRef.current.has(cardKey);
+      const result = isScheduled ? await recordReview(currentWord.id, rating, currentWord.direction) : null;
+      if (isScheduled) scheduledThisSessionRef.current.add(cardKey);
       recordDailyActivity(1);
       if (result) setLastResult(result);
       setReviewCount((prev) => prev + 1);
@@ -276,8 +298,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
         rating,
         xpEarned: xpReward.totalXP,
         timestamp: new Date().toISOString(),
-        isScheduled: !practiceMode,
-        direction: result?.direction ?? gradedDirection,
+        isScheduled,
+        direction: result?.direction ?? currentWord.direction,
       }).catch((err) => console.warn("Review log save failed:", err));
 
       // Update XP state for display
@@ -321,13 +343,14 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       }
     } catch (err) {
       console.error("Failed to record review:", err);
+      gradingLockRef.current = false;
       setIsAdvancing(false);
     }
   };
 
   // Submit Answer in Cloze or Spelling mode
   const handleCheckAnswer = () => {
-    if (!currentWord || hasCheckedAnswer || isAdvancing) return;
+    if (!currentWord || hasCheckedAnswer || isAdvancing || answerLockedRef.current) return;
     if (!userInput.trim()) {
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 350);
@@ -344,14 +367,16 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
 
     if (matched) {
       // ---------------- CORRECT ----------------
+      // Lock the card right away: Enter / Skip / Show answer during the short delay are ignored
+      answerLockedRef.current = true;
       setIsCorrect(true);
       setFeedbackMessage({
-        text: "Chính xác tuyệt đối! 🎉 Đang chuyển từ tiếp theo...",
+        text: "Chính xác tuyệt đối! 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.",
         type: "success",
       });
       handleSpeak(currentWord.word);
 
-      // FSRS grade: any wrong attempt = Again, hint / typo = Hard, fast production = Easy
+      // FSRS grade: any wrong attempt = Again, hint / typo / very slow = Hard, otherwise Good
       const rating = deriveRating({
         exerciseType: effectiveExerciseType,
         wrongAttempts,
@@ -362,15 +387,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       });
       if (match === "near") {
         setFeedbackMessage({
-          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó).`,
+          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó). Nhấn Enter hoặc Tiếp tục.`,
           type: "info",
         });
       }
 
-      // Smooth auto-transition to next word
-      setTimeout(() => {
-        handleGrade(rating);
-      }, match === "near" ? 1800 : 700);
+      // No auto-advance: the learner reads the answer and continues when ready
+      setPendingRating(rating);
     } else {
       // ---------------- INCORRECT ----------------
       const newAttempts = wrongAttempts + 1;
@@ -405,9 +428,15 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     }
   };
 
+  /** Apply the grade of a correct typed answer and go to the next card */
+  const confirmCorrectAnswer = () => {
+    if (pendingRating === null) return;
+    handleGrade(pendingRating);
+  };
+
   // User explicitly skips this word
   const handleSkip = () => {
-    if (!currentWord || isAdvancing) return;
+    if (!currentWord || isAdvancing || answerLockedRef.current) return;
     setSessionStats((prev) => ({
       ...prev,
       skippedCount: prev.skippedCount + 1,
@@ -418,7 +447,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
 
   // User explicitly asks to see result and detailed grammar/example
   const handleShowAnswer = () => {
-    if (!currentWord || isAdvancing) return;
+    if (!currentWord || isAdvancing || answerLockedRef.current) return;
     setHasCheckedAnswer(true);
     setIsFlipped(true);
     setIsCorrect(false);
@@ -447,6 +476,15 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       const isTyping =
         e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
 
+      // Correct answer waiting: Enter (from the input or anywhere) moves to the next card
+      if (pendingRating !== null) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmCorrectAnswer();
+        }
+        return;
+      }
+
       // In Cloze or Spelling mode, if typing into input, Enter submits answer
       if (isTyping) {
         if (e.key === "Enter" && !hasCheckedAnswer) {
@@ -461,12 +499,14 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
         e.preventDefault();
         setIsFlipped((prev) => !prev);
       } else if (isFlipped || hasCheckedAnswer) {
-        // Grading hotkeys: 1 (Again), 2 (Hard), 3 (Good), 4 (Easy), Enter (Advance with Again)
-        if (e.key === "1") handleGrade(Rating.Again);
-        else if (e.key === "2") handleGrade(Rating.Hard);
-        else if (e.key === "3") handleGrade(Rating.Good);
-        else if (e.key === "4") handleGrade(Rating.Easy);
-        else if (e.key === "Enter") handleGrade(Rating.Again);
+        // Grading hotkeys: 1 (Again), 2 (Hard), 3 (Good), 4 (Easy), Enter (Advance with Again).
+        // After revealing the answer only Again is allowed; Easy only on recall cards.
+        if (e.key === "1" || e.key === "Enter") handleGrade(Rating.Again);
+        else if (!revealedWithoutRecall) {
+          if (e.key === "2") handleGrade(Rating.Hard);
+          else if (e.key === "3") handleGrade(Rating.Good);
+          else if (e.key === "4" && currentWord?.direction === "production") handleGrade(Rating.Easy);
+        }
       }
     };
 
@@ -483,9 +523,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     isAdvancing,
     wrongAttempts,
     showHint,
+    pendingRating,
   ]);
 
   return {
+    revealedWithoutRecall,
+    pendingRating,
+    confirmCorrectAnswer,
     mode,
     handleModeChange,
     setFallbackMode,

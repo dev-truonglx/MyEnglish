@@ -12,6 +12,9 @@ static LAST_NOTIFICATION_TIME: AtomicU64 = AtomicU64::new(0);
 static NOTIFICATION_WAITING: AtomicBool = AtomicBool::new(false);
 /// Set to true before calling relaunch() so CloseRequested lets the process die.
 static ALLOW_EXIT: AtomicBool = AtomicBool::new(false);
+/// Last payload sent to the nudge card, kept so a card that registers its listener late can fetch it.
+static LAST_NUDGE_PAYLOAD: std::sync::Mutex<Option<serde_json::Value>> = std::sync::Mutex::new(None);
+static NUDGE_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
@@ -54,15 +57,18 @@ fn output_with_timeout(
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let mut stdout = child.stdout.take().ok_or("stdout not captured")?;
     let mut stderr = child.stderr.take().ok_or("stderr not captured")?;
-    let out_reader = std::thread::spawn(move || {
+    // Buffers come back over channels: a grandchild holding the pipe open must not block us forever
+    let (out_tx, out_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    let (err_tx, err_rx) = std::sync::mpsc::channel::<Vec<u8>>();
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stdout.read_to_end(&mut buf);
-        buf
+        let _ = out_tx.send(buf);
     });
-    let err_reader = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         let mut buf = Vec::new();
         let _ = stderr.read_to_end(&mut buf);
-        buf
+        let _ = err_tx.send(buf);
     });
 
     let start = std::time::Instant::now();
@@ -81,10 +87,11 @@ fn output_with_timeout(
         }
     };
 
+    const DRAIN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
     Ok(std::process::Output {
         status,
-        stdout: out_reader.join().unwrap_or_default(),
-        stderr: err_reader.join().unwrap_or_default(),
+        stdout: out_rx.recv_timeout(DRAIN_TIMEOUT).unwrap_or_default(),
+        stderr: err_rx.recv_timeout(DRAIN_TIMEOUT).unwrap_or_default(),
     })
 }
 
@@ -127,6 +134,11 @@ fn ai_cli_args(prompt: &str) -> Vec<String> {
     ]
 }
 
+/// Minimal arguments for older CLIs that reject the newer flags. `--sandbox` is never dropped.
+fn ai_cli_fallback_args(prompt: &str) -> Vec<String> {
+    vec!["--sandbox".into(), "-p".into(), prompt.into()]
+}
+
 fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, String> {
     let mut cmd = create_hidden_command(bin_path);
     cmd.args(ai_cli_args(prompt));
@@ -137,9 +149,9 @@ fn run_ai_cli(bin_path: &str, prompt: &str) -> Result<std::process::Output, Stri
         return Ok(output);
     }
 
-    // Older CLI versions: retry once with only the print flag
+    // Older CLI versions: retry once with the minimal flags (still sandboxed: fail rather than run unsandboxed)
     let mut fallback = create_hidden_command(bin_path);
-    fallback.arg("-p").arg(prompt);
+    fallback.args(ai_cli_fallback_args(prompt));
     output_with_timeout(fallback, AI_CLI_FALLBACK_TIMEOUT)
         .map_err(|e| format!("Failed to execute AI CLI at '{}': {}", bin_path, e))
 }
@@ -604,6 +616,9 @@ mod macos_focus {
         fn objc_getClass(name: *const std::os::raw::c_char) -> *mut c_void;
         fn sel_registerName(name: *const std::os::raw::c_char) -> *mut c_void;
         fn objc_msgSend(receiver: *mut c_void, sel: *mut c_void, ...) -> *mut c_void;
+        // libobjc, reachable through AppKit: background threads have no autorelease pool
+        fn objc_autoreleasePoolPush() -> *mut c_void;
+        fn objc_autoreleasePoolPop(pool: *mut c_void);
     }
 
     struct WindowInfo {
@@ -677,22 +692,29 @@ mod macos_focus {
 
     fn frontmost_app_pid() -> Option<i64> {
         unsafe {
-            let cls = objc_getClass(b"NSWorkspace\0".as_ptr() as *const _);
-            if cls.is_null() {
-                return None;
-            }
-            let workspace = objc_msgSend(cls, sel_registerName(b"sharedWorkspace\0".as_ptr() as *const _));
-            if workspace.is_null() {
-                return None;
-            }
-            let app = objc_msgSend(workspace, sel_registerName(b"frontmostApplication\0".as_ptr() as *const _));
-            if app.is_null() {
-                return None;
-            }
-            let pid_fn: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32 =
-                std::mem::transmute(objc_msgSend as *const ());
-            Some(pid_fn(app, sel_registerName(b"processIdentifier\0".as_ptr() as *const _)) as i64)
+            let pool = objc_autoreleasePoolPush();
+            let pid = frontmost_app_pid_inner();
+            objc_autoreleasePoolPop(pool);
+            pid
         }
+    }
+
+    unsafe fn frontmost_app_pid_inner() -> Option<i64> {
+        let cls = objc_getClass(b"NSWorkspace\0".as_ptr() as *const _);
+        if cls.is_null() {
+            return None;
+        }
+        let workspace = objc_msgSend(cls, sel_registerName(b"sharedWorkspace\0".as_ptr() as *const _));
+        if workspace.is_null() {
+            return None;
+        }
+        let app = objc_msgSend(workspace, sel_registerName(b"frontmostApplication\0".as_ptr() as *const _));
+        if app.is_null() {
+            return None;
+        }
+        let pid_fn: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32 =
+            std::mem::transmute(objc_msgSend as *const ());
+        Some(pid_fn(app, sel_registerName(b"processIdentifier\0".as_ptr() as *const _)) as i64)
     }
 
     fn covers(window: &CGRect, display: &CGRect) -> bool {
@@ -846,11 +868,63 @@ fn get_target_monitor_for_popup(popup_win: &tauri::WebviewWindow, prefer_primary
         .or_else(|| popup_win.current_monitor().ok().flatten())
 }
 
+/// Logical size of the nudge window (tauri.conf.json); outer_size() is in the CURRENT monitor's pixels.
+const NUDGE_WIDTH: f64 = 380.0;
+
+/// Move `window` to (dx, dy) logical points from the monitor's top-left corner.
+/// macOS: tao converts Physical values with the window's CURRENT scale factor, which lands on the
+/// wrong spot on mixed-DPI setups, so convert with the TARGET monitor's scale and pass Logical.
+/// Elsewhere monitor coordinates are physical per-monitor values and stay physical.
+fn place_on_monitor(window: &tauri::WebviewWindow, monitor: &tauri::Monitor, dx: f64, dy: f64) {
+    let scale = monitor.scale_factor();
+    #[cfg(target_os = "macos")]
+    {
+        let origin = monitor.position().to_logical::<f64>(scale);
+        let _ = window.set_position(tauri::Position::Logical(tauri::LogicalPosition {
+            x: origin.x + dx,
+            y: origin.y + dy,
+        }));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let origin = monitor.position();
+        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition {
+            x: origin.x + (dx * scale).round() as i32,
+            y: origin.y + (dy * scale).round() as i32,
+        }));
+    }
+}
+
+/// Make `window` cover the whole monitor (same scale handling as `place_on_monitor`).
+fn fill_monitor(window: &tauri::WebviewWindow, monitor: &tauri::Monitor) {
+    #[cfg(target_os = "macos")]
+    {
+        let scale = monitor.scale_factor();
+        let _ = window.set_position(tauri::Position::Logical(monitor.position().to_logical::<f64>(scale)));
+        let _ = window.set_size(tauri::Size::Logical(monitor.size().to_logical::<f64>(scale)));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window.set_position(tauri::Position::Physical(*monitor.position()));
+        let _ = window.set_size(tauri::Size::Physical(*monitor.size()));
+    }
+}
+
+fn is_review_popup_visible(app: &AppHandle) -> bool {
+    app.get_webview_window("review-popup")
+        .and_then(|w| w.is_visible().ok())
+        .unwrap_or(false)
+}
+
 /// Small reminder card in the top-right corner of the active monitor. It never takes keyboard
 /// focus (the window is not focusable and the app is not activated), so typing elsewhere is
 /// not interrupted. The payload (due count, countdown...) is forwarded to the card.
 #[tauri::command]
 fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary: Option<bool>) -> Result<bool, String> {
+    // A review is already on screen: no reminder on top of it
+    if is_review_popup_visible(&app) {
+        return Ok(false);
+    }
     let window = app
         .get_webview_window("review-nudge")
         .ok_or_else(|| "Review nudge window not found".to_string())?;
@@ -859,21 +933,32 @@ fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary:
     let _ = window.set_always_on_top(true);
 
     if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary.unwrap_or(false)) {
-        let scale = monitor.scale_factor();
-        let m_pos = monitor.position();
-        let m_size = monitor.size();
-        let w_size = window.outer_size().unwrap_or(tauri::PhysicalSize { width: 0, height: 0 });
-        let margin = (16.0 * scale) as i32;
+        // Computed in logical points of the target monitor
+        let m_width = monitor.size().to_logical::<f64>(monitor.scale_factor()).width;
+        let margin = 16.0;
         // Leave room for the macOS menu bar / notch area
-        let top_inset = (if cfg!(target_os = "macos") { 40.0 } else { 16.0 } * scale) as i32;
-        let x = m_pos.x + (m_size.width as i32 - w_size.width as i32 - margin).max(0);
-        let y = m_pos.y + top_inset;
-        let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+        let top_inset = if cfg!(target_os = "macos") { 40.0 } else { 16.0 };
+        let dx = (m_width - NUDGE_WIDTH - margin).max(0.0);
+        place_on_monitor(&window, &monitor, dx, top_inset);
     }
 
+    // Tag each reminder so the card can tell a fetched payload from the same one arriving by event
+    let mut payload = payload;
+    if let Some(obj) = payload.as_object_mut() {
+        obj.insert("nudgeId".into(), (NUDGE_SEQ.fetch_add(1, Ordering::SeqCst) + 1).into());
+    }
+    if let Ok(mut last) = LAST_NUDGE_PAYLOAD.lock() {
+        *last = Some(payload.clone());
+    }
     let _ = window.emit("review-nudge-opened", payload);
     window.show().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Payload of the last reminder, for a card whose listener was not ready when it was emitted.
+#[tauri::command]
+fn take_review_nudge_payload() -> Option<serde_json::Value> {
+    LAST_NUDGE_PAYLOAD.lock().ok().and_then(|mut last| last.take())
 }
 
 #[tauri::command]
@@ -892,6 +977,16 @@ fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<boo
         let _ = nudge.hide();
     }
     if let Some(window) = app.get_webview_window("review-popup") {
+        // Already open: just bring it forward. Re-emitting review-popup-opened would wipe the session.
+        if window.is_visible().unwrap_or(false) {
+            let _ = window.unminimize();
+            #[cfg(target_os = "macos")]
+            {
+                macos_app::activate_app_ignoring_other_apps();
+            }
+            let _ = window.set_focus();
+            return Ok(true);
+        }
         let _ = window.set_visible_on_all_workspaces(true);
         let _ = window.set_always_on_top(true);
         let _ = window.unminimize();
@@ -902,24 +997,18 @@ fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<boo
         }
 
         if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
-            let size = monitor.size();
-            let pos = monitor.position();
-            let _ = window.set_position(tauri::Position::Physical(*pos));
-            let _ = window.set_size(tauri::Size::Physical(*size));
+            fill_monitor(&window, &monitor);
         }
 
         window.show().map_err(|e| e.to_string())?;
 
         // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
         if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
-            let size = monitor.size();
-            let pos = monitor.position();
-            let _ = window.set_position(tauri::Position::Physical(*pos));
-            let _ = window.set_size(tauri::Size::Physical(*size));
+            fill_monitor(&window, &monitor);
             eprintln!(
                 "[ReviewPopup] monitor pos: {:?}, size: {:?}, current win pos: {:?}, win size: {:?}",
-                pos,
-                size,
+                monitor.position(),
+                monitor.size(),
                 window.outer_position().ok(),
                 window.inner_size().ok()
             );
@@ -1591,6 +1680,7 @@ pub fn run() {
             hide_review_popup,
             show_review_nudge,
             hide_review_nudge,
+            take_review_nudge_payload,
             prepare_update_exit,
             cancel_update_exit,
             get_popup_blockers,
@@ -1665,6 +1755,15 @@ mod tests {
         assert!(!args.iter().any(|a| a == "--effort"));
         assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
         assert_eq!(args.last().map(String::as_str), Some("hi"));
+    }
+
+    #[test]
+    fn ai_cli_fallback_args_stay_sandboxed() {
+        let args = ai_cli_fallback_args("hi");
+        assert!(args.contains(&"--sandbox".to_string()));
+        assert!(!args.iter().any(|a| a == "--dangerously-skip-permissions"));
+        assert_eq!(args.last().map(String::as_str), Some("hi"));
+        assert!(ai_cli_args("hi").contains(&"--sandbox".to_string()));
     }
 
     #[test]

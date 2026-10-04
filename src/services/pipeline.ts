@@ -35,6 +35,34 @@ async function getActiveCefrLevel(): Promise<string> {
   }
 }
 
+// Automatic re-queue on launch gives up on a word after this many attempts that didn't enrich it
+const REQUEUE_ATTEMPTS_KEY = "myenglish_pending_requeue_attempts_v1";
+const MAX_AUTO_REQUEUE_ATTEMPTS = 3;
+
+function readRequeueAttempts(): Record<string, number> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(REQUEUE_ATTEMPTS_KEY) || "{}");
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeRequeueAttempts(attempts: Record<string, number>): void {
+  try {
+    if (Object.keys(attempts).length === 0) localStorage.removeItem(REQUEUE_ATTEMPTS_KEY);
+    else localStorage.setItem(REQUEUE_ATTEMPTS_KEY, JSON.stringify(attempts));
+  } catch {}
+}
+
+/** Forget automatic attempts for a word (enriched successfully or added again by hand) */
+function resetRequeueAttempts(word: string): void {
+  const attempts = readRequeueAttempts();
+  if (!(word in attempts)) return;
+  delete attempts[word];
+  writeRequeueAttempts(attempts);
+}
+
 export interface PipelineItem {
   word: string;
   status: "pending" | "analyzing" | "completed" | "failed";
@@ -71,6 +99,7 @@ class WordProcessingPipeline {
   public async enqueue(word: string, options: { source?: "user" | "auto" } = {}): Promise<void> {
     const cleanWord = word.trim().toLowerCase();
     if (!cleanWord) return;
+    if (options.source !== "auto") resetRequeueAttempts(cleanWord);
 
     // If currently being analyzed or pending, ignore duplicate clicks
     const ongoing = this.queue.find(
@@ -126,6 +155,7 @@ class WordProcessingPipeline {
     const cleanWord = word.trim().toLowerCase();
     const item = this.queue.find((i) => i.word === cleanWord);
     if (item) {
+      resetRequeueAttempts(cleanWord);
       item.status = "pending";
       item.error = undefined;
       this.notify();
@@ -236,6 +266,7 @@ class WordProcessingPipeline {
       pendingItem.wordId = wordId;
       pendingItem.status = "completed";
       pendingItem.error = undefined;
+      resetRequeueAttempts(pendingItem.word);
       logTerminal("Pipeline", `Hoàn tất toàn bộ quy trình cho từ "${pendingItem.word}" ✓`);
     } catch (err) {
       logTerminal("Pipeline ERROR", `Lỗi quy trình cho từ "${pendingItem.word}": ${err}`);
@@ -277,15 +308,37 @@ export const pipeline = new WordProcessingPipeline();
 /**
  * Re-queue words still holding a placeholder meaning (e.g. app closed mid-analysis or AI failed).
  * Call once on main window mount. Uses source "auto" so it doesn't count as study activity.
+ * Each automatic attempt is counted (reset on success / manual re-add); a word is skipped after
+ * MAX_AUTO_REQUEUE_ATTEMPTS so a word the AI keeps failing on isn't retried on every launch.
  */
 export async function requeuePendingWords(): Promise<number> {
   try {
-    const pending = await getPlaceholderWords();
+    const placeholders = await getPlaceholderWords();
+    const attempts = readRequeueAttempts();
+    // Drop counters for words that are no longer placeholders (enriched elsewhere or deleted)
+    const placeholderSet = new Set(placeholders.map((w) => w.word.trim().toLowerCase()));
+    for (const word of Object.keys(attempts)) {
+      if (!placeholderSet.has(word)) delete attempts[word];
+    }
+    const pending = placeholders.filter(
+      (w) => (attempts[w.word.trim().toLowerCase()] ?? 0) < MAX_AUTO_REQUEUE_ATTEMPTS
+    );
+    for (const w of pending) {
+      const key = w.word.trim().toLowerCase();
+      attempts[key] = (attempts[key] ?? 0) + 1;
+    }
+    writeRequeueAttempts(attempts);
+
     for (const w of pending) {
       await pipeline.enqueue(w.word, { source: "auto" });
     }
-    if (pending.length > 0) {
-      logTerminal("Pipeline", `Đã đưa lại ${pending.length} từ chưa phân tích vào hàng đợi.`);
+    const skipped = placeholders.length - pending.length;
+    if (pending.length > 0 || skipped > 0) {
+      logTerminal(
+        "Pipeline",
+        `Đã đưa lại ${pending.length} từ chưa phân tích vào hàng đợi` +
+          (skipped > 0 ? ` (bỏ qua ${skipped} từ đã thử ${MAX_AUTO_REQUEUE_ATTEMPTS} lần).` : ".")
+      );
     }
     return pending.length;
   } catch (e) {

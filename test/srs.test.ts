@@ -70,6 +70,23 @@ describe("recordReview (FSRS persisted in SQLite)", () => {
   });
 });
 
+describe("interval previews", () => {
+  it("match the interval the card actually gets when graded seconds later", async () => {
+    const { db, srs } = await freshServices();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T08:00:00Z"));
+    const id = await addWord(db, "rollback");
+    await srs.recordReview(id, srs.Rating.Easy);
+    vi.setSystemTime(new Date("2026-10-20T08:00:00Z"));
+
+    const [word] = await db.getAllWords();
+    const preview = srs.getFSRSScheduler().repeat(srs.srsRowToCard(word.srs), new Date())[srs.Rating.Good].card;
+    vi.setSystemTime(new Date(Date.now() + 4000)); // user reads the buttons, then presses Good
+    const graded = await srs.recordReview(id, srs.Rating.Good);
+    expect(graded.scheduled_days).toBe(preview.scheduled_days);
+  });
+});
+
 describe("study limits", () => {
   it("falls back to defaults and persists overrides", async () => {
     const { srs } = await freshServices();

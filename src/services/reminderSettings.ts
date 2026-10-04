@@ -257,11 +257,11 @@ export async function triggerReviewNudge(dueCount: number): Promise<boolean> {
   recordPopupDisplayed(Date.now());
   const settings = getReminderSettings();
   try {
-    await invoke("show_review_nudge", {
+    // false = not shown (the review popup is already open)
+    return await invoke<boolean>("show_review_nudge", {
       payload: buildNudgePayload(dueCount, settings),
       preferPrimary: settings.preferPrimaryMonitor,
     });
-    return true;
   } catch (err) {
     console.warn("invoke show_review_nudge failed, opening the review directly:", err);
     return triggerReviewPopup();

@@ -365,10 +365,14 @@ function scheduleLessonReview(
   };
 }
 
-function movingMastery(current: GrammarProgress, scorePercent: number): number {
-  const isFirstAttempt = current.diagnosticStatus === "unattempted" && current.mastery === 0;
+/** First-ever mastery from a single practice question is capped: one (possibly guessed) answer
+ *  must not mark a lesson as mastered */
+const SINGLE_QUESTION_MASTERY_CAP = 50;
+
+function movingMastery(current: GrammarProgress, scorePercent: number, firstAttemptCap = 100): number {
+  const isFirstAttempt = current.mastery === 0 && current.reps === 0 && !current.lastAttemptDate;
   return isFirstAttempt
-    ? scorePercent
+    ? Math.min(scorePercent, firstAttemptCap)
     : Math.round(Math.min(100, Math.max(0, current.mastery * 0.7 + scorePercent * 0.3)));
 }
 
@@ -438,9 +442,10 @@ export async function recordPracticeResult(
   const updated: GrammarProgress = {
     ...current,
     ...(schedule ?? {}),
-    diagnosticStatus: current.diagnosticStatus === "unattempted" ? "reviewed_and_passed" : current.diagnosticStatus,
+    // Only the diagnostic test decides pass/fail; a practice question never marks a lesson as passed
+    diagnosticStatus: current.diagnosticStatus,
     score: scorePercent,
-    mastery: movingMastery(current, scorePercent),
+    mastery: movingMastery(current, scorePercent, SINGLE_QUESTION_MASTERY_CAP),
     lastAttemptDate: nowDate.toISOString(),
   };
 
@@ -463,7 +468,9 @@ export function getDueGrammarLessons(): string[] {
 
   for (const lesson of GRAMMAR_LESSONS) {
     const progress = progressCache[lesson.id];
-    if (progress && progress.diagnosticStatus !== "unattempted") {
+    // Due once the lesson has a schedule: from a diagnostic or from practice questions
+    const isScheduled = !!progress && (progress.diagnosticStatus !== "unattempted" || !!progress.lastReview || progress.reps > 0);
+    if (progress && isScheduled) {
       const reviewDate = new Date(progress.nextReviewDate);
       if (reviewDate <= now) {
         dueLessonIds.push(lesson.id);

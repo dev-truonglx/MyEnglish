@@ -14,10 +14,7 @@ const PROFICIENCY_OVERRIDE_KEY = "myenglish_user_cefr_override_v1";
 const KNOWN_WORD_MIN_STABILITY = 7;
 /** Known words of a level needed (together with its grammar) to complete that level */
 const LEVEL_VOCAB_TARGET: Record<GrammarLevel, number> = { A1: 40, A2: 60, B1: 80, B2: 100, C1: 120 };
-/** Below this many CEFR-tagged known words, fall back to total known words */
-const MIN_TAGGED_WORDS_FOR_LEVEL_VOCAB = 20;
-/** Legacy fallback: total known words needed to complete A1..C1 */
-const LEGACY_KNOWN_WORDS_TARGET = [30, 100, 250, 500, 800];
+
 
 export interface LevelBreakdown {
   level: GrammarLevel;
@@ -47,7 +44,7 @@ export interface UserProficiencyProfile {
   
   // Specific stats
   levelBreakdown: Record<GrammarLevel, LevelBreakdown>;
-  /** Known words of each level vs the target needed to complete it (legacy: total known words) */
+  /** Known words of each level vs the target needed to complete it (untagged words fill gaps bottom-up) */
   levelVocab: Record<GrammarLevel, { known: number; target: number }>;
   vocabularyStats: {
     totalWords: number;
@@ -242,7 +239,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
         if (
           prog.diagnosticStatus === "passed_first_try" ||
           prog.diagnosticStatus === "reviewed_and_passed" ||
-          prog.score >= 70 ||
+          // Mastery builds up over several answers (a single question is capped at 50)
           prog.mastery >= 70
         ) {
           passed++;
@@ -299,7 +296,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
 
   // Per-level vocabulary: words tagged with their CEFR level that the learner reliably recognises
   // (recognition card in Review with >= 7 days stability). Untagged words (added before tagging)
-  // only feed a legacy fallback based on the total number of known words.
+  // fill the remaining gaps from the lowest level up, so the result changes smoothly as tags arrive.
   const isKnown = (w: WordDetail) => w.srs.state === 2 && (w.srs.stability ?? 0) >= KNOWN_WORD_MIN_STABILITY;
   const knownByLevel: Record<GrammarLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
   let taggedKnown = 0;
@@ -314,13 +311,14 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
       taggedKnown++;
     }
   }
-  const useLegacyVocab = taggedKnown < MIN_TAGGED_WORDS_FOR_LEVEL_VOCAB;
+  let untaggedKnown = totalKnown - taggedKnown;
   const levelVocab = {} as Record<GrammarLevel, { known: number; target: number }>;
-  ALL_LEVELS.forEach((lvl, idx) => {
-    levelVocab[lvl] = useLegacyVocab
-      ? { known: totalKnown, target: LEGACY_KNOWN_WORDS_TARGET[idx] }
-      : { known: knownByLevel[lvl], target: LEVEL_VOCAB_TARGET[lvl] };
-  });
+  for (const lvl of ALL_LEVELS) {
+    const target = LEVEL_VOCAB_TARGET[lvl];
+    const fill = Math.min(untaggedKnown, Math.max(0, target - knownByLevel[lvl]));
+    untaggedKnown -= fill;
+    levelVocab[lvl] = { known: knownByLevel[lvl] + fill, target };
+  }
   const vocabPercent = (lvl: GrammarLevel) =>
     Math.min(100, Math.round((levelVocab[lvl].known / levelVocab[lvl].target) * 100));
   const vocabularyScore = Math.round(ALL_LEVELS.reduce((sum, lvl) => sum + vocabPercent(lvl), 0) / ALL_LEVELS.length);
@@ -381,9 +379,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   if (vocabPercent(effectiveLevel) < 100) {
     const { known, target } = levelVocab[effectiveLevel];
     recommendations.push(
-      useLegacyVocab
-        ? `Bạn đã thuộc ${known}/${target} từ. Hãy ôn đều để đạt mốc từ vựng của cấp độ ${effectiveLevel}.`
-        : `Bạn đã thuộc ${known}/${target} từ cấp độ ${effectiveLevel}. Học thêm từ đúng cấp độ này (tự động nạp từ sẽ chỉ gợi ý từ ${effectiveLevel}).`
+      `Bạn đã thuộc ${known}/${target} từ cấp độ ${effectiveLevel}. Học thêm từ đúng cấp độ này (tự động nạp từ sẽ chỉ gợi ý từ ${effectiveLevel}).`
     );
   }
   if (avgRetrievability < 75 && totalWords > 10) {

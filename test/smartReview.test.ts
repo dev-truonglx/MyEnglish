@@ -9,6 +9,7 @@ import {
   maskWordInSentence,
   normalizeTypedText,
   prepareContextMatch,
+  contractionVariants,
 } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { makeWord, reviewSrs, freshServices } from "./helpers";
@@ -32,12 +33,10 @@ describe("deriveRating", () => {
     expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, nearMiss: true })).toBe(Rating.Hard);
   });
 
-  it("gives Easy only for fast production answers on Review cards", () => {
-    expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, srs: { state: 2 } })).toBe(Rating.Easy);
-    expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, srs: { state: 0 } })).toBe(Rating.Good);
-    expect(
-      deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 20000, srs: { state: 2 } })
-    ).toBe(Rating.Good);
+  it("never gives Easy automatically; very slow correct answers are Hard", () => {
+    expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, srs: { state: 2 } })).toBe(Rating.Good);
+    expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 25000 })).toBe(Rating.Hard);
+    expect(deriveRating({ exerciseType: "multiple_choice", wrongAttempts: 0, responseTimeMs: 16000 })).toBe(Rating.Hard);
   });
 });
 
@@ -121,6 +120,26 @@ describe("text helpers", () => {
     expect(normalizeTypedText("It  didn’t crash")).toBe(normalizeTypedText("it did not crash"));
   });
 
+  it.each([
+    ["doesn't", "does not"],
+    ["does not", "doesn't"],
+    ["He doesn't  like it", "he does not like it"],
+    ["can't", "cannot"],
+    ["won't", "will not"],
+    ["They’re ready", "they are ready"],
+    ["didn't crash", "did not crash."],
+  ])("treats %s and %s as the same typed answer", (a, b) => {
+    expect(normalizeTypedText(a)).toBe(normalizeTypedText(b));
+  });
+
+  it("lists equivalent contracted/full answer forms", () => {
+    expect(contractionVariants("does not")).toEqual(["doesn't"]);
+    expect(contractionVariants("didn't crash")).toEqual(["did not crash"]);
+    expect(contractionVariants("Doesn't work")).toEqual(["Does not work"]);
+    expect(contractionVariants("works")).toEqual([]);
+    for (const v of contractionVariants("can't")) expect(normalizeTypedText(v)).toBe(normalizeTypedText("can't"));
+  });
+
   it("builds context-match pairs without leaking the answer", async () => {
     await freshServices();
     const mk = (word: string, sentence: string, meaning: string) =>
@@ -160,6 +179,6 @@ describe("new-card budget", () => {
     await log(studied, true);
     await log(practiced, false);
 
-    expect(await smart.getNewCardsIntroducedToday()).toBe(1);
+    expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 1, production: 0 });
   });
 });

@@ -77,12 +77,15 @@ export default function WordInspector({
           <button
             onClick={(e) => requestDeleteWord(selectedWord.id, selectedWord.word, e)}
             title="Xoá từ"
+            aria-label="Xoá từ"
             className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <Trash2 className="w-4 h-4" />
           </button>
           <button
             onClick={() => setSelectedWord(null)}
+            aria-label="Đóng chi tiết từ vựng"
+            title="Đóng"
             className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <X className="w-4 h-4" />
