@@ -320,7 +320,7 @@ export default function Sidebar({
           >
             <div className="flex items-center gap-2.5">
               <Flame className="w-4 h-4 text-orange-400" />
-              <span>Daily Review (SM-2)</span>
+              <span>Daily Review (FSRS)</span>
             </div>
             {dueCount > 0 && (
               <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 font-semibold animate-pulse">

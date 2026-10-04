@@ -222,3 +222,11 @@ pre code {
     animation: none;
   }
 }
+
+/* tailwindcss-animate utilities (animate-in, fade-in, zoom-in...) respect reduced motion too */
+@media (prefers-reduced-motion: reduce) {
+  .animate-in,
+  .animate-out {
+    animation: none !important;
+  }
+}
