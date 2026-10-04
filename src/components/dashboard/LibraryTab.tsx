@@ -52,12 +52,16 @@ export default function LibraryTab({
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
       {/* Notification alert if any */}
       {message && (
-        <div className="p-3 rounded-lg bg-cyan-950/40 border border-cyan-800 text-cyan-300 text-xs flex items-center justify-between">
+        <div className="p-3 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-800 dark:bg-cyan-950/40 dark:border-cyan-800 dark:text-cyan-300 text-xs flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+            <Sparkles className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
             <span>{message}</span>
           </div>
-          <button onClick={() => setMessage(null)} className="text-cyan-400 hover:text-white">
+          <button
+            onClick={() => setMessage(null)}
+            aria-label="Đóng thông báo"
+            className="text-cyan-600 hover:text-cyan-900 dark:text-cyan-400 dark:hover:text-white"
+          >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>

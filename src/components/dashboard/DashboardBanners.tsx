@@ -48,6 +48,7 @@ export function GlobalToast({ globalToast, handleOpenReview, setGlobalToast }: G
           e.stopPropagation();
           setGlobalToast(null);
         }}
+        aria-label="Đóng thông báo"
         className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 p-1"
       >
         <X className="w-4 h-4" />

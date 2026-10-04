@@ -20,7 +20,8 @@ function isBackedUpKey(key: string): boolean {
   return key.startsWith(KEY_PREFIX) && !EXCLUDED_KEYS.has(key);
 }
 
-function readLocalEntries(): Array<[string, string]> {
+/** null when localStorage can't be read (never treat that as "every key was deleted") */
+function readLocalEntries(): Array<[string, string]> | null {
   const entries: Array<[string, string]> = [];
   try {
     for (let i = 0; i < localStorage.length; i++) {
@@ -29,7 +30,9 @@ function readLocalEntries(): Array<[string, string]> {
       const value = localStorage.getItem(key);
       if (value !== null) entries.push([key, value]);
     }
-  } catch {}
+  } catch {
+    return null;
+  }
   return entries;
 }
 
@@ -54,13 +57,25 @@ export async function restoreLocalStorageFromDb(): Promise<number> {
 }
 
 /**
- * Write changed keys to SQLite.
+ * Write changed keys to SQLite and drop rows for keys removed from localStorage
+ * (otherwise restore would bring deleted keys back on the next start).
  */
 export async function backupLocalStorageToDb(): Promise<void> {
-  const changed = readLocalEntries().filter(([key, value]) => lastBackedUp.get(key) !== value);
-  if (changed.length === 0) return;
+  const local = readLocalEntries();
+  if (!local) return;
+  const changed = local.filter(([key, value]) => lastBackedUp.get(key) !== value);
+  const present = new Set(local.map(([key]) => key));
+  const removed = [...lastBackedUp.keys()].filter((key) => !present.has(key));
+  if (changed.length === 0 && removed.length === 0) return;
 
   const db = await getDatabase();
+  if (removed.length > 0) {
+    const placeholders = removed.map((_, i) => `$${i + 1}`).join(", ");
+    await db.execute(`DELETE FROM app_kv WHERE key IN (${placeholders});`, removed);
+    for (const key of removed) lastBackedUp.delete(key);
+  }
+  if (changed.length === 0) return;
+
   const now = new Date().toISOString();
   const params: unknown[] = [];
   const rows = changed.map(([key, value], i) => {
@@ -76,6 +91,7 @@ export async function backupLocalStorageToDb(): Promise<void> {
   for (const [key, value] of changed) lastBackedUp.set(key, value);
 }
 
+/** Run only in the main window after a successful restore (other windows share localStorage). */
 export function startLocalStorageBackup(): void {
   if (backupTimer !== null) return;
   const run = () => {

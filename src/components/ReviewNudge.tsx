@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { BookOpen, Clock, Play } from "lucide-react";
 import {
@@ -26,17 +27,34 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const [animationKey, setAnimationKey] = useState(0);
   const hoveredRef = useRef(false);
   const actedRef = useRef(false);
+  const lastNudgeIdRef = useRef<number | null>(null);
+  // First frame of a new reminder: no width transition, so the bar doesn't animate 0→100%
+  const [freshBar, setFreshBar] = useState(false);
 
-  const begin = useCallback((next: ReviewNudgePayload) => {
+  const begin = useCallback((next: ReviewNudgePayload & { nudgeId?: number }) => {
+    // The same reminder can arrive both by event and by take_review_nudge_payload
+    if (next.nudgeId !== undefined) {
+      if (next.nudgeId === lastNudgeIdRef.current) return;
+      lastNudgeIdRef.current = next.nudgeId;
+    }
     actedRef.current = false;
+    hoveredRef.current = false; // the window may have hidden before mouseleave fired
     setPayload(next);
     setSecondsLeft(next.autoOpenSeconds);
+    setFreshBar(true);
     setAnimationKey((k) => k + 1); // replay the slide-in for every reminder
   }, []);
+
+  useEffect(() => {
+    if (!freshBar) return;
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setFreshBar(false)));
+    return () => cancelAnimationFrame(id);
+  }, [freshBar]);
 
   const finish = useCallback(async (action: "start" | "snooze") => {
     if (actedRef.current) return;
     actedRef.current = true;
+    hoveredRef.current = false;
     setSecondsLeft(null);
     if (action === "snooze") {
       snoozeReminder();
@@ -59,6 +77,15 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         else unlisten = fn;
       })
       .catch(() => {});
+
+    // The reminder may have been emitted before this lazy chunk registered its listener
+    if ("__TAURI_INTERNALS__" in window) {
+      invoke<(ReviewNudgePayload & { nudgeId?: number }) | null>("take_review_nudge_payload")
+        .then((pending) => {
+          if (!cancelled && pending) begin(pending);
+        })
+        .catch(() => {});
+    }
 
     // Browser preview: there is no native event, start right away
     if (!("__TAURI_INTERNALS__" in window)) begin(buildNudgePayload(5));
@@ -104,9 +131,10 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
           <div className="min-w-0 flex-1">
             <div className="text-[13px] font-bold text-slate-900 dark:text-white">Đến giờ ôn tập</div>
             <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">{subtitle}</div>
-            <div className="mt-2.5 flex items-center gap-2">
+            <div className="mt-2.5 flex items-center gap-2" role="group" aria-label="Nhắc ôn tập">
               <button
                 onClick={() => finish("start")}
+                aria-label="Bắt đầu ôn tập ngay"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 !text-white text-[11px] font-semibold transition-colors"
               >
                 <Play className="w-3 h-3 fill-white" />
@@ -114,13 +142,14 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               </button>
               <button
                 onClick={() => finish("snooze")}
+                aria-label={`Hoãn nhắc ôn tập ${payload.snoozeMinutes} phút`}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 text-[11px] font-semibold transition-colors"
               >
                 <Clock className="w-3 h-3 text-amber-500" />
                 Hoãn {payload.snoozeMinutes}p
               </button>
               {secondsLeft !== null && (
-                <span className="ml-auto text-[10px] text-slate-400 dark:text-zinc-500 tabular-nums">
+                <span className="ml-auto text-[10px] text-slate-500 dark:text-zinc-500 tabular-nums">
                   Tự mở sau {secondsLeft}s
                 </span>
               )}
@@ -130,7 +159,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         {/* Countdown bar */}
         <div className="h-1 bg-slate-100 dark:bg-zinc-800">
           <div
-            className="h-full bg-cyan-500 transition-[width] duration-1000 ease-linear"
+            className={`h-full bg-cyan-500 ${freshBar ? "" : "transition-[width] duration-1000 ease-linear"}`}
             style={{ width: `${progress * 100}%` }}
           />
         </div>

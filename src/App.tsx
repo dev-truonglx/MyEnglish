@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import { getInitialWindowLabel } from "@/lib/windowLabel";
+import ErrorBoundary from "@/components/ErrorBoundary";
 // Each window (main, quick-input, review-popup) loads only the code it renders
 const QuickInput = lazy(() => import("@/components/QuickInput"));
 const MainDashboard = lazy(() => import("@/components/MainDashboard"));
@@ -11,22 +12,6 @@ const TRANSPARENT_WINDOWS = ["review-popup", "quick-input", "review-nudge"];
 import { useUpdateStore } from "@/services/updateService";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-function getInitialWindowLabel(): string {
-  try {
-    const params = new URLSearchParams(window.location.search);
-    const urlWin = params.get("window");
-    if (urlWin) return urlWin;
-
-    const current = getCurrentWebviewWindow();
-    if (current?.label) {
-      return current.label;
-    }
-  } catch (e) {
-    // Browser preview mode fallback
-  }
-  return "main";
-}
 
 // Synchronously apply transparent window styles before React render
 if (typeof document !== "undefined") {
@@ -77,6 +62,7 @@ export default function App() {
   // When inside the Quick Input floating window
   if (windowLabel === "quick-input") {
     return (
+      <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
       <div className="w-screen h-screen overflow-hidden flex items-center justify-center bg-transparent">
         <Suspense fallback={null}>
         <QuickInput
@@ -98,12 +84,14 @@ export default function App() {
         />
         </Suspense>
       </div>
+      </ErrorBoundary>
     );
   }
 
   // When inside the corner reminder window
   if (windowLabel === "review-nudge") {
     return (
+      <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
       <Suspense fallback={null}>
         <ReviewNudge
           onDone={() => {
@@ -113,12 +101,14 @@ export default function App() {
           }}
         />
       </Suspense>
+      </ErrorBoundary>
     );
   }
 
   // When inside the Review Popup floating window
   if (windowLabel === "review-popup") {
     return (
+      <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
       <Suspense fallback={null}>
         <FocusReviewModal
           onClose={() => {
@@ -128,16 +118,19 @@ export default function App() {
           }}
         />
       </Suspense>
+      </ErrorBoundary>
     );
   }
 
   // When inside the Main Dashboard window
   return (
-    <Suspense fallback={null}>
-      <MainDashboard
-        onOpenQuickInputPreview={() => setWindowLabel("quick-input")}
-        onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
-      />
-    </Suspense>
+    <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
+      <Suspense fallback={null}>
+        <MainDashboard
+          onOpenQuickInputPreview={() => setWindowLabel("quick-input")}
+          onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
+        />
+      </Suspense>
+    </ErrorBoundary>
   );
 }

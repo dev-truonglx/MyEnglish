@@ -4,7 +4,7 @@ import { initReviewLogsTable } from "./smartReview";
 import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -38,6 +38,14 @@ export async function getDatabase(): Promise<Database> {
  * Creates required tables and indexes if they don't exist.
  */
 export async function initSchema(db: Database): Promise<void> {
+  // Every window runs this on startup at the same time: when the schema is already current,
+  // skip the CREATE/ALTER work (it only takes write locks) and do just the cheap repair.
+  const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
+  if ((versionRows[0]?.user_version ?? 0) >= SCHEMA_VERSION) {
+    await repairMissingSrsRows(db);
+    return;
+  }
+
   // 1. Words table
   await db.execute(`
     CREATE TABLE IF NOT EXISTS words (
@@ -130,8 +138,14 @@ export async function initSchema(db: Database): Promise<void> {
   `);
 
   await runMigrations(db);
+  await repairMissingSrsRows(db);
 
-  // Repair words left without an SRS row (e.g. a write failed halfway); otherwise they would never become due
+  // Initialize review_logs table for response time & exercise type tracking
+  await initReviewLogsTable(db);
+}
+
+/** Repair words left without an SRS row (e.g. a write failed halfway); otherwise they would never become due */
+async function repairMissingSrsRows(db: Database): Promise<void> {
   try {
     await db.execute(`
       INSERT INTO srs_reviews (word_id, next_review_date)
@@ -140,9 +154,6 @@ export async function initSchema(db: Database): Promise<void> {
   } catch (e) {
     console.warn("SRS row repair notice:", e);
   }
-
-  // Initialize review_logs table for response time & exercise type tracking
-  await initReviewLogsTable(db);
 }
 
 /**
@@ -285,6 +296,12 @@ async function runMigrations(db: Database): Promise<void> {
   if (version < 5) {
     // CEFR level of the term (from AI enrichment), used to keep content and assessment level-accurate
     await tryExec(`ALTER TABLE words ADD COLUMN cefr_level TEXT;`);
+  }
+
+  if (version < 6) {
+    // The v1 dedupe deleted words without their review logs; drop those orphans
+    await initReviewLogsTable(db);
+    await tryExec(`DELETE FROM review_logs WHERE word_id NOT IN (SELECT id FROM words);`);
   }
 
   if (version < SCHEMA_VERSION) {
