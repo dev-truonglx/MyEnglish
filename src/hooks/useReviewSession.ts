@@ -284,7 +284,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       const isScheduled = !practiceMode && !scheduledThisSessionRef.current.has(cardKey);
       const result = isScheduled ? await recordReview(currentWord.id, rating, currentWord.direction) : null;
       if (isScheduled) scheduledThisSessionRef.current.add(cardKey);
-      recordDailyActivity(1);
+      // Only the first answer to a card counts toward the daily goal (retries after Again don't)
+      if (!isRequeuedCard) recordDailyActivity(1);
       if (result) setLastResult(result);
       setReviewCount((prev) => prev + 1);
 
@@ -362,7 +363,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       return;
     }
 
-    const match = matchTypedAnswer(userInput, currentWord.word);
+    const clozeSentence = effectiveExerciseType === "cloze" ? currentWord.examples[0]?.sentence_en : undefined;
+    const match = matchTypedAnswer(userInput, currentWord.word, clozeSentence);
     const matched = match !== "wrong";
 
     if (matched) {

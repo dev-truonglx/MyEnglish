@@ -718,8 +718,8 @@ class SRSBackgroundWorker {
         return;
       }
 
-      // Gentle start: a small corner card that doesn't take focus; it opens the review on its own
-      // after a countdown unless the user snoozes it (triggerReviewNudge records the display time)
+      // Gentle start: a small corner card that doesn't take focus; the user opens the review from it,
+      // otherwise it snoozes itself after a countdown (triggerReviewNudge records the display time)
       const dueCount = await countDueWords();
       await triggerReviewNudge(dueCount);
     } catch (err) {

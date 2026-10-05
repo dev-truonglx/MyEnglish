@@ -129,6 +129,45 @@ export function snoozeReminder(customMinutes?: number): number {
   return minutes;
 }
 
+const IGNORED_NUDGES_KEY = "myenglish_ignored_nudges_v1";
+
+/** Reminders in a row that timed out without an answer (reset as soon as the user responds) */
+export function getIgnoredNudgeCount(): number {
+  try {
+    const n = parseInt(localStorage.getItem(IGNORED_NUDGES_KEY) || "0", 10);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function resetIgnoredNudges(): void {
+  try {
+    localStorage.removeItem(IGNORED_NUDGES_KEY);
+  } catch {}
+}
+
+/**
+ * Snooze length after `ignoredBefore` reminders were already ignored in a row: doubles each time
+ * (10 -> 20 -> 40 min) so a busy user is not nagged every few minutes, but never longer than the
+ * normal reminder interval.
+ */
+export function ignoredNudgeSnoozeMinutes(ignoredBefore: number, snoozeMinutes: number, intervalMinutes: number): number {
+  const cap = Math.max(snoozeMinutes, intervalMinutes || snoozeMinutes);
+  return Math.min(cap, snoozeMinutes * 2 ** Math.min(ignoredBefore, 10));
+}
+
+/** The reminder timed out unanswered: snooze it with backoff. Returns the minutes snoozed. */
+export function snoozeIgnoredNudge(): number {
+  const settings = getReminderSettings();
+  const ignored = getIgnoredNudgeCount();
+  const minutes = ignoredNudgeSnoozeMinutes(ignored, settings.snoozeMinutes ?? 10, settings.intervalMinutes);
+  try {
+    localStorage.setItem(IGNORED_NUDGES_KEY, String(ignored + 1));
+  } catch {}
+  return snoozeReminder(minutes);
+}
+
 /**
  * Cancel active snooze
  */

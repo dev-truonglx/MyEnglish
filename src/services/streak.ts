@@ -15,6 +15,59 @@ export interface StreakStats {
   dailyGoal: number;
   goalReached: boolean;
   goalPercentage: number;
+  /** Streak freezes in stock: a missed day is covered automatically while one is left */
+  freezesAvailable: number;
+  /** Missed days inside the current streak that a freeze covered */
+  frozenDates: string[];
+  /** Words with a card due right now, when known (0 = everything due was reviewed) */
+  dueRemaining: number | null;
+}
+
+/** Every this many active days in a streak earns one freeze ... */
+export const FREEZE_EVERY_DAYS = 7;
+/** ... up to this many in stock */
+export const MAX_FREEZES = 2;
+
+export interface StreakResult {
+  current: number;
+  longest: number;
+  freezes: number;
+  frozenDates: string[];
+}
+
+/**
+ * Streak over local dates with activity. Today without activity yet does not break it.
+ * Each FREEZE_EVERY_DAYS active days earn a freeze (max MAX_FREEZES) that covers one missed day,
+ * so one busy day does not wipe out weeks of habit. Frozen days keep the streak but don't add to it.
+ */
+export function computeStreak(activeDates: Iterable<string>, today: Date = new Date()): StreakResult {
+  const active = new Set(activeDates);
+  const todayStr = getLocalDateString(today);
+  const sorted = Array.from(active).filter((d) => d <= todayStr).sort();
+  const result: StreakResult = { current: 0, longest: 0, freezes: 0, frozenDates: [] };
+  if (sorted.length === 0) return result;
+
+  const [y, m, d] = sorted[0].split("-").map(Number);
+  const day = new Date(y, m - 1, d);
+  let activeInRun = 0;
+  for (let s = getLocalDateString(day); s <= todayStr; day.setDate(day.getDate() + 1), s = getLocalDateString(day)) {
+    if (active.has(s)) {
+      result.current++;
+      activeInRun++;
+      if (activeInRun % FREEZE_EVERY_DAYS === 0) result.freezes = Math.min(MAX_FREEZES, result.freezes + 1);
+    } else if (s !== todayStr) {
+      if (result.current > 0 && result.freezes > 0) {
+        result.freezes--;
+        result.frozenDates.push(s);
+      } else {
+        result.current = 0;
+        activeInRun = 0;
+        result.frozenDates = [];
+      }
+    }
+    result.longest = Math.max(result.longest, result.current);
+  }
+  return result;
 }
 
 /**
@@ -107,89 +160,34 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
   } catch {}
 }
 
-export function calculateStreakAndGoal(words: WordDetail[]): StreakStats {
+/**
+ * Streak (with freezes) and today's goal. The goal is reached with `dailyGoal` answers, or as soon
+ * as every due word has been reviewed today (`dueRemaining` = 0): nothing left to do is a success.
+ */
+export function calculateStreakAndGoal(words: WordDetail[], dueRemaining: number | null = null): StreakStats {
   const logs = getActivityLogs();
   const activityMap = new Map<string, number>();
-
-  // 1. Incorporate study logs (reviews, spelling, cloze)
   for (const [dateStr, count] of Object.entries(logs)) {
     activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + count);
   }
-
-  // 2. Word creation is no longer counted here (AI auto-replenish would keep the streak alive
-  //    without studying). Manual adds are logged by the pipeline; past days are backfilled once.
+  // Word creation is no longer counted here (AI auto-replenish would keep the streak alive
+  // without studying). Manual adds are logged by the pipeline; past days are backfilled once.
   backfillActivityFromWordsOnce(words, activityMap);
 
-  const todayStr = getLocalDateString();
-  const todayCount = activityMap.get(todayStr) || 0;
+  const todayCount = activityMap.get(getLocalDateString()) || 0;
   const dailyGoal = getDailyGoal();
-
-  // 3. Compute current streak (consecutive days backwards)
-  let curStreak = 0;
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const checkDate = new Date(today);
-  const todayHasActivity = (activityMap.get(todayStr) || 0) > 0;
-
-  if (todayHasActivity) {
-    curStreak++;
-    checkDate.setDate(checkDate.getDate() - 1);
-  } else {
-    // If today has no activity yet, check yesterday to keep streak active
-    checkDate.setDate(checkDate.getDate() - 1);
-  }
-
-  while (true) {
-    const dStr = getLocalDateString(checkDate);
-    const count = activityMap.get(dStr) || 0;
-    if (count > 0) {
-      curStreak++;
-      checkDate.setDate(checkDate.getDate() - 1);
-    } else {
-      break;
-    }
-  }
-
-  // 4. Compute longest streak
-  const sortedDates = Array.from(activityMap.keys())
-    .filter((d) => (activityMap.get(d) || 0) > 0)
-    .sort();
-
-  let maxStreak = 0;
-  let tempStreak = 0;
-  let prevDate: Date | null = null;
-
-  for (const dateStr of sortedDates) {
-    const [y, m, d] = dateStr.split("-").map(Number);
-    const curDate = new Date(y, m - 1, d);
-    if (!prevDate) {
-      tempStreak = 1;
-    } else {
-      const diffDays = Math.round(
-        (curDate.getTime() - prevDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
-      if (diffDays === 1) {
-        tempStreak++;
-      } else if (diffDays > 1) {
-        tempStreak = 1;
-      }
-    }
-    if (tempStreak > maxStreak) {
-      maxStreak = tempStreak;
-    }
-    prevDate = curDate;
-  }
-
-  const finalLongest = Math.max(curStreak, maxStreak);
-  const goalPercentage = Math.min(100, Math.round((todayCount / dailyGoal) * 100));
+  const streak = computeStreak(Array.from(activityMap.keys()).filter((d) => (activityMap.get(d) || 0) > 0));
+  const goalReached = todayCount >= dailyGoal || (dueRemaining === 0 && todayCount > 0);
 
   return {
-    currentStreak: curStreak,
-    longestStreak: finalLongest,
+    currentStreak: streak.current,
+    longestStreak: streak.longest,
     todayCount,
     dailyGoal,
-    goalReached: todayCount >= dailyGoal,
-    goalPercentage,
+    goalReached,
+    goalPercentage: goalReached ? 100 : Math.min(100, Math.round((todayCount / dailyGoal) * 100)),
+    freezesAvailable: streak.freezes,
+    frozenDates: streak.frozenDates,
+    dueRemaining,
   };
 }

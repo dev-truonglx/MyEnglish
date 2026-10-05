@@ -1,7 +1,8 @@
 import { Play, Bell, CheckCircle, Flame, Folder, Tag } from "lucide-react";
 import { checkAndNotifyDueReviews } from "@/services/srs";
 import { useWordsStore } from "@/stores/wordsStore";
-import { DUE_LIST_LIMIT, type LibraryStats } from "./shared";
+import { DUE_LIST_LIMIT, PAGE_CONTAINER, type LibraryStats } from "./shared";
+import WeeklyProgressCard from "../WeeklyProgressCard";
 
 interface ReviewTabProps {
   dueCount: number;
@@ -37,13 +38,15 @@ export default function ReviewTab({
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 max-w-2xl mx-auto w-full space-y-6">
+    <div className={`${PAGE_CONTAINER} space-y-6`}>
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Spaced Repetition Review</h2>
         <p className="text-xs text-slate-500 dark:text-zinc-400">
           Powered by FSRS. Optimal recall timing tailored to your memory strength.
         </p>
       </div>
+
+      <WeeklyProgressCard words={words} />
 
       {/* Status Banner */}
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-gradient-to-r dark:from-zinc-900 dark:via-zinc-900/90 dark:to-zinc-950 p-6 space-y-4 shadow-sm">

@@ -388,8 +388,16 @@ export default function Sidebar({
               <Flame className="w-3.5 h-3.5 text-orange-400" />
               <span>Streak & Tiến độ</span>
             </span>
-            <span className="font-mono text-orange-600 dark:text-orange-400 text-xs font-bold">
-              🔥 {streakStats.currentStreak} ngày
+            <span className="font-mono text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1.5">
+              <span>🔥 {streakStats.currentStreak} ngày</span>
+              {streakStats.freezesAvailable > 0 && (
+                <span
+                  className="text-sky-600 dark:text-sky-400"
+                  title={`${streakStats.freezesAvailable} lượt giữ chuỗi: nếu lỡ 1 ngày, chuỗi vẫn được giữ. Học 7 ngày liên tục để nhận thêm (tối đa 2).`}
+                >
+                  🧊{streakStats.freezesAvailable}
+                </span>
+              )}
             </span>
           </div>
 
@@ -398,7 +406,9 @@ export default function Sidebar({
             <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-400">
               <span>Mục tiêu hôm nay</span>
               <span>
-                {streakStats.todayCount}/{streakStats.dailyGoal} từ
+                {streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
+                  ? "Đã ôn hết từ đến hạn ✓"
+                  : `${streakStats.todayCount}/${streakStats.dailyGoal} từ`}
               </span>
             </div>
             <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">

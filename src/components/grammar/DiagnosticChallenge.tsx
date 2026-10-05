@@ -25,7 +25,7 @@ import {
   smartPrepareGrammarExercises,
   recordGrammarExerciseAttempt,
 } from "@/services/grammarService";
-import { normalizeTypedText } from "@/services/smartReview";
+import { isGrammarAnswerCorrect } from "@/services/smartReview";
 import { generateGrammarExercisesWithGemini } from "@/services/ai";
 import SyntaxHighlighter from "./SyntaxHighlighter";
 
@@ -192,21 +192,8 @@ export default function DiagnosticChallenge({
     async (userAnswer: string) => {
       if (isEvaluated || !currentExercise) return;
 
-      // Same normalization on both sides: case, curly quotes, contractions, punctuation, whitespace
-      const normUser = normalizeTypedText(userAnswer);
-      const rawTargets: string[] = [];
-      if (Array.isArray(currentExercise.correctAnswer)) {
-        rawTargets.push(...currentExercise.correctAnswer);
-      } else if (currentExercise.correctAnswer) {
-        rawTargets.push(currentExercise.correctAnswer);
-      }
-      if (currentExercise.errorWord) {
-        rawTargets.push(currentExercise.errorWord);
-      }
-
-      const targets = rawTargets.map((a) => normalizeTypedText(a));
-
-      const correct = normUser.length > 0 && targets.some((t) => t === normUser);
+      // Answer alone or the whole filled-in sentence; contractions, case and punctuation ignored
+      const correct = isGrammarAnswerCorrect(userAnswer, currentExercise);
       setIsCorrect(correct);
       setIsEvaluated(true);
       lastEvaluatedTime.current = Date.now();

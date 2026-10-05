@@ -106,7 +106,8 @@ export default function MainDashboard({
   const effectiveLevel = currentProficiency.effectiveLevel;
 
   const streakStats = useMemo(() => {
-    return calculateStreakAndGoal(words);
+    // Reviewing everything due today also completes the daily goal
+    return calculateStreakAndGoal(words, words.filter((w) => isWordDue(w)).length);
   }, [words, activityVersion]);
 
   const handleCopyCode = (code: string) => {

@@ -18,6 +18,7 @@ import {
 } from "@/services/grammarService";
 import type { GrammarLevel, GrammarProgress } from "@/types/grammar";
 import GrammarLessonView from "./GrammarLessonView";
+import { PAGE_CONTAINER } from "../dashboard/shared";
 
 export default function GrammarHub() {
   const [selectedLevel, setSelectedLevel] = useState<string>("all");
@@ -126,7 +127,7 @@ export default function GrammarHub() {
 
   if (activeLesson) {
     return (
-      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div className={`${PAGE_CONTAINER} space-y-6`}>
         <GrammarLessonView
           lesson={activeLesson}
           initialTab={activeLessonInitialTab}
@@ -138,7 +139,7 @@ export default function GrammarHub() {
   }
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+    <div className={`${PAGE_CONTAINER} space-y-6`}>
       {/* ─── HEADER HERO BANNER ─── */}
       <div className="relative rounded-3xl p-6 md:p-8 overflow-hidden border border-cyan-200 dark:border-cyan-800/40 bg-gradient-to-br from-cyan-500/10 via-emerald-500/5 to-transparent shadow-sm">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">

@@ -28,7 +28,9 @@ import { getAchievements } from "@/services/achievements";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 import Heatmap from "./Heatmap";
+import { PAGE_CONTAINER } from "./dashboard/shared";
 import ProficiencyAssessmentCard from "./ProficiencyAssessmentCard";
+import WeeklyProgressCard from "./WeeklyProgressCard";
 
 interface AnalyticsViewProps {
   words: WordDetail[];
@@ -114,7 +116,7 @@ export default function AnalyticsView({
   const unlockedCount = achievements.filter((a) => a.isUnlocked).length;
 
   return (
-    <div className="flex-1 overflow-y-auto p-4 md:p-8 max-w-5xl mx-auto w-full space-y-8 animate-in fade-in duration-200">
+    <div className={`${PAGE_CONTAINER} space-y-8 animate-in fade-in duration-200`}>
       {/* Header Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-zinc-800 pb-6">
         <div>
@@ -229,6 +231,8 @@ export default function AnalyticsView({
           </p>
         </div>
       </div>
+
+      <WeeklyProgressCard words={words} />
 
       {/* Heatmap Widget */}
       <div className="space-y-3">

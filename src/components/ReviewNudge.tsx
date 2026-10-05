@@ -5,6 +5,8 @@ import { BookOpen, Clock, Play } from "lucide-react";
 import {
   buildNudgePayload,
   hideReviewNudge,
+  resetIgnoredNudges,
+  snoozeIgnoredNudge,
   snoozeReminder,
   triggerReviewPopup,
   type ReviewNudgePayload,
@@ -17,15 +19,21 @@ interface ReviewNudgeProps {
 
 /**
  * Corner reminder shown before the full review popup. It never takes keyboard focus.
- * - "Bắt đầu" opens the review now
+ * - "Học ngay" opens the review now
  * - "Hoãn" snoozes the reminder
- * - ignoring it: the review opens by itself when the countdown ends (paused while hovered)
+ * - ignoring it: the reminder is snoozed when the countdown ends (paused while the pointer is on it)
  */
+const TICK_MS = 250;
+
 export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const [payload, setPayload] = useState<ReviewNudgePayload>(() => buildNudgePayload(0));
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [animationKey, setAnimationKey] = useState(0);
-  const hoveredRef = useRef(false);
+  // Browser-preview fallback only: > 0 while the pointer is over the card
+  const hoverAtRef = useRef(0);
+  // Wall-clock moment the countdown ends; pushed back while hovered
+  const deadlineRef = useRef(0);
+  const lastTickRef = useRef(0);
   const actedRef = useRef(false);
   const lastNudgeIdRef = useRef<number | null>(null);
   // First frame of a new reminder: no width transition, so the bar doesn't animate 0→100%
@@ -38,7 +46,9 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       lastNudgeIdRef.current = next.nudgeId;
     }
     actedRef.current = false;
-    hoveredRef.current = false; // the window may have hidden before mouseleave fired
+    hoverAtRef.current = 0; // the window may have hidden before mouseleave fired
+    deadlineRef.current = Date.now() + next.autoOpenSeconds * 1000;
+    lastTickRef.current = Date.now();
     setPayload(next);
     setSecondsLeft(next.autoOpenSeconds);
     setFreshBar(true);
@@ -51,15 +61,21 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     return () => cancelAnimationFrame(id);
   }, [freshBar]);
 
-  const finish = useCallback(async (action: "start" | "snooze") => {
+  // "timeout" = nobody answered: snoozed with a growing delay; any click resets that delay
+  const finish = useCallback(async (action: "start" | "snooze" | "timeout") => {
     if (actedRef.current) return;
     actedRef.current = true;
-    hoveredRef.current = false;
+    hoverAtRef.current = 0;
     setSecondsLeft(null);
-    if (action === "snooze") {
+    if (action === "timeout") {
+      snoozeIgnoredNudge();
+      await hideReviewNudge();
+    } else if (action === "snooze") {
+      resetIgnoredNudges();
       snoozeReminder();
       await hideReviewNudge();
     } else {
+      resetIgnoredNudges();
       // show_review_popup also hides this card
       await triggerReviewPopup();
     }
@@ -96,18 +112,46 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     };
   }, [begin]);
 
-  // Countdown: one tick per second, skipped while the pointer is over the card (reading/deciding)
+  // Countdown against a wall-clock deadline, so ticks throttled by the OS for a background,
+  // non-focused window are caught up instead of silently lost. The deadline is pushed back while
+  // the cursor is over the card. Hover comes from the native cursor position (DOM mouseleave is
+  // unreliable on a non-key transparent window); in a browser preview it falls back to DOM events.
   const running = secondsLeft !== null;
   useEffect(() => {
     if (!running) return;
-    const timer = setInterval(() => {
-      if (!hoveredRef.current) setSecondsLeft((s) => (s === null ? s : Math.max(0, s - 1)));
-    }, 1000);
+    const native = "__TAURI_INTERNALS__" in window;
+    let busy = false;
+    const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        let hovered: boolean;
+        if (native) {
+          hovered = await invoke<boolean>("is_cursor_over_nudge").catch(() => hoverAtRef.current > 0);
+        } else {
+          hovered = hoverAtRef.current > 0;
+        }
+        if (actedRef.current) return;
+        const now = Date.now();
+        const elapsed = now - lastTickRef.current;
+        lastTickRef.current = now;
+        if (hovered) {
+          deadlineRef.current += elapsed;
+          return;
+        }
+        const left = Math.max(0, Math.ceil((deadlineRef.current - now) / 1000));
+        setSecondsLeft((s) => (s === null || s === left ? s : left));
+      } finally {
+        busy = false;
+      }
+    };
+    const timer = setInterval(tick, TICK_MS);
     return () => clearInterval(timer);
   }, [running]);
 
+  // Nobody answered: default to snoozing
   useEffect(() => {
-    if (secondsLeft === 0) finish("start");
+    if (secondsLeft === 0) finish("timeout");
   }, [secondsLeft, finish]);
 
   const progress = secondsLeft === null ? 0 : secondsLeft / payload.autoOpenSeconds;
@@ -121,8 +165,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       <div
         key={animationKey}
         className="nudge-enter w-full rounded-2xl border border-slate-200/80 dark:border-zinc-700/80 bg-white/95 dark:bg-zinc-900/95 backdrop-blur shadow-xl overflow-hidden"
-        onMouseEnter={() => (hoveredRef.current = true)}
-        onMouseLeave={() => (hoveredRef.current = false)}
+        onMouseEnter={() => (hoverAtRef.current = Date.now())}
+        onMouseLeave={() => (hoverAtRef.current = 0)}
       >
         <div className="p-3.5 flex items-start gap-3">
           <span className="shrink-0 w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white flex items-center justify-center shadow-sm">
@@ -134,11 +178,11 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
             <div className="mt-2.5 flex items-center gap-2" role="group" aria-label="Nhắc ôn tập">
               <button
                 onClick={() => finish("start")}
-                aria-label="Bắt đầu ôn tập ngay"
+                aria-label="Học ngay"
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 !text-white text-[11px] font-semibold transition-colors"
               >
                 <Play className="w-3 h-3 fill-white" />
-                Bắt đầu
+                Học ngay
               </button>
               <button
                 onClick={() => finish("snooze")}
@@ -150,7 +194,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               </button>
               {secondsLeft !== null && (
                 <span className="ml-auto text-[10px] text-slate-500 dark:text-zinc-500 tabular-nums">
-                  Tự mở sau {secondsLeft}s
+                  Tự hoãn sau {secondsLeft}s
                 </span>
               )}
             </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
+import { normalizeTypedText, prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
 
 interface SentenceBuilderExerciseProps {
   word: WordDetail;
@@ -97,20 +97,9 @@ export default function SentenceBuilderExercise({
     if (lastCheckedKeyRef.current === currentKey) return;
     lastCheckedKeyRef.current = currentKey;
 
-    const constructed = placedTokens.map((t) => t.text).join(" ").trim().toLowerCase();
-    const target = data.fullSentence.trim().toLowerCase();
-
-    // Remove punctuation from both for flexible comparison and normalize whitespace
-    const cleanConstructed = constructed
-      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-    const cleanTarget = target
-      .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-
-    const matched = cleanConstructed === cleanTarget;
+    // Case, punctuation, spacing and contractions ("doesn't" = "does not") are ignored
+    const constructed = placedTokens.map((t) => t.text).join(" ");
+    const matched = normalizeTypedText(constructed) === normalizeTypedText(data.fullSentence);
 
     if (matched) {
       setIsCorrect(true);

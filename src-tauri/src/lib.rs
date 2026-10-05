@@ -961,6 +961,20 @@ fn take_review_nudge_payload() -> Option<serde_json::Value> {
     LAST_NUDGE_PAYLOAD.lock().ok().and_then(|mut last| last.take())
 }
 
+/// Whether the mouse cursor is over the reminder card. Polled by the card to pause its countdown:
+/// DOM mouseenter/mouseleave are unreliable on this non-focusable transparent window.
+#[tauri::command]
+fn is_cursor_over_nudge(app: AppHandle) -> bool {
+    let Some(window) = app.get_webview_window("review-nudge") else { return false };
+    let (Ok(cursor), Ok(pos), Ok(size)) = (window.cursor_position(), window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    cursor.x >= pos.x as f64
+        && cursor.x < pos.x as f64 + size.width as f64
+        && cursor.y >= pos.y as f64
+        && cursor.y < pos.y as f64 + size.height as f64
+}
+
 #[tauri::command]
 fn hide_review_nudge(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window("review-nudge") {
@@ -1681,6 +1695,7 @@ pub fn run() {
             hide_review_popup,
             show_review_nudge,
             hide_review_nudge,
+            is_cursor_over_nudge,
             take_review_nudge_payload,
             prepare_update_exit,
             cancel_update_exit,

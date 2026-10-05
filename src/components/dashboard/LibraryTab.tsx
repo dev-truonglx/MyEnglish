@@ -5,7 +5,7 @@ import { useWordsStore } from "@/stores/wordsStore";
 import WordTableView from "../WordTableView";
 import WordCard, { type WordCardMeta } from "./WordCard";
 import TopicFilters from "./TopicFilters";
-import { GALLERY_PAGE_SIZE, handleSpeak, type DashboardTab, type FilterMode, type ViewMode } from "./shared";
+import { GALLERY_PAGE_SIZE, PAGE_CONTAINER, handleSpeak, type DashboardTab, type FilterMode, type ViewMode } from "./shared";
 
 interface LibraryTabProps {
   message: string | null;
@@ -49,7 +49,7 @@ export default function LibraryTab({
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 space-y-6">
+    <div className={`${PAGE_CONTAINER} space-y-6`}>
       {/* Notification alert if any */}
       {message && (
         <div className="p-3 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-800 dark:bg-cyan-950/40 dark:border-cyan-800 dark:text-cyan-300 text-xs flex items-center justify-between">

@@ -10,6 +10,8 @@ import {
   normalizeTypedText,
   prepareContextMatch,
   contractionVariants,
+  fillPromptBlanks,
+  isGrammarAnswerCorrect,
 } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { makeWord, reviewSrs, freshServices } from "./helpers";
@@ -52,6 +54,56 @@ describe("matchTypedAnswer", () => {
     ["", "deploy", "wrong"],
   ])("%s vs %s -> %s", (input, target, expected) => {
     expect(matchTypedAnswer(input, target)).toBe(expected);
+  });
+});
+
+describe("matchTypedAnswer leniency", () => {
+  it("treats contractions and curly quotes as the same plain word", () => {
+    expect(matchTypedAnswer("do not", "don't")).toBe("exact");
+    expect(matchTypedAnswer("don’t", "don't")).toBe("exact");
+  });
+
+  it("keeps symbols strict", () => {
+    expect(matchTypedAnswer("c", "c++")).toBe("wrong");
+  });
+
+  it("accepts the whole context sentence", () => {
+    const sentence = "We deploy every Friday.";
+    expect(matchTypedAnswer("we deploy every friday", "deploy", sentence)).toBe("exact");
+    expect(matchTypedAnswer("we ship every friday", "deploy", sentence)).toBe("wrong");
+  });
+});
+
+describe("fillPromptBlanks", () => {
+  it("fills brackets, hinted blanks and several blanks in order", () => {
+    expect(fillPromptBlanks("She [not work] on Sunday.", "doesn't work")).toBe("She doesn't work on Sunday.");
+    expect(fillPromptBlanks("It usually _____ (take) five minutes.", "takes")).toBe("It usually takes five minutes.");
+    expect(fillPromptBlanks("Send me _____ link to _____ docs.", "the / the")).toBe("Send me the link to the docs.");
+    expect(fillPromptBlanks("Send me _____ link to _____ docs.", "the")).toBeNull();
+    expect(fillPromptBlanks("Rewrite this sentence.", "x")).toBeNull();
+  });
+});
+
+describe("isGrammarAnswerCorrect", () => {
+  const ex = { type: "conjugation", promptEn: "She [not work] on Sunday.", correctAnswer: "doesn't work" };
+
+  it.each([
+    "doesn't work",
+    "does not work",
+    "she does not work on sunday",
+    "She doesn’t work on Sunday.",
+  ])("accepts %s", (input) => {
+    expect(isGrammarAnswerCorrect(input, ex)).toBe(true);
+  });
+
+  it.each(["", "don't work", "she do not work on sunday", "she does not works on sunday"])("rejects %s", (input) => {
+    expect(isGrammarAnswerCorrect(input, ex)).toBe(false);
+  });
+
+  it("does not treat error-spotting tokens as blanks", () => {
+    const spot = { type: "error_spotting", promptEn: "My team [lead] [don't] [approve] code.", correctAnswer: "don't", errorWord: "don't" };
+    expect(isGrammarAnswerCorrect("don't", spot)).toBe(true);
+    expect(isGrammarAnswerCorrect("My team don't don't don't code", spot)).toBe(false);
   });
 });
 

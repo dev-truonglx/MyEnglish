@@ -52,6 +52,7 @@ import {
   type BlurOverlayLevel,
   type GrammarLevel,
 } from "@/services/reminderSettings";
+import { PAGE_CONTAINER } from "./dashboard/shared";
 
 interface CliStatus {
   installed: boolean;
@@ -308,7 +309,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-6 md:p-8 max-w-4xl mx-auto w-full space-y-6">
+    <div className={`${PAGE_CONTAINER} space-y-6`}>
 
       {/* Top Header */}
       <div className="space-y-1">
@@ -1082,7 +1083,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       Tự hoãn pop-up khi có ứng dụng toàn màn hình (trình chiếu, video, họp), khi đang chia sẻ màn
                       hình Zoom, khi bật Focus/Không làm phiền (nếu macOS cho phép đọc) hoặc khi bạn rời máy quá 5
                       phút. Khi đến giờ, một thẻ nhỏ hiện ở góc màn hình (không chiếm bàn phím) lúc bạn tạm dừng
-                      thao tác; bỏ qua thì bài ôn tự mở sau 20 giây, bấm Hoãn để dời lại.
+                      thao tác; bỏ qua thì thẻ tự hoãn sau 20 giây, bấm Học ngay để mở bài ôn.
                     </span>
                   </span>
                   <input

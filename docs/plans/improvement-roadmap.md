@@ -143,6 +143,25 @@
 
 ---
 
+## E. Đợt rà soát 2026-10-05: popup, ghi nhớ và động lực học
+
+Đã làm, có test (`test/popupSession.test.ts`, `test/progress.test.ts`) và kiểm tra trên giao diện:
+
+- ✅ **Giới thiệu từ mới trước khi hỏi:** popup hiện thẻ giới thiệu (từ, nghĩa, ví dụ, phát âm) trước câu hỏi đầu tiên của từ mới.
+  Flashcard ở chế độ trộn luôn dùng thẻ lật cho từ mới. Xem `needsIntro` (`src/services/popupSession.ts`) và `selectExerciseType`.
+- ✅ **Đáp án nhiễu hợp lý:** popup dùng `generateMultipleChoiceQuestion`, ưu tiên cùng chủ đề rồi cùng từ loại.
+- ✅ **Chấm điểm popup giống flashcard:** `popupAnswerRating` dùng `deriveRating` (chậm hoặc gõ gần đúng → Hard).
+- ✅ **Thẻ nhắc bị bỏ qua thì hoãn lũy tiến** 10 → 20 → 40 phút, tối đa bằng chu kỳ nhắc. Bấm bất kỳ nút nào thì reset.
+  Xem `snoozeIgnoredNudge` trong `reminderSettings.ts`.
+- ✅ **Phản hồi khi sai:** hiện từ đã chọn nhầm và nghĩa của nó, câu ví dụ có tô đậm kèm bản dịch, mẹo nhớ nếu đã có.
+- ✅ **Chuỗi ngày học có "đóng băng":** cứ 7 ngày học được 1 lượt, giữ tối đa 2 (`computeStreak`). Mục tiêu ngày cũng đạt khi đã
+  ôn hết từ đến hạn. Chỉ câu trả lời đầu tiên của mỗi thẻ được tính vào mục tiêu.
+- ✅ **Tóm tắt cuối phiên popup** (số câu đúng ngay lần đầu, mỗi từ gặp lại sau bao lâu) và thẻ **"Tuần này"** (lượt trả lời, số từ,
+  số ngày học, tỉ lệ nhớ thực tế so với mục tiêu, số từ nhớ chắc). Thẻ này nằm ở tab Review và Analytics.
+- ✅ **Thử thách chủ đề hằng tuần:** trả lời đúng N câu của chủ đề còn nhiều từ chưa thuộc nhất, hoàn thành được +50 XP
+  (`getTopicChallenge`).
+- ✅ Sửa lỗi: bấm Enter hai lần nhanh trong popup từng nhảy qua mất một câu.
+
 ## Còn tồn đọng từ đợt rà soát
 
 - **CSP cho webview** (`tauri.conf.json` → `security.csp` đang là `null`): cần chạy app thật để kiểm tra, vì `index.html` có inline script. Gợi ý: `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; connect-src 'self' ipc: http://ipc.localhost`.

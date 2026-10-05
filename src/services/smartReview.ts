@@ -392,11 +392,20 @@ export type TypedAnswerMatch = "exact" | "near" | "wrong";
  * Compare a typed answer with the target word.
  * "near" = one-letter typo on words of 5+ letters, or a simple inflection (s/es/ed/d/ing) of the target.
  */
-export function matchTypedAnswer(input: string, target: string): TypedAnswerMatch {
+export function matchTypedAnswer(input: string, target: string, sentence?: string): TypedAnswerMatch {
   const guess = input.trim().toLowerCase().replace(/\s+/g, " ");
   const answer = target.trim().toLowerCase().replace(/\s+/g, " ");
   if (!guess) return "wrong";
   if (guess === answer) return "exact";
+  // Symbols matter for terms like "c++" / "c#", so only loosen the match for plain words:
+  // case, curly quotes, contractions ("don't" = "do not"), punctuation and spacing
+  const isPlainWord = /^[a-z\s'\u2019-]+$/i.test(target.trim());
+  const normGuess = normalizeTypedText(input);
+  if (isPlainWord && normGuess === normalizeTypedText(target)) return "exact";
+  // The learner retyped the whole context sentence (which contains the word) instead of the blank
+  if (sentence && new RegExp(wordFormsPattern(target), "i").test(sentence) && normGuess === normalizeTypedText(sentence)) {
+    return "exact";
+  }
   if (/^(s|es|ed|d|ing)$/.test(guess.startsWith(answer) ? guess.slice(answer.length) : "")) return "near";
   if (answer.length >= 5 && editDistance(guess, answer, 1) <= 1) return "near";
   return "wrong";
@@ -834,10 +843,10 @@ export function selectExerciseType(card: WordDetail & { direction?: CardDirectio
     return withExamples(["cloze", "spelling", "listening"], ["spelling", "listening"]);
   }
 
-  // Recognition: understand the word when reading/hearing it
-  if (state === 0 || reps === 0) {
-    return withExamples(["flip", "multiple_choice", "context_match"], ["flip", "multiple_choice"]);
-  }
+  // Recognition: understand the word when reading/hearing it.
+  // A brand-new word is shown first (flip card): quizzing a word never seen means guessing, and a
+  // lucky guess would be graded Good and push the next review too far.
+  if (state === 0 || reps === 0) return "flip";
   if (state === 1 || state === 3 || isLeech(card.srs)) {
     return withExamples(["multiple_choice", "sentence_builder", "flip"], ["multiple_choice", "flip"]);
   }
@@ -894,33 +903,25 @@ export function generateMultipleChoiceQuestion(
     (w) => w.id !== targetWord.id && w.word.trim().toLowerCase() !== targetWord.word.trim().toLowerCase()
   );
 
-  // Group others by topic priority
+  // Plausible distractors are harder to rule out: same topic first, then same part of speech.
+  // Shuffled before the (stable) sort so equally similar words are picked at random.
   const targetTopic = (targetWord.topic || "").toLowerCase();
-  const sameTopicOthers = otherWords.filter((w) => (w.topic || "").toLowerCase() === targetTopic);
-  const diffTopicOthers = otherWords.filter((w) => (w.topic || "").toLowerCase() !== targetTopic);
-
-  // Shuffle pools
-  const shuffledSame = [...sameTopicOthers].sort(() => 0.5 - Math.random());
-  const shuffledDiff = [...diffTopicOthers].sort(() => 0.5 - Math.random());
+  const targetPos = (targetWord.part_of_speech || "").toLowerCase();
+  const similarity = (w: WordDetail) =>
+    ((w.topic || "").toLowerCase() === targetTopic ? 2 : 0) +
+    (targetPos && (w.part_of_speech || "").toLowerCase() === targetPos ? 1 : 0);
+  const ranked = [...otherWords]
+    .sort(() => 0.5 - Math.random())
+    .sort((x, y) => similarity(y) - similarity(x));
 
   // Displayed text of an option; options that look identical to another one are skipped
   const displayKey = (w: WordDetail) =>
     (promptType === "en_to_vn" ? cleanMeaningForOption(w.meaning_vn) : w.word).trim().toLowerCase();
   const usedTexts = new Set<string>([displayKey(targetWord)]);
 
-  // Pick up to 2 from same topic, rest from other
   const selectedDistractors: WordDetail[] = [];
-  while (selectedDistractors.length < 3) {
-    let next: WordDetail | undefined;
-    if (shuffledSame.length > 0 && selectedDistractors.length < 2) {
-      next = shuffledSame.pop()!;
-    } else if (shuffledDiff.length > 0) {
-      next = shuffledDiff.pop()!;
-    } else if (shuffledSame.length > 0) {
-      next = shuffledSame.pop()!;
-    } else {
-      break;
-    }
+  for (const next of ranked) {
+    if (selectedDistractors.length >= 3) break;
     const key = displayKey(next);
     if (!key || usedTexts.has(key)) continue;
     usedTexts.add(key);
@@ -1193,6 +1194,50 @@ export function normalizeTypedText(text: string): string {
     .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** A blank in a grammar prompt: "[not work]" or "_____" with an optional "(verb)" hint */
+const PROMPT_BLANK_RE = /\[[^\]]*\]|_{3,}(?:\s*\([^)]*\))?/g;
+
+/**
+ * The prompt with its blank(s) filled by `answer`, or null when it has no blank.
+ * Several blanks take the "/"-separated parts in order ("a / the").
+ */
+export function fillPromptBlanks(prompt: string, answer: string): string | null {
+  const blanks = prompt.match(PROMPT_BLANK_RE);
+  if (!blanks) return null;
+  const parts = blanks.length === 1 ? [answer] : answer.split(/\s*\/\s*/);
+  if (parts.length !== blanks.length) return null;
+  let i = 0;
+  return prompt.replace(PROMPT_BLANK_RE, () => parts[i++]);
+}
+
+interface GradableExercise {
+  type: string;
+  promptEn: string;
+  correctAnswer: string | string[];
+  errorWord?: string;
+}
+
+/**
+ * Whether a typed or picked answer solves a grammar exercise. Accepts the answer alone or the whole
+ * sentence with it filled in ("She does not work on Sunday." for "She [not work] on Sunday."),
+ * with contractions, case, curly quotes, punctuation and spacing ignored.
+ */
+export function isGrammarAnswerCorrect(input: string, ex: GradableExercise): boolean {
+  const user = normalizeTypedText(input);
+  if (!user) return false;
+  const answers = (Array.isArray(ex.correctAnswer) ? ex.correctAnswer : [ex.correctAnswer]).filter(Boolean);
+  if (ex.errorWord) answers.push(ex.errorWord);
+  const targets = answers.map(normalizeTypedText);
+  // In error spotting the brackets mark clickable words, not a blank to fill
+  if (ex.type !== "error_spotting") {
+    for (const a of answers) {
+      const sentence = fillPromptBlanks(ex.promptEn, a);
+      if (sentence) targets.push(normalizeTypedText(sentence));
+    }
+  }
+  return targets.includes(user);
 }
 
 /** Full form -> contraction pairs used to show equivalent answers ("does not" / "doesn't") */
