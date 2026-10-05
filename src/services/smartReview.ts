@@ -481,7 +481,7 @@ export async function getWordReviewLogs(wordId: string, limit: number = 20): Pro
     timestamp: string;
     is_scheduled: number | null;
   }>>(
-    `SELECT * FROM review_logs WHERE word_id = $1 ORDER BY timestamp DESC LIMIT $2`,
+    `SELECT id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled FROM review_logs WHERE word_id = $1 ORDER BY timestamp DESC LIMIT $2`,
     [wordId, limit]
   );
   return rows.map((r) => ({

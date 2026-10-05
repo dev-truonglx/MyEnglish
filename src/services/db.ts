@@ -8,6 +8,50 @@ const SCHEMA_VERSION = 6;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
+/** Columns selected for Word records */
+export const WORD_COLUMNS = [
+  "id",
+  "word",
+  "phonetic",
+  "part_of_speech",
+  "meaning_vn",
+  "image_url",
+  "synonyms",
+  "antonyms",
+  "collocations",
+  "code_snippet",
+  "topic",
+  "cefr_level",
+  "created_at",
+].join(", ");
+
+/** Columns selected for WordExample records */
+export const EXAMPLE_COLUMNS = [
+  "id",
+  "word_id",
+  "sentence_en",
+  "sentence_vn",
+  "grammar_analysis",
+].join(", ");
+
+/** Columns selected for SRSReview records */
+export const SRS_COLUMNS = [
+  "word_id",
+  "ease_factor",
+  "interval",
+  "repetitions",
+  "next_review_date",
+  "stability",
+  "difficulty",
+  "elapsed_days",
+  "scheduled_days",
+  "reps",
+  "lapses",
+  "state",
+  "last_review",
+  "learning_steps",
+].join(", ");
+
 /**
  * Initialize and get the database connection singleton.
  */
@@ -38,10 +82,10 @@ export async function getDatabase(): Promise<Database> {
  * Creates required tables and indexes if they don't exist.
  */
 export async function initSchema(db: Database): Promise<void> {
-  // Every window runs this on startup at the same time: when the schema is already current,
-  // skip the CREATE/ALTER work (it only takes write locks) and do just the cheap repair.
+  // Check current schema version
   const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
-  if ((versionRows[0]?.user_version ?? 0) >= SCHEMA_VERSION) {
+  const currentVersion = versionRows[0]?.user_version ?? 0;
+  if (currentVersion >= SCHEMA_VERSION) {
     await repairMissingSrsRows(db);
     return;
   }
@@ -52,10 +96,15 @@ export async function initSchema(db: Database): Promise<void> {
       id TEXT PRIMARY KEY,
       word TEXT NOT NULL,
       phonetic TEXT,
+      part_of_speech TEXT,
       meaning_vn TEXT NOT NULL,
       image_url TEXT,
       synonyms TEXT,
       antonyms TEXT,
+      collocations TEXT,
+      code_snippet TEXT,
+      topic TEXT DEFAULT 'General Tech',
+      cefr_level TEXT,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -104,7 +153,12 @@ export async function initSchema(db: Database): Promise<void> {
       lapses INTEGER DEFAULT 0,
       last_attempt_date TIMESTAMP,
       next_review_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-      streak INTEGER DEFAULT 0
+      streak INTEGER DEFAULT 0,
+      first_try_bonus INTEGER DEFAULT 0,
+      stability REAL DEFAULT 0,
+      difficulty REAL DEFAULT 0,
+      fsrs_state INTEGER DEFAULT 0,
+      last_review TIMESTAMP
     );
   `);
 
@@ -374,7 +428,7 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
 
   // 1. Check if word already exists in SQLite
   const existingList = await db.select<Word[]>(
-    `SELECT * FROM words WHERE LOWER(TRIM(word)) = $1 LIMIT 1;`,
+    `SELECT ${WORD_COLUMNS} FROM words WHERE LOWER(TRIM(word)) = $1 LIMIT 1;`,
     [cleanWord]
   );
 
@@ -602,9 +656,9 @@ function defaultSrsFor(word: Word): SRSReview {
 async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, params: unknown[]): Promise<WordDetail[]> {
   if (words.length === 0) return [];
   const [examples, srsRows, productionRows] = await Promise.all([
-    db.select<WordExample[]>(`SELECT * FROM examples WHERE word_id IN (${wordFilterSql});`, params),
-    db.select<SRSReview[]>(`SELECT * FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
-    db.select<SRSReview[]>(`SELECT * FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<WordExample[]>(`SELECT ${EXAMPLE_COLUMNS} FROM examples WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
   ]);
 
   const examplesByWord = new Map<string, WordExample[]>();
@@ -629,7 +683,7 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
  */
 export async function getAllWords(): Promise<WordDetail[]> {
   const db = await getDatabase();
-  const words = await db.select<Word[]>(`SELECT * FROM words ORDER BY created_at DESC;`);
+  const words = await db.select<Word[]>(`SELECT ${WORD_COLUMNS} FROM words ORDER BY created_at DESC;`);
   return hydrateWords(db, words, `SELECT id FROM words`, []);
 }
 
@@ -645,7 +699,7 @@ export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDet
     UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
     UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)`;
   const words = await db.select<Word[]>(
-    `SELECT * FROM words WHERE id IN (${dueFilter}) ORDER BY created_at DESC;`,
+    `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) ORDER BY created_at DESC;`,
     [nowIso]
   );
   return hydrateWords(db, words, dueFilter, [nowIso]);

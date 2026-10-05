@@ -10,7 +10,7 @@ import {
   GenSeedStrategyWithCardId,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getAllWords, getDueWordsFromDb, countDueWords } from "./db";
+import { getDatabase, getAllWords, getDueWordsFromDb, countDueWords, SRS_COLUMNS } from "./db";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 
 export { Rating, State };
@@ -290,12 +290,12 @@ export async function recordReview(
   //    production card yet (still learning by recognition) is recorded on the recognition card.
   let direction = requestedDirection;
   let srsRows = await db.select<SRSReview[]>(
-    `SELECT * FROM ${SRS_TABLE[direction]} WHERE word_id = $1 LIMIT 1;`,
+    `SELECT ${SRS_COLUMNS} FROM ${SRS_TABLE[direction]} WHERE word_id = $1 LIMIT 1;`,
     [wordId]
   );
   if (direction === "production" && srsRows.length === 0) {
     direction = "recognition";
-    srsRows = await db.select<SRSReview[]>(`SELECT * FROM srs_reviews WHERE word_id = $1 LIMIT 1;`, [wordId]);
+    srsRows = await db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id = $1 LIMIT 1;`, [wordId]);
   }
   const current = srsRows[0] || {
     word_id: wordId,

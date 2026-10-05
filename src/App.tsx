@@ -10,6 +10,7 @@ const ReviewNudge = lazy(() => import("@/components/ReviewNudge"));
 /** Floating windows rendered over other apps on a transparent background */
 const TRANSPARENT_WINDOWS = ["review-popup", "quick-input", "review-nudge"];
 import { useUpdateStore } from "@/services/updateService";
+import { syncAutostartWithSystem } from "@/services/autostartService";
 
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
@@ -28,11 +29,11 @@ export default function App() {
   const [windowLabel, setWindowLabel] = useState<string>(getInitialWindowLabel);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
 
-  // Check for updates on startup and every 6 hours, only in the main window
-  // (the popup/quick-input windows share the same app and would repeat the check)
+  // Check for updates and sync autostart on startup in the main window
   useEffect(() => {
     if (windowLabel !== "main") return;
     checkForUpdates();
+    syncAutostartWithSystem();
     const timer = window.setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [checkForUpdates, windowLabel]);

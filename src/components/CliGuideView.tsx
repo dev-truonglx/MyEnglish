@@ -21,7 +21,13 @@ import {
   Hourglass,
   Sparkles,
   GraduationCap,
+  Power,
 } from "lucide-react";
+import {
+  getSavedAutostartPreference,
+  setAutostartEnabled,
+  checkSystemAutostartStatus,
+} from "@/services/autostartService";
 import {
   sendTestNotification,
   markWordDueImmediately,
@@ -71,6 +77,10 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [testingNotif, setTestingNotif] = useState(false);
   const [testingDueWord, setTestingDueWord] = useState(false);
   const [testingPopup, setTestingPopup] = useState(false);
+
+  // Autostart state
+  const [autostart, setAutostart] = useState<boolean>(() => getSavedAutostartPreference());
+  const [togglingAutostart, setTogglingAutostart] = useState(false);
 
   // Reminder settings state
   const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(getReminderSettings());
@@ -155,15 +165,45 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     };
     syncSettings();
 
+    // Check system autostart status
+    checkSystemAutostartStatus().then((active) => {
+      setAutostart(active);
+    });
+
+    const onAutostartChanged = (e: Event) => {
+      const custom = e as CustomEvent<{ enabled: boolean }>;
+      if (custom.detail?.enabled !== undefined) {
+        setAutostart(custom.detail.enabled);
+      }
+    };
+    window.addEventListener("myenglish-autostart-changed", onAutostartChanged);
+
     window.addEventListener("myenglish-reminder-settings-updated", syncSettings);
     window.addEventListener("myenglish-popup-displayed", syncSettings);
     const interval = setInterval(syncSettings, 1000);
     return () => {
+      window.removeEventListener("myenglish-autostart-changed", onAutostartChanged);
       window.removeEventListener("myenglish-reminder-settings-updated", syncSettings);
       window.removeEventListener("myenglish-popup-displayed", syncSettings);
       clearInterval(interval);
     };
   }, []);
+
+  const handleToggleAutostart = async (checked: boolean) => {
+    setTogglingAutostart(true);
+    setAutostart(checked);
+    const ok = await setAutostartEnabled(checked);
+    setTogglingAutostart(false);
+    if (ok) {
+      setNotifFeedback(
+        checked
+          ? "Đã bật tự khởi động cùng hệ điều hành (mặc định mở khay hệ thống)."
+          : "Đã tắt tự khởi động cùng hệ điều hành."
+      );
+    } else {
+      setNotifFeedback("Đã lưu thiết lập vào ứng dụng.");
+    }
+  };
 
   const handleUpdateReminder = (partial: Partial<ReminderSettings>) => {
     const updated = saveReminderSettings(partial);
@@ -790,6 +830,55 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       {/* TAB 2: NOTIFICATION & FOCUS REVIEW SETTINGS */}
       {activeGuideTab === "notification" && (
         <div className="space-y-6 animate-in fade-in duration-150">
+          {/* SECTION 0: AUTOSTART SYSTEM SETTING */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white shadow-md shadow-rose-500/20">
+                  <Power className="w-5 h-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Tự khởi động cùng hệ điều hành
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                      Mặc định: Bật
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                    Tự động mở MyEnglish khi khởi động máy tính để không bỏ lỡ lịch nhắc từ vựng và phím tắt tra từ nhanh
+                  </p>
+                </div>
+              </div>
+
+              {/* Autostart Toggle */}
+              <button
+                type="button"
+                disabled={togglingAutostart}
+                onClick={() => handleToggleAutostart(!autostart)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 ${
+                  autostart
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    autostart ? "bg-white animate-pulse" : "bg-slate-400"
+                  }`}
+                />
+                <span>
+                  {togglingAutostart
+                    ? "Đang cập nhật..."
+                    : autostart
+                    ? "Tự khởi động: Bật"
+                    : "Tự khởi động: Tắt"}
+                </span>
+              </button>
+            </div>
+          </div>
+
           {/* SECTION 1: SETTINGS & SCHEDULE CONFIGURATION */}
           <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-6 shadow-sm">
             <div className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 dark:border-zinc-800 pb-4">

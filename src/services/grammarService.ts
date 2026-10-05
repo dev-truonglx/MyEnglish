@@ -150,7 +150,9 @@ async function runGrammarInit(): Promise<void> {
         } catch {}
       }
 
-      const rows = await db.select<GrammarProgressRow[]>("SELECT * FROM grammar_progress");
+      const rows = await db.select<GrammarProgressRow[]>(
+        "SELECT lesson_id, diagnostic_status, score, mastery, reps, lapses, last_attempt_date, next_review_date, streak, first_try_bonus, stability, difficulty, fsrs_state, last_review FROM grammar_progress"
+      );
       const fromDb: Record<string, GrammarProgress> = {};
       for (const row of rows || []) {
         fromDb[row.lesson_id] = {
@@ -825,7 +827,7 @@ export async function getCustomGrammarExercisesForLessons(
     const db = await getDatabase();
     const placeholders = lessonIds.map((_, i) => `$${i + 1}`).join(", ");
     const rows = await db.select<CustomExerciseRow[]>(
-      `SELECT * FROM grammar_custom_exercises WHERE lesson_id IN (${placeholders}) ORDER BY created_at ASC;`,
+      `SELECT id, lesson_id, type, prompt_en, prompt_vn, hint, options, correct_answer, error_word, explanation, created_at FROM grammar_custom_exercises WHERE lesson_id IN (${placeholders}) ORDER BY created_at ASC;`,
       lessonIds
     );
     for (const row of rows) {
