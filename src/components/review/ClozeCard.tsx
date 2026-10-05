@@ -91,6 +91,13 @@ export default function ClozeCard({
                   }}
                   disabled={isAdvancing}
                   readOnly={isCorrect === true}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-gramm="false"
+                  data-enable-grammarly="false"
+                  data-lpignore="true"
                   placeholder={`Gõ từ còn thiếu (${currentWord.word.length} ký tự) và nhấn Enter ↵`}
                   className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-xl px-4 py-3 text-base font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-wide shadow-sm transition-all ${
                     isCorrect

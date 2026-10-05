@@ -178,7 +178,11 @@ export default function ListeningDictationExercise({
             placeholder="Gõ từ bạn nghe được và nhấn Enter..."
             autoComplete="off"
             autoCorrect="off"
-            spellCheck="false"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-gramm="false"
+            data-enable-grammarly="false"
+            data-lpignore="true"
             className={`w-full px-5 py-4 rounded-xl text-center text-lg md:text-xl font-mono font-bold tracking-wider outline-none transition-all ${
               isCorrect === true
                 ? "border-2 border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-200"

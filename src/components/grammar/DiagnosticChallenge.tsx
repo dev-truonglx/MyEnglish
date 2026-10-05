@@ -672,6 +672,13 @@ export default function DiagnosticChallenge({
                   value={typedAnswer}
                   onChange={(e) => setTypedAnswer(e.target.value)}
                   disabled={isEvaluated}
+                  autoComplete="off"
+                  autoCorrect="off"
+                  autoCapitalize="off"
+                  spellCheck={false}
+                  data-gramm="false"
+                  data-enable-grammarly="false"
+                  data-lpignore="true"
                   placeholder={
                     currentExercise.type === "conjugation"
                       ? "Nhập dạng đúng của động từ..."

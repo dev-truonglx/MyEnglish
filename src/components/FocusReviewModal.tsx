@@ -1225,6 +1225,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         type="text"
                         autoFocus
                         disabled={isAnswered}
+                        autoComplete="off"
+                        autoCorrect="off"
+                        autoCapitalize="off"
+                        spellCheck={false}
+                        data-gramm="false"
+                        data-enable-grammarly="false"
+                        data-lpignore="true"
                         value={typedInput}
                         onChange={(e) => setTypedInput(e.target.value)}
                         placeholder="Gõ từ tiếng Anh vào đây..."
@@ -1460,6 +1467,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                           type="text"
                           autoFocus
                           disabled={isAnswered}
+                          autoComplete="off"
+                          autoCorrect="off"
+                          autoCapitalize="off"
+                          spellCheck={false}
+                          data-gramm="false"
+                          data-enable-grammarly="false"
+                          data-lpignore="true"
                           value={typedInput}
                           onChange={(e) => setTypedInput(e.target.value)}
                           placeholder="Nhập từ hoặc đáp án chính xác..."
