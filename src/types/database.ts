@@ -58,12 +58,21 @@ export interface SRSReview {
   learning_steps?: number; // Current (re)learning step index, required by ts-fsrs v5 short-term scheduling
 }
 
+export interface WordAttemptStats {
+  totalAttempts: number;
+  correctCount: number;
+  wrongCount: number;
+  accuracy: number; // 0 - 100
+}
+
 export interface WordDetail extends Word {
   examples: WordExample[];
   /** Recognition card (EN -> VN): flip, multiple choice, context match... */
   srs: SRSReview;
   /** Production card (recall the English word): spelling, cloze, dictation. Created once recognition graduates. */
   srsProduction?: SRSReview | null;
+  /** Aggregated quiz attempts and accuracy from review_logs / FSRS */
+  stats?: WordAttemptStats;
 }
 
 /**

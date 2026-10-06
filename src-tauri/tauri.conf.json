@@ -55,8 +55,8 @@
       {
         "label": "review-nudge",
         "title": "MyEnglish Reminder",
-        "width": 380,
-        "height": 132,
+        "width": 400,
+        "height": 230,
         "visible": false,
         "decorations": false,
         "transparent": true,

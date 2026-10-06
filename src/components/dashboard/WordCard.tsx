@@ -1,7 +1,9 @@
 import { memo } from "react";
-import { Volume2, Trash2, ChevronRight, Tag } from "lucide-react";
+import { Volume2, Trash2, ChevronRight, Tag, Clock, Sparkles } from "lucide-react";
 import { parseTerms, type WordDetail } from "@/types/database";
 import { getRetrievabilityInfo } from "@/services/smartReview";
+import { getNextReviewDate } from "@/services/cards";
+import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 
 const EMPTY_TERMS: ReturnType<typeof parseTerms> = [];
 
@@ -18,21 +20,40 @@ interface WordCardProps {
   onSelect: (word: WordDetail) => void;
   onSpeak: (text: string, e?: React.MouseEvent) => void;
   onDelete: (wordId: string, wordText: string, e?: React.MouseEvent) => void;
+  onOpenTrajectory?: (word: WordDetail) => void;
 }
 
 // Memoized gallery card; derived data is precomputed by the parent
-const WordCard = memo(function WordCard({ item, meta, isSelected, onSelect, onSpeak, onDelete }: WordCardProps) {
+const WordCard = memo(function WordCard({
+  item,
+  meta,
+  isSelected,
+  onSelect,
+  onSpeak,
+  onDelete,
+  onOpenTrajectory,
+}: WordCardProps) {
   const synonyms = meta?.synonyms ?? EMPTY_TERMS;
   const rInfo = meta?.rInfo ?? getRetrievabilityInfo(item.srs);
   const leech = meta?.leech ?? false;
 
+  const isNew = (!item.srs.reps && !item.srs.repetitions) || item.srs.repetitions === 0;
+  const nextDate = getNextReviewDate(item);
+  const relativeInfo = formatNextReviewRelative(nextDate, isNew);
+
+  const total = item.stats?.totalAttempts ?? (item.srs.repetitions || 0);
+  const wrong = item.stats?.wrongCount ?? (item.srs.lapses || 0);
+  const correct = item.stats?.correctCount ?? Math.max(0, total - wrong);
+  const accuracy = item.stats?.accuracy ?? (total > 0 ? Math.round((correct / total) * 100) : 0);
+
   return (
     <div
       onClick={() => onSelect(item)}
-      className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${isSelected
-        ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
-        : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
-        }`}
+      className={`group relative rounded-2xl border p-4 cursor-pointer transition-all flex flex-col justify-between ${
+        isSelected
+          ? "bg-cyan-50/60 dark:bg-zinc-900 border-cyan-500 dark:border-cyan-500/80 shadow-lg shadow-cyan-500/10 dark:shadow-cyan-950/50 ring-1 ring-cyan-500/50"
+          : "bg-white dark:bg-zinc-900/60 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 hover:bg-slate-50/80 dark:hover:bg-zinc-900/90 shadow-sm"
+      }`}
     >
       <div className="space-y-3">
         {/* Word header & actions */}
@@ -79,15 +100,24 @@ const WordCard = memo(function WordCard({ item, meta, isSelected, onSelect, onSp
           <div className="flex items-center gap-1 shrink-0 flex-wrap justify-end">
             {/* Leech Badge */}
             {leech && (
-              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse" title={`Leech: ${item.srs.lapses ?? 0} lần quên`}>
+              <span
+                className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse"
+                title={`Leech: ${item.srs.lapses ?? 0} lần quên`}
+              >
                 🐛
               </span>
             )}
             {/* Retrievability Mini Indicator */}
             {rInfo.level !== "new" && (
-              <span className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`} title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}>
-                <span className={`w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block`}>
-                  <span className={`block h-full ${rInfo.colorClass} rounded-full`} style={{ width: `${rInfo.percent}%` }} />
+              <span
+                className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`}
+                title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}
+              >
+                <span className="w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block">
+                  <span
+                    className={`block h-full ${rInfo.colorClass} rounded-full`}
+                    style={{ width: `${rInfo.percent}%` }}
+                  />
                 </span>
                 {rInfo.percent}%
               </span>
@@ -103,6 +133,41 @@ const WordCard = memo(function WordCard({ item, meta, isSelected, onSelect, onSp
               <Trash2 className="w-3.5 h-3.5" />
             </button>
           </div>
+        </div>
+
+        {/* Schedule & History Banner */}
+        <div className="flex items-center justify-between gap-2 pt-1 flex-wrap">
+          {/* Relative Next Review Badge (clickable for trajectory) */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenTrajectory?.(item);
+            }}
+            title={`Lịch nhắc lại: ${relativeInfo.label} (${relativeInfo.exactDateStr}). Bấm để xem lộ trình nhắc lại.`}
+            className={`text-[10px] font-mono px-2.5 py-1 rounded-full border flex items-center gap-1.5 transition-all hover:scale-105 ${relativeInfo.badgeClass}`}
+          >
+            <Clock className="w-3 h-3 opacity-80" />
+            <span>{relativeInfo.label}</span>
+            <Sparkles className="w-3 h-3 text-cyan-500" />
+          </button>
+
+          {/* Attempts & Accuracy Stat Badge */}
+          {total > 0 ? (
+            <div
+              className="flex items-center gap-1.5 text-[10px] font-mono bg-slate-50 dark:bg-zinc-950/70 px-2 py-1 rounded-md border border-slate-200/80 dark:border-zinc-800/80"
+              title={`Lịch sử: ${total} lần ôn (${correct} đúng · ${wrong} sai - ${accuracy}% chính xác)`}
+            >
+              <span className="text-slate-500 dark:text-zinc-400 font-semibold">{total} lần:</span>
+              <span className="text-emerald-600 dark:text-emerald-400 font-bold">{correct}✓</span>
+              <span className="text-slate-300 dark:text-zinc-700">/</span>
+              <span className="text-rose-600 dark:text-rose-400 font-bold">{wrong}✗</span>
+              <span className="text-cyan-600 dark:text-cyan-400 font-semibold">({accuracy}%)</span>
+            </div>
+          ) : (
+            <span className="text-[10px] font-mono text-slate-400 dark:text-zinc-600">
+              Chưa làm bài tập
+            </span>
+          )}
         </div>
 
         {/* First Example preview */}

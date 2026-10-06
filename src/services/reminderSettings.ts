@@ -48,15 +48,29 @@ export const NUDGE_AUTO_OPEN_SECONDS = 20;
 /** Rough time per popup question, used for the "~N phút" estimate */
 const SECONDS_PER_QUESTION = 20;
 
+import type { DuoMotivationState, MicroQuizQuestion } from "./duoMotivation";
+import {
+  getConsecutiveSkipCount,
+  incrementConsecutiveSkipCount,
+  resetConsecutiveSkipCount,
+} from "./duoMotivation";
+
 export interface ReviewNudgePayload {
   dueCount: number;
   sessionSize: number;
   estimatedMinutes: number;
   autoOpenSeconds: number;
   snoozeMinutes: number;
+  consecutiveSkips?: number;
+  motivation?: DuoMotivationState;
+  microQuiz?: MicroQuizQuestion | null;
 }
 
-export function buildNudgePayload(dueCount: number, settings: ReminderSettings = getReminderSettings()): ReviewNudgePayload {
+export function buildNudgePayload(
+  dueCount: number,
+  settings: ReminderSettings = getReminderSettings(),
+  extra?: Partial<ReviewNudgePayload>
+): ReviewNudgePayload {
   const sessionSize = Math.max(3, settings.wordsPerSession || 3);
   return {
     dueCount,
@@ -64,6 +78,8 @@ export function buildNudgePayload(dueCount: number, settings: ReminderSettings =
     estimatedMinutes: Math.max(1, Math.ceil((sessionSize * SECONDS_PER_QUESTION) / 60)),
     autoOpenSeconds: NUDGE_AUTO_OPEN_SECONDS,
     snoozeMinutes: settings.snoozeMinutes ?? 10,
+    consecutiveSkips: getConsecutiveSkipCount(),
+    ...extra,
   };
 }
 
@@ -126,6 +142,7 @@ export function snoozeReminder(customMinutes?: number): number {
   const minutes = customMinutes ?? settings.snoozeMinutes ?? 10;
   const snoozedUntil = Date.now() + minutes * 60 * 1000;
   saveReminderSettings({ snoozedUntil });
+  incrementConsecutiveSkipCount();
   return minutes;
 }
 
@@ -144,6 +161,7 @@ export function getIgnoredNudgeCount(): number {
 export function resetIgnoredNudges(): void {
   try {
     localStorage.removeItem(IGNORED_NUDGES_KEY);
+    resetConsecutiveSkipCount();
   } catch {}
 }
 
@@ -292,13 +310,17 @@ export async function triggerReviewPopup(): Promise<boolean> {
  * Show the small corner reminder (no focus stealing). Falls back to the full popup if the
  * reminder window is unavailable.
  */
-export async function triggerReviewNudge(dueCount: number): Promise<boolean> {
+export async function triggerReviewNudge(
+  dueCount: number,
+  extraPayload?: Partial<ReviewNudgePayload>
+): Promise<boolean> {
   recordPopupDisplayed(Date.now());
   const settings = getReminderSettings();
   try {
     // false = not shown (the review popup is already open)
+    const payload = buildNudgePayload(dueCount, settings, extraPayload);
     return await invoke<boolean>("show_review_nudge", {
-      payload: buildNudgePayload(dueCount, settings),
+      payload,
       preferPrimary: settings.preferPrimaryMonitor,
     });
   } catch (err) {

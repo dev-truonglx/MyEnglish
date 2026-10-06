@@ -869,7 +869,7 @@ fn get_target_monitor_for_popup(popup_win: &tauri::WebviewWindow, prefer_primary
 }
 
 /// Logical size of the nudge window (tauri.conf.json); outer_size() is in the CURRENT monitor's pixels.
-const NUDGE_WIDTH: f64 = 380.0;
+const NUDGE_WIDTH: f64 = 400.0;
 
 /// Move `window` to (dx, dy) logical points from the monitor's top-left corner.
 /// macOS: tao converts Physical values with the window's CURRENT scale factor, which lands on the

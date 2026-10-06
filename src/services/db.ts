@@ -655,10 +655,17 @@ function defaultSrsFor(word: Word): SRSReview {
  */
 async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, params: unknown[]): Promise<WordDetail[]> {
   if (words.length === 0) return [];
-  const [examples, srsRows, productionRows] = await Promise.all([
+  const [examples, srsRows, productionRows, logStats] = await Promise.all([
     db.select<WordExample[]>(`SELECT ${EXAMPLE_COLUMNS} FROM examples WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
+    db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
+      `SELECT word_id, COUNT(*) as total,
+              SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+              SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
+       FROM review_logs WHERE word_id IN (${wordFilterSql}) GROUP BY word_id;`,
+      params
+    ).catch(() => []),
   ]);
 
   const examplesByWord = new Map<string, WordExample[]>();
@@ -669,13 +676,45 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
   }
   const srsByWord = new Map(srsRows.map((row) => [row.word_id, row]));
   const productionByWord = new Map(productionRows.map((row) => [row.word_id, row]));
+  const logStatsByWord = new Map((logStats || []).map((row) => [row.word_id, row]));
 
-  return words.map((word) => ({
-    ...word,
-    examples: examplesByWord.get(word.id) ?? [],
-    srs: srsByWord.get(word.id) ?? defaultSrsFor(word),
-    srsProduction: productionByWord.get(word.id) ?? null,
-  }));
+  return words.map((word) => {
+    const srs = srsByWord.get(word.id) ?? defaultSrsFor(word);
+    const prodSrs = productionByWord.get(word.id) ?? null;
+    const logStat = logStatsByWord.get(word.id);
+
+    const baseReps = (srs.reps ?? srs.repetitions ?? 0) + (prodSrs?.reps ?? prodSrs?.repetitions ?? 0);
+    const baseLapses = (srs.lapses ?? 0) + (prodSrs?.lapses ?? 0);
+
+    let totalAttempts = 0;
+    let correctCount = 0;
+    let wrongCount = 0;
+
+    if (logStat && logStat.total > 0) {
+      totalAttempts = Number(logStat.total);
+      correctCount = Number(logStat.correct || 0);
+      wrongCount = Number(logStat.wrong || 0);
+    } else if (baseReps > 0 || baseLapses > 0) {
+      totalAttempts = Math.max(baseReps, baseLapses);
+      wrongCount = baseLapses;
+      correctCount = Math.max(0, totalAttempts - wrongCount);
+    }
+
+    const accuracy = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : 0;
+
+    return {
+      ...word,
+      examples: examplesByWord.get(word.id) ?? [],
+      srs,
+      srsProduction: prodSrs,
+      stats: {
+        totalAttempts,
+        correctCount,
+        wrongCount,
+        accuracy,
+      },
+    };
+  });
 }
 
 /**

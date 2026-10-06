@@ -3,7 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
-import { getDueCards, isWordDue, practiceCards } from "@/services/cards";
+import { getDueCards, isWordDue, practiceCards, getNextReviewDate } from "@/services/cards";
+import { formatNextReviewRelative, compareNextReview, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
 import {
   getRetrievabilityInfo,
@@ -76,6 +77,7 @@ export default function MainDashboard({
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterMode, setFilterMode] = useState<FilterMode>("all");
+  const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
   const [activeTab, setActiveTab] = useState<DashboardTab>("library");
@@ -387,7 +389,7 @@ export default function MainDashboard({
   // Filter & Search Logic
   const filteredWords = useMemo(() => {
     const now = new Date(nowTick);
-    return words.filter((item) => {
+    const result = words.filter((item) => {
       // Search
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
@@ -417,9 +419,44 @@ export default function MainDashboard({
       if (filterMode === "leech") {
         return isLeech(item.srs);
       }
+
+      // Review schedule time bucket filter
+      if (reviewTimeFilter !== "all") {
+        const isNew = (!item.srs.reps && !item.srs.repetitions) || item.srs.repetitions === 0;
+        const nextDate = getNextReviewDate(item);
+        const info = formatNextReviewRelative(nextDate, isNew, now);
+        if (info.bucket !== reviewTimeFilter) {
+          return false;
+        }
+      }
+
       return true;
     });
-  }, [words, searchQuery, filterMode, selectedTopic, nowTick]);
+
+    // Default sort: words due earliest / coming up next first
+    return result.sort((a, b) => compareNextReview(a, b, now));
+  }, [words, searchQuery, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
+
+  // Counts for each review schedule bucket
+  const reviewBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
+    const now = new Date(nowTick);
+    const counts: Record<ReviewTimeBucket, number> = {
+      all: words.length,
+      due: 0,
+      today: 0,
+      "1-3d": 0,
+      "4-7d": 0,
+      future: 0,
+      new: 0,
+    };
+    for (const w of words) {
+      const isNew = (!w.srs.reps && !w.srs.repetitions) || w.srs.repetitions === 0;
+      const nextDate = getNextReviewDate(w);
+      const info = formatNextReviewRelative(nextDate, isNew, now);
+      counts[info.bucket]++;
+    }
+    return counts;
+  }, [words, nowTick]);
 
   // Single pass over words: due/learned/leech counts and per-topic {total, due}
   const libraryStats = useMemo<LibraryStats>(() => {
@@ -582,6 +619,7 @@ export default function MainDashboard({
           libraryStats={libraryStats}
           effectiveLevel={effectiveLevel}
           setGlobalToast={setGlobalToast}
+          onStartReview={() => handleStartReview(true)}
         />
 
         {/* TAB 1: VOCABULARY LIBRARY */}
@@ -600,6 +638,9 @@ export default function MainDashboard({
             setSelectedTopic={setSelectedTopic}
             availableTopics={availableTopics}
             topicStats={topicStats}
+            reviewTimeFilter={reviewTimeFilter}
+            setReviewTimeFilter={setReviewTimeFilter}
+            reviewBucketCounts={reviewBucketCounts}
             handleStartReview={handleStartReview}
             requestDeleteWord={requestDeleteWord}
             setActiveTab={setActiveTab}

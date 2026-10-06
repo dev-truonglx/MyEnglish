@@ -552,6 +552,13 @@ import {
   recordPopupDisplayed,
   getNextReminderTime,
 } from "./reminderSettings";
+import {
+  evaluateMotivationState,
+  selectMicroQuizQuestion,
+  getConsecutiveSkipCount,
+  sendDuoDesktopNotification,
+} from "./duoMotivation";
+import { computeStreak, getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -721,7 +728,43 @@ class SRSBackgroundWorker {
       // Gentle start: a small corner card that doesn't take focus; the user opens the review from it,
       // otherwise it snoozes itself after a countdown (triggerReviewNudge records the display time)
       const dueCount = await countDueWords();
-      await triggerReviewNudge(dueCount);
+      let motivation = undefined;
+      let microQuiz = undefined;
+
+      try {
+        const activityLogs = getActivityLogs();
+        const streakRes = computeStreak(Object.keys(activityLogs));
+        const todayStr = getLocalDateString();
+        const todayCount = activityLogs[todayStr] || 0;
+        const dailyGoal = getDailyGoal();
+        const consecutiveSkips = getConsecutiveSkipCount();
+
+        motivation = evaluateMotivationState({
+          dueCount,
+          consecutiveSkips,
+          streak: streakRes.current,
+          todayCount,
+          dailyGoal,
+          hour: new Date().getHours(),
+        });
+
+        const dueWords = await getDueWordsFromDb();
+        const allWords = await getAllWords();
+        microQuiz = selectMicroQuizQuestion(dueWords, allWords);
+
+        // Also trigger native OS notification if user has been skipping or during streak emergency
+        if (
+          consecutiveSkips >= 2 ||
+          motivation.tone === "level_3_streak_fomo" ||
+          motivation.tone === "level_4_drama_resignation"
+        ) {
+          sendDuoDesktopNotification(motivation, dueCount).catch(() => {});
+        }
+      } catch (err) {
+        console.warn("Error preparing Duo motivation payload:", err);
+      }
+
+      await triggerReviewNudge(dueCount, { motivation, microQuiz });
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
     } finally {

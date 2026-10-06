@@ -6,8 +6,8 @@ import {
   Zap,
   CheckCircle2,
   Clock,
-  Flame,
   RotateCw,
+  Sparkles,
 } from "lucide-react";
 import { GRAMMAR_LESSONS, getLessonById } from "@/data/grammarData";
 import {
@@ -19,14 +19,25 @@ import {
 import type { GrammarLevel, GrammarProgress } from "@/types/grammar";
 import GrammarLessonView from "./GrammarLessonView";
 import { PAGE_CONTAINER } from "../dashboard/shared";
+import ReviewTimeFilterBar from "../dashboard/ReviewTimeFilterBar";
+import ReviewTrajectoryModal from "../review/ReviewTrajectoryModal";
+import { formatNextReviewRelative, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 
 export default function GrammarHub() {
   const [selectedLevel, setSelectedLevel] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "due" | "mastered" | "learning">("all");
+  const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [searchQuery, setSearchQuery] = useState("");
   const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
   const [activeLessonInitialTab, setActiveLessonInitialTab] = useState<"diagnostic" | "practice" | "handbook">("diagnostic");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [trajectoryLesson, setTrajectoryLesson] = useState<{
+    id: string;
+    title: string;
+    titleVn: string;
+    level: string;
+    progress?: GrammarProgress;
+  } | null>(null);
 
   // Initialize storage & sync on mount
   useEffect(() => {
@@ -49,8 +60,30 @@ export default function GrammarHub() {
     return getDueGrammarLessons();
   }, [refreshTrigger]);
 
+  // Counts for each review schedule time bucket
+  const grammarBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
+    const now = new Date();
+    const counts: Record<ReviewTimeBucket, number> = {
+      all: GRAMMAR_LESSONS.length,
+      due: 0,
+      today: 0,
+      "1-3d": 0,
+      "4-7d": 0,
+      future: 0,
+      new: 0,
+    };
+    for (const lesson of GRAMMAR_LESSONS) {
+      const prog = progressMap[lesson.id];
+      const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
+      const info = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted, now);
+      counts[info.bucket]++;
+    }
+    return counts;
+  }, [progressMap]);
+
   // Filter lessons
   const filteredLessons = useMemo(() => {
+    const now = new Date();
     return GRAMMAR_LESSONS.filter((lesson) => {
       // Level filter
       if (selectedLevel !== "all" && lesson.level !== selectedLevel) {
@@ -68,6 +101,15 @@ export default function GrammarHub() {
       if (statusFilter === "mastered" && !isMastered) return false;
       if (statusFilter === "learning" && !isLearning) return false;
 
+      // Review schedule time bucket filter
+      if (reviewTimeFilter !== "all") {
+        const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
+        const info = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted, now);
+        if (info.bucket !== reviewTimeFilter) {
+          return false;
+        }
+      }
+
       // Search query
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -82,7 +124,7 @@ export default function GrammarHub() {
 
       return true;
     });
-  }, [selectedLevel, statusFilter, searchQuery, progressMap, dueLessonIds]);
+  }, [selectedLevel, statusFilter, reviewTimeFilter, searchQuery, progressMap, dueLessonIds]);
 
   const activeLesson = useMemo(() => {
     if (!activeLessonId) return null;
@@ -156,87 +198,74 @@ export default function GrammarHub() {
               <strong className="text-cyan-600 dark:text-cyan-400 font-bold">
                 Làm Bài Kiểm Tra Chẩn Đoán Trước (Diagnostic-First)
               </strong>
-              , phân tích cú pháp trực quan, so sánh đối chiếu và ôn tập lặp lại ngắt quãng (SRS).
+              , phân tích cú pháp trực quan, so sánh đối chiếu và ôn tập lặp lại ngắt quãng (SRS/FSRS).
             </p>
           </div>
 
-          {/* Quick Mastery & SRS Due Action */}
-          <div className="flex flex-col sm:flex-row md:flex-col gap-3 shrink-0">
-            <div className="p-4 rounded-2xl bg-white/90 dark:bg-zinc-900/90 border border-slate-200 dark:border-zinc-800 text-center shadow-sm space-y-1">
-              <span className="text-[11px] font-medium text-slate-500 dark:text-zinc-400">
-                Độ Thành Thạo Tổng Thể
-              </span>
-              <div className="text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono">
-                {summaryStats.overallMasteryPercent}%
+          {/* Quick Summary Pill Widget */}
+          <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-cyan-200/60 dark:border-cyan-800/40 shadow-sm shrink-0">
+            <div className="text-center">
+              <div className="text-xl md:text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono">
+                {summaryStats.masteredCount}
               </div>
-              <div className="w-36 h-2 bg-slate-200 dark:bg-zinc-800 rounded-full mx-auto overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-cyan-500 to-emerald-500 rounded-full transition-all"
-                  style={{ width: `${summaryStats.overallMasteryPercent}%` }}
-                />
+              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                Thành thạo
               </div>
             </div>
-
-            {dueLessonIds.length > 0 && (
-              <button
-                onClick={() => {
-                  setStatusFilter("due");
-                  if (dueLessonIds[0]) setActiveLessonId(dueLessonIds[0]);
-                }}
-                className="px-4 py-2.5 rounded-2xl bg-gradient-to-r from-orange-500 to-amber-500 text-white text-xs font-semibold shadow-md shadow-orange-500/20 hover:opacity-95 transition flex items-center justify-center gap-2"
-              >
-                <Flame className="w-4 h-4 fill-white" />
-                <span>Ôn tập ngay ({dueLessonIds.length} bài cần ôn)</span>
-              </button>
-            )}
+            <div className="text-center border-x border-slate-200 dark:border-zinc-800 px-3">
+              <div className="text-xl md:text-2xl font-black text-amber-500 font-mono">
+                {summaryStats.learningCount}
+              </div>
+              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                Đang học
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-xl md:text-2xl font-black text-orange-500 font-mono">
+                {dueLessonIds.length}
+              </div>
+              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
+                Cần ôn ngay
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* ─── CEFR ROADMAP LEVEL PILLS ─── */}
+      {/* ─── LEVEL SELECTOR TABS ─── */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider">
-          <span>Lộ trình các cấp độ (Roadmap)</span>
-          <span>{summaryStats.masteredCount} / {summaryStats.totalLessons} bài đã thành thạo</span>
-        </div>
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+          <button
+            onClick={() => setSelectedLevel("all")}
+            className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
+              selectedLevel === "all"
+                ? "bg-slate-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm"
+                : "bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 border border-slate-200 dark:border-zinc-800"
+            }`}
+          >
+            Tất cả cấp độ ({GRAMMAR_LESSONS.length})
+          </button>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
           {(["A1", "A2", "B1", "B2", "C1"] as GrammarLevel[]).map((lvl) => {
             const stat = summaryStats.levelStats[lvl] || { total: 0, mastered: 0, percent: 0 };
             const isSelected = selectedLevel === lvl;
-
             return (
               <button
                 key={lvl}
-                onClick={() => setSelectedLevel(isSelected ? "all" : lvl)}
-                className={`p-3 rounded-2xl border text-left transition-all ${isSelected
-                    ? "bg-cyan-50 dark:bg-cyan-950/80 border-cyan-500 ring-2 ring-cyan-400/40 shadow-sm"
-                    : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700"
-                  }`}
+                onClick={() => setSelectedLevel(lvl)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-2 border ${
+                  isSelected
+                    ? "bg-cyan-600 text-white border-cyan-600 shadow-sm font-semibold"
+                    : "bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200"
+                }`}
               >
-                <div className="flex items-center justify-between">
-                  <span className={`text-xs font-bold px-2 py-0.5 rounded border ${getLevelColor(lvl)}`}>
-                    {lvl}
-                  </span>
-                  <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
-                    {stat.mastered}/{stat.total}
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-[11px] text-slate-600 dark:text-zinc-400 font-medium">
-                    {lvl === "A1" && "Cơ bản"}
-                    {lvl === "A2" && "Sơ cấp"}
-                    {lvl === "B1" && "Trung cấp"}
-                    {lvl === "B2" && "Nâng cao"}
-                    {lvl === "C1" && "Cao cấp"}
-                  </span>
-                  <span className="text-[11px] font-bold text-slate-800 dark:text-zinc-200 font-mono">
-                    {stat.percent}%
-                  </span>
-                </div>
-                <div className="w-full h-1 bg-slate-100 dark:bg-zinc-800 rounded-full mt-1.5 overflow-hidden">
+                <span>{lvl}</span>
+                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-black/10 dark:bg-white/10">
+                  {stat.mastered}/{stat.total}
+                </span>
+                <div className="w-8 h-1.5 bg-slate-200 dark:bg-zinc-700 rounded-full overflow-hidden">
                   <div
-                    className="h-full bg-cyan-500 rounded-full transition-all"
+                    className={`h-full rounded-full ${isSelected ? "bg-white" : "bg-cyan-500"}`}
                     style={{ width: `${stat.percent}%` }}
                   />
                 </div>
@@ -247,68 +276,83 @@ export default function GrammarHub() {
       </div>
 
       {/* ─── FILTERS & SEARCH BAR ─── */}
-      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2">
-        {/* Search */}
-        <div className="relative w-full sm:w-72">
-          <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm kiếm bài học, thì, cấu trúc..."
-            className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-          />
+      <div className="space-y-2 p-3 rounded-2xl bg-slate-50/60 dark:bg-zinc-900/40 border border-slate-200/80 dark:border-zinc-800/80">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          {/* Search */}
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Tìm kiếm bài học, thì, cấu trúc..."
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
+            />
+          </div>
+
+          {/* Status Filter Pills */}
+          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+            <button
+              onClick={() => setStatusFilter("all")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
+                statusFilter === "all"
+                  ? "bg-slate-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm"
+                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+              }`}
+            >
+              Tất cả ({GRAMMAR_LESSONS.length})
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("due")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+                statusFilter === "due"
+                  ? "bg-orange-500 text-white shadow-sm"
+                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5 text-orange-400" />
+              <span>Cần ôn</span>
+              {dueLessonIds.length > 0 && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 font-bold">
+                  {dueLessonIds.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("mastered")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+                statusFilter === "mastered"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+              }`}
+            >
+              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+              <span>Thành thạo</span>
+            </button>
+
+            <button
+              onClick={() => setStatusFilter("learning")}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
+                statusFilter === "learning"
+                  ? "bg-cyan-600 text-white shadow-sm"
+                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+              }`}
+            >
+              <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
+              <span>Đang học</span>
+            </button>
+          </div>
         </div>
 
-        {/* Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-          <button
-            onClick={() => setStatusFilter("all")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${statusFilter === "all"
-                ? "bg-slate-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm"
-                : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            Tất cả ({GRAMMAR_LESSONS.length})
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("due")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${statusFilter === "due"
-                ? "bg-orange-500 text-white shadow-sm"
-                : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            <Clock className="w-3.5 h-3.5 text-orange-400" />
-            <span>Cần ôn</span>
-            {dueLessonIds.length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 font-bold">
-                {dueLessonIds.length}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("mastered")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${statusFilter === "mastered"
-                ? "bg-emerald-600 text-white shadow-sm"
-                : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Thành thạo</span>
-          </button>
-
-          <button
-            onClick={() => setStatusFilter("learning")}
-            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${statusFilter === "learning"
-                ? "bg-cyan-600 text-white shadow-sm"
-                : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Đang học</span>
-          </button>
+        {/* Review Time Schedule Filter Bar */}
+        <div className="pt-1 border-t border-slate-200/60 dark:border-zinc-800/60">
+          <ReviewTimeFilterBar
+            selectedBucket={reviewTimeFilter}
+            onSelectBucket={setReviewTimeFilter}
+            bucketCounts={grammarBucketCounts}
+          />
         </div>
       </div>
 
@@ -320,7 +364,7 @@ export default function GrammarHub() {
             Không tìm thấy bài học phù hợp
           </h3>
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Hãy thử tìm bằng từ khóa khác hoặc xóa bộ lọc cấp độ.
+            Hãy thử tìm bằng từ khóa khác hoặc xóa bộ lọc lịch nhắc lại.
           </p>
         </div>
       ) : (
@@ -330,7 +374,13 @@ export default function GrammarHub() {
             const isDue = dueLessonIds.includes(lesson.id);
             const mastery = prog?.mastery || 0;
             const isMastered = mastery >= 80;
-            const isUnattempted = !prog || prog.diagnosticStatus === "unattempted";
+            const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
+
+            const relativeInfo = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted);
+            const totalAttempts = prog?.reps || 0;
+            const wrongCount = prog?.lapses || 0;
+            const correctCount = Math.max(0, totalAttempts - wrongCount);
+            const accuracy = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : (prog?.score || 0);
 
             return (
               <div
@@ -379,6 +429,35 @@ export default function GrammarHub() {
                   <p className="text-xs text-slate-600 dark:text-zinc-400 line-clamp-2 leading-relaxed">
                     {lesson.tagline}
                   </p>
+
+                  {/* Schedule & History Row */}
+                  <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setTrajectoryLesson({ ...lesson, progress: prog });
+                      }}
+                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full border flex items-center gap-1 transition-all hover:scale-105 ${relativeInfo.badgeClass}`}
+                      title={`Lịch nhắc lại: ${relativeInfo.label} (${relativeInfo.exactDateStr}). Bấm để xem 4 mốc nhắc lại tiếp theo.`}
+                    >
+                      <Clock className="w-2.5 h-2.5 opacity-80" />
+                      <span>{relativeInfo.label}</span>
+                      <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+                    </button>
+
+                    {totalAttempts > 0 && (
+                      <div
+                        className="flex items-center gap-1 text-[10px] font-mono bg-slate-50 dark:bg-zinc-950/70 px-2 py-0.5 rounded-md border border-slate-200/80 dark:border-zinc-800/80"
+                        title={`Lịch sử: ${totalAttempts} lần ôn (${correctCount} đúng · ${wrongCount} sai - ${accuracy}% chính xác)`}
+                      >
+                        <span className="text-slate-500 dark:text-zinc-400 font-semibold">{totalAttempts} lần:</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">{correctCount}✓</span>
+                        <span className="text-slate-300 dark:text-zinc-700">/</span>
+                        <span className="text-rose-600 dark:text-rose-400 font-bold">{wrongCount}✗</span>
+                        <span className="text-cyan-600 dark:text-cyan-400 font-semibold">({accuracy}%)</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Footer: Mastery line + Action buttons */}
@@ -392,12 +471,13 @@ export default function GrammarHub() {
 
                   <div className="w-full h-1.5 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all ${isMastered
+                      className={`h-full rounded-full transition-all ${
+                        isMastered
                           ? "bg-emerald-500"
                           : mastery > 0
-                            ? "bg-cyan-500"
-                            : "bg-slate-300 dark:bg-zinc-700"
-                        }`}
+                          ? "bg-cyan-500"
+                          : "bg-slate-300 dark:bg-zinc-700"
+                      }`}
                       style={{ width: `${mastery}%` }}
                     />
                   </div>
@@ -424,6 +504,15 @@ export default function GrammarHub() {
             );
           })}
         </div>
+      )}
+
+      {/* Trajectory Modal for Grammar Lessons */}
+      {trajectoryLesson && (
+        <ReviewTrajectoryModal
+          isOpen={!!trajectoryLesson}
+          onClose={() => setTrajectoryLesson(null)}
+          grammarLesson={trajectoryLesson}
+        />
       )}
     </div>
   );

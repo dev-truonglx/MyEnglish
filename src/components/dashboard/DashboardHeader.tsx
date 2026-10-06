@@ -1,5 +1,5 @@
 import { useState, type RefObject } from "react";
-import { Sparkles, Search, RefreshCw, Plus, X, Flame, LayoutGrid, List, Target, Loader2 } from "lucide-react";
+import { Sparkles, Search, RefreshCw, Plus, X, Flame, LayoutGrid, List, Target, Loader2, Zap } from "lucide-react";
 import type { calculateStreakAndGoal } from "@/services/streak";
 import { triggerAutoReplenish } from "@/services/autoReplenish";
 import { useWordsStore } from "@/stores/wordsStore";
@@ -21,6 +21,7 @@ interface DashboardHeaderProps {
   libraryStats: LibraryStats;
   effectiveLevel: string;
   setGlobalToast: (toast: GlobalToastData | null) => void;
+  onStartReview?: () => void;
 }
 
 /** Top App Bar: search, streak indicator, view/filter toggles, refresh, auto-replenish, add word */
@@ -39,6 +40,7 @@ export default function DashboardHeader({
   libraryStats,
   effectiveLevel,
   setGlobalToast,
+  onStartReview,
 }: DashboardHeaderProps) {
   const loading = useWordsStore((s) => s.loading);
   const refreshWords = useWordsStore((s) => s.refreshWords);
@@ -221,6 +223,29 @@ export default function DashboardHeader({
             </>
           )}
         </button>
+
+        {/* Quick Review Button */}
+        {onStartReview && (
+          <button
+            onClick={onStartReview}
+            title={
+              dueCount > 0
+                ? `Ôn tập nhanh ${dueCount} từ đã đến hạn`
+                : "Bắt đầu buổi ôn tập nhanh (Flashcards & Bài tập)"
+            }
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
+          >
+            <Zap className="w-3.5 h-3.5 fill-white text-white" />
+            <span>Ôn tập ngay</span>
+            {dueCount > 0 ? (
+              <span className="text-[10px] bg-black/25 text-white px-1.5 py-0.2 rounded font-mono font-bold">
+                {dueCount}
+              </span>
+            ) : (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-300" />
+            )}
+          </button>
+        )}
 
         {/* Add Word Button */}
         <button
