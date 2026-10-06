@@ -131,3 +131,48 @@ describe("recordPracticeResult", () => {
     expect(g.getLessonProgress(lessonId).mastery).toBeLessThan(before);
   });
 });
+
+describe("recordGrammarExerciseAttempt & skipping", () => {
+  it("records skipped exercise attempt and increments skipped count", async () => {
+    const g = await freshGrammar();
+    const testExId = "test_skip_ex_1";
+    g.recordGrammarExerciseAttempt(testExId, false, true);
+
+    const history = g.getGrammarExerciseHistoryMap();
+    expect(history[testExId]).toBeDefined();
+    expect(history[testExId].attempts).toBe(1);
+    expect(history[testExId].incorrect).toBe(1);
+    expect(history[testExId].skipped).toBe(1);
+  });
+
+  it("prioritizes skipped exercises during smart preparation", async () => {
+    const g = await freshGrammar();
+    const ex1 = {
+      id: "ex_mastered_1",
+      type: "multiple_choice" as const,
+      promptEn: "He ___ every day.",
+      correctAnswer: "walks",
+      options: ["walk", "walks", "walked"],
+      explanation: "Present simple third person singular.",
+    };
+    const ex2 = {
+      id: "ex_skipped_2",
+      type: "conjugation" as const,
+      promptEn: "They ___ (leave) yesterday.",
+      correctAnswer: "left",
+      explanation: "Past simple irregular verb.",
+    };
+
+    // Mark ex1 as answered correctly multiple times
+    g.recordGrammarExerciseAttempt(ex1.id, true, false);
+    g.recordGrammarExerciseAttempt(ex1.id, true, false);
+
+    // Mark ex2 as skipped (user did not know it)
+    g.recordGrammarExerciseAttempt(ex2.id, false, true);
+
+    const prepared = g.smartPrepareGrammarExercises([ex1, ex2]);
+    // ex2 should be sorted first due to urgency weighting of skipped/incorrect status
+    expect(prepared[0].id).toBe(ex2.id);
+  });
+});
+

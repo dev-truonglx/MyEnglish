@@ -855,6 +855,7 @@ export interface GrammarExerciseHistory {
   exerciseId: string;
   attempts: number;
   incorrect: number;
+  skipped?: number;
   lastAttempt: string;
 }
 
@@ -871,19 +872,27 @@ export function getGrammarExerciseHistoryMap(): Record<string, GrammarExerciseHi
 /**
  * Record attempt outcome for an individual exercise
  */
-export function recordGrammarExerciseAttempt(exerciseId: string, isCorrect: boolean): void {
+export function recordGrammarExerciseAttempt(
+  exerciseId: string,
+  isCorrect: boolean,
+  isSkipped: boolean = false
+): void {
   try {
     const map = getGrammarExerciseHistoryMap();
     const existing = map[exerciseId] || {
       exerciseId,
       attempts: 0,
       incorrect: 0,
+      skipped: 0,
       lastAttempt: new Date().toISOString(),
     };
 
     existing.attempts += 1;
     if (!isCorrect) {
       existing.incorrect += 1;
+    }
+    if (isSkipped) {
+      existing.skipped = (existing.skipped || 0) + 1;
     }
     existing.lastAttempt = new Date().toISOString();
     map[exerciseId] = existing;
@@ -944,9 +953,14 @@ export function smartPrepareGrammarExercises(
       const errorRate = hist.incorrect / Math.max(1, hist.attempts);
       score += errorRate * 35;
 
+      // Skipped question boost: user specifically skipped because they didn't know the answer
+      if ((hist.skipped || 0) > 0) {
+        score += Math.min(30, (hist.skipped || 0) * 15);
+      }
+
       // Recency check: if attempted less than 30 mins ago and was correct, lower priority
       const hoursSinceLast = (now - new Date(hist.lastAttempt).getTime()) / (1000 * 60 * 60);
-      if (hoursSinceLast < 0.5 && hist.incorrect === 0) {
+      if (hoursSinceLast < 0.5 && hist.incorrect === 0 && (hist.skipped || 0) === 0) {
         score -= 15;
       }
     }
@@ -1035,6 +1049,7 @@ export async function getGrammarExercisesForReview(
       const errorRate = hist.incorrect / Math.max(1, hist.attempts);
       score += errorRate * 35;
       if (hist.incorrect > 0) score += 10;
+      if ((hist.skipped || 0) > 0) score += 20; // boost skipped questions for review
     }
 
     // Natural variety jitter

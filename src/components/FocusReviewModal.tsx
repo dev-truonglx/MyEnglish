@@ -12,6 +12,7 @@ import {
   HelpCircle,
   GraduationCap,
   BookOpen,
+  SkipForward,
 } from "lucide-react";
 import { getAllWords, isPlaceholderMeaning } from "@/services/db";
 import { getDueWords, recordReview } from "@/services/srs";
@@ -775,6 +776,26 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   };
 
+  // Xử lý khi user chọn bỏ qua bài tập ngữ pháp
+  const handleSkipGrammar = async () => {
+    if (isAnswered || !currentItem || currentItem.kind === "word") return;
+    const ex = currentItem.exercise;
+    const lesson = currentItem.lesson;
+
+    setIsAnswered(true);
+    setIsCorrect(false);
+
+    try {
+      noteFirstAnswer(`g:${ex.id}`, lesson.title, false, null);
+      recordGrammarExerciseAttempt(ex.id, false, true);
+      await recordPracticeResult(lesson.id, 40);
+      setFeedbackMsg(`Bạn đã bỏ qua câu này. Đáp án đúng là: ${formatAnswerForms(ex)}`);
+      requeueItem(currentItem);
+    } catch (err) {
+      console.warn("Failed to record grammar skip:", err);
+    }
+  };
+
   // Keyboard navigation: Esc đóng, 1-4 chọn trắc nghiệm, S hoãn, Enter/Space chuyển câu
   useEffect(() => {
     const handleKeyDown = (e: globalThis.KeyboardEvent) => {
@@ -1447,6 +1468,20 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         );
                       })}
                     </div>
+
+                    {!isAnswered && (
+                      <div className="flex justify-end pt-1">
+                        <button
+                          type="button"
+                          onClick={handleSkipGrammar}
+                          className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 transition flex items-center gap-1.5 py-1 px-2.5 rounded-lg hover:bg-black/5 dark:hover:bg-white/5"
+                          title="Bỏ qua câu hỏi này nếu bạn chưa biết đáp án"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                          <span>Bỏ qua (Chưa biết)</span>
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -1483,13 +1518,24 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     </div>
 
                     {!isAnswered ? (
-                      <button
-                        type="submit"
-                        disabled={!typedInput.trim()}
-                        className="w-full py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-sm shadow-violet-600/20"
-                      >
-                        Kiểm tra đáp án (Enter)
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="submit"
+                          disabled={!typedInput.trim()}
+                          className="flex-1 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-sm shadow-violet-600/20"
+                        >
+                          Kiểm tra đáp án (Enter)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleSkipGrammar}
+                          className="px-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 text-xs font-bold transition-all shrink-0 flex items-center gap-1.5"
+                          title="Bỏ qua câu hỏi này nếu bạn chưa biết đáp án"
+                        >
+                          <SkipForward className="w-3.5 h-3.5" />
+                          <span>Bỏ qua</span>
+                        </button>
+                      </div>
                     ) : null}
                   </form>
                 )}

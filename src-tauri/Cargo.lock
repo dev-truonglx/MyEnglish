@@ -4678,7 +4678,7 @@ dependencies = [
 
 [[package]]
 name = "tauri-app"
-version = "0.0.17"
+version = "0.0.20"
 dependencies = [
  "arboard",
  "mac-notification-sys",
