@@ -10,6 +10,7 @@ import {
   ArrowRight,
   Sparkles,
   HelpCircle,
+  Lightbulb,
   GraduationCap,
   BookOpen,
 } from "lucide-react";
@@ -1089,11 +1090,23 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
                       <span>Nhập từ tiếng Anh tương ứng:</span>
-                      <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
-                        Gợi ý: {currentWord.word[0].toUpperCase()}
-                        {" · ".repeat(Math.max(0, currentWord.word.length - 1))}
-                        ({currentWord.word.length} chữ cái)
-                      </span>
+                      <div className="relative group/hint flex items-center">
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          className="flex items-center gap-1 text-[11px] font-mono text-cyan-600 dark:text-cyan-400 hover:text-cyan-700 dark:hover:text-cyan-300 font-semibold px-2 py-0.5 rounded-lg hover:bg-cyan-50 dark:hover:bg-cyan-950/40 transition-colors cursor-help"
+                        >
+                          <Lightbulb className="w-3.5 h-3.5 shrink-0" />
+                          <span>Gợi ý</span>
+                        </button>
+                        <div className="absolute right-0 bottom-full mb-1.5 hidden group-hover/hint:block z-20 pointer-events-none">
+                          <div className="whitespace-nowrap rounded-xl bg-slate-900 dark:bg-zinc-800 text-white px-3 py-1.5 text-xs font-mono font-bold shadow-lg border border-slate-700/50">
+                            Bắt đầu bằng: {currentWord.word[0].toUpperCase()}
+                            {" · ".repeat(Math.max(0, currentWord.word.length - 1))}
+                            {" "}({currentWord.word.length} chữ cái)
+                          </div>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="relative">
@@ -1234,9 +1247,22 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
                   {/* Gợi ý */}
                   {currentGrammar.exercise.hint && (
-                    <div className="flex items-center justify-center gap-1.5 text-[11px] text-amber-600 dark:text-amber-400 font-medium">
-                      <HelpCircle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Gợi ý: {currentGrammar.exercise.hint}</span>
+                    <div className="flex items-center justify-center">
+                      <div className="relative group/hint inline-flex items-center">
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-semibold text-amber-600 dark:text-amber-400 hover:text-amber-700 dark:hover:text-amber-300 hover:bg-amber-50 dark:hover:bg-amber-950/40 transition-colors cursor-help border border-amber-200/60 dark:border-amber-800/50"
+                        >
+                          <Lightbulb className="w-3.5 h-3.5 shrink-0" />
+                          <span>Gợi ý</span>
+                        </button>
+                        <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 hidden group-hover/hint:block z-20 pointer-events-none">
+                          <div className="max-w-xs sm:max-w-sm rounded-xl bg-slate-900 dark:bg-zinc-800 text-white px-3 py-1.5 text-xs font-medium shadow-lg border border-slate-700/50 text-center leading-relaxed">
+                            {currentGrammar.exercise.hint}
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>

@@ -25,6 +25,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const [payload, setPayload] = useState<ReviewNudgePayload>(() => buildNudgePayload(0));
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   const [animationKey, setAnimationKey] = useState(0);
+  const [isHovered, setIsHovered] = useState(false);
   const hoveredRef = useRef(false);
   const actedRef = useRef(false);
   const lastNudgeIdRef = useRef<number | null>(null);
@@ -39,6 +40,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     }
     actedRef.current = false;
     hoveredRef.current = false; // the window may have hidden before mouseleave fired
+    setIsHovered(false);
     setPayload(next);
     setSecondsLeft(next.autoOpenSeconds);
     setFreshBar(true);
@@ -55,6 +57,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     if (actedRef.current) return;
     actedRef.current = true;
     hoveredRef.current = false;
+    setIsHovered(false);
     setSecondsLeft(null);
     if (action === "snooze") {
       snoozeReminder();
@@ -121,8 +124,14 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       <div
         key={animationKey}
         className="nudge-enter w-full rounded-2xl border border-slate-200/80 dark:border-zinc-700/80 bg-white/95 dark:bg-zinc-900/95 backdrop-blur shadow-xl overflow-hidden"
-        onMouseEnter={() => (hoveredRef.current = true)}
-        onMouseLeave={() => (hoveredRef.current = false)}
+        onMouseEnter={() => {
+          hoveredRef.current = true;
+          setIsHovered(true);
+        }}
+        onMouseLeave={() => {
+          hoveredRef.current = false;
+          setIsHovered(false);
+        }}
       >
         <div className="p-3.5 flex items-start gap-3">
           <span className="shrink-0 w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white flex items-center justify-center shadow-sm">
@@ -150,7 +159,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               </button>
               {secondsLeft !== null && (
                 <span className="ml-auto text-[10px] text-slate-500 dark:text-zinc-500 tabular-nums">
-                  Tự mở sau {secondsLeft}s
+                  {isHovered ? "Tạm dừng đếm lùi" : `Tự mở sau ${secondsLeft}s`}
                 </span>
               )}
             </div>
