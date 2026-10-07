@@ -372,11 +372,19 @@ export async function recordReview(
 
   // Once a word is known by recognition, start training recall with its own production card.
   // It becomes due tomorrow so both directions are not drilled in the same session.
+  // Kế thừa một phần sức mạnh từ thẻ Recognition để FSRS không coi đây là từ hoàn toàn xa lạ.
   if (direction === "recognition" && updatedCard.state === State.Review) {
+    const inheritedDiff = Math.min(10, Number((updatedCard.difficulty + 1.5).toFixed(4)));
+    const inheritedStab = Math.max(1, Number((updatedCard.stability * 0.5).toFixed(4)));
     await db.execute(
       `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
-       VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
-      [wordId, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()]
+       VALUES ($1, $2, 1, 1, 0, $3, $4, 0)`,
+      [
+        wordId, 
+        new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
+        inheritedStab,
+        inheritedDiff
+      ]
     );
   }
 

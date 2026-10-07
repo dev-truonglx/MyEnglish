@@ -25,6 +25,7 @@ import {
 import { checkAndUnlockAchievements } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
 import { handleSpeak } from "@/components/review/speech";
+import { emit } from "@tauri-apps/api/event";
 
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
@@ -279,11 +280,14 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     });
 
     try {
-      // Only the first answer to a card in this session updates FSRS; retries after Again are practice
+      // Cho phép FSRS cập nhật liên tục các bước Learning/Relearning trong cùng session
       const cardKey = `${currentWord.id}:${currentWord.direction}`;
-      const isScheduled = !practiceMode && !scheduledThisSessionRef.current.has(cardKey);
+      const isScheduled = !practiceMode;
       const result = isScheduled ? await recordReview(currentWord.id, rating, currentWord.direction) : null;
-      if (isScheduled) scheduledThisSessionRef.current.add(cardKey);
+      if (isScheduled) {
+        scheduledThisSessionRef.current.add(cardKey);
+        emit("words-changed").catch(() => {});
+      }
       // Only the first answer to a card counts toward the daily goal (retries after Again don't)
       if (!isRequeuedCard) recordDailyActivity(1);
       if (result) setLastResult(result);

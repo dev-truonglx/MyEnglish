@@ -180,7 +180,22 @@ export function calculateUrgencyScore(
   // Factor 4: Lapse penalty — more lapses = more forgotten = more urgency
   const lapsePenalty = Math.min(15, (srs.lapses ?? 0) * 3);
 
-  const urgencyScore = overdueness + difficulty + leechBonus + lapsePenalty;
+  const isDue = srs.next_review_date ? new Date(srs.next_review_date).getTime() <= now.getTime() : true;
+  // If card is not due yet, heavily downweight its urgency so it never outranks truly due cards
+  const dueWeight = isDue ? 1 : 0.05;
+
+  // Recent review cooldown: if reviewed within 60 minutes and already in Review state, heavily scale down urgency
+  let cooldownWeight = 1;
+  // Chỉ áp dụng cooldown cho thẻ đã học xong (State.Review = 2), KHÔNG phạt thẻ đang học (Learning/Relearning)
+  if (srs.last_review && srs.state === 2) {
+    const elapsedMinutes = (now.getTime() - new Date(srs.last_review).getTime()) / (60 * 1000);
+    if (elapsedMinutes < 60) {
+      cooldownWeight = Math.max(0.01, elapsedMinutes / 60);
+    }
+  }
+
+  const rawScore = overdueness + difficulty + leechBonus + lapsePenalty;
+  const urgencyScore = rawScore * dueWeight * cooldownWeight;
 
   return {
     wordId: word.id,
@@ -304,8 +319,11 @@ export function buildReviewSession(
   // Recall cards of known words first: they are cheaper and unlock real usage of the word
   const newCards = [...newOf("production", introduced.production), ...newOf("recognition", introduced.recognition)];
 
-  const reviewSlice = reviewCards.slice(0, limits.maxSessionSize);
-  const newSlice = newCards.slice(0, Math.max(0, limits.maxSessionSize - reviewSlice.length));
+  // Guarantee up to 20% of the session for new cards so users don't get stuck only reviewing old cards
+  const maxNewCards = Math.ceil(limits.maxSessionSize * 0.2);
+  const newSlice = newCards.slice(0, maxNewCards);
+  const maxReviewCards = limits.maxSessionSize - newSlice.length;
+  const reviewSlice = reviewCards.slice(0, maxReviewCards);
   if (newSlice.length === 0) return reviewSlice;
   if (reviewSlice.length === 0) return newSlice;
 
@@ -329,13 +347,13 @@ export function buildReviewSession(
 
 /** Correct answers slower than this (ms) are graded Hard */
 const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
-  multiple_choice: 15000,
-  context_match: 30000,
-  sentence_builder: 40000,
-  reverse_cloze: 20000,
-  spelling: 20000,
-  cloze: 25000,
-  listening: 25000,
+  multiple_choice: 20000,
+  context_match: 40000,
+  sentence_builder: 60000,
+  reverse_cloze: 30000,
+  spelling: 30000,
+  cloze: 35000,
+  listening: 35000,
 };
 
 export interface AnswerOutcome {
@@ -353,14 +371,19 @@ export interface AnswerOutcome {
  *  - hint / small typo -> Hard
  *  - correct on first try -> Good
  *  - a correct but very slow answer -> Hard
- *  - automatic grading never gives Easy (Easy stays a manual choice in flip mode)
+ *  - super fast correct answer -> Easy
  */
 export function deriveRating(outcome: AnswerOutcome): Rating {
   if (outcome.wrongAttempts > 0) return Rating.Again;
   if (outcome.usedHint || outcome.nearMiss) return Rating.Hard;
+  
+  // Super fast response (< 3s) gets Easy, as it shows strong mastery.
+  // For long reading exercises, < 5s gets Easy.
+  const isReadingExercise = outcome.exerciseType === "context_match" || outcome.exerciseType === "sentence_builder" || outcome.exerciseType === "cloze";
+  const fastThreshold = isReadingExercise ? 5000 : 3000;
+  if (outcome.responseTimeMs > 0 && outcome.responseTimeMs < fastThreshold) return Rating.Easy;
+
   // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
-  // (Fast answers are not upgraded to Easy: in simulation that doubled scheduled stability
-  // versus true memory strength and pushed production recall below target.)
   const slowMs = SLOW_RESPONSE_MS[outcome.exerciseType];
   if (slowMs && outcome.responseTimeMs > slowMs) return Rating.Hard;
   return Rating.Good;
@@ -489,8 +512,9 @@ export async function getWordReviewLogs(wordId: string, limit: number = 20): Pro
     xp_earned: number;
     timestamp: string;
     is_scheduled: number | null;
+    direction?: string | null;
   }>>(
-    `SELECT id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled FROM review_logs WHERE word_id = $1 ORDER BY timestamp DESC LIMIT $2`,
+    `SELECT id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled, direction FROM review_logs WHERE word_id = $1 ORDER BY timestamp DESC LIMIT $2`,
     [wordId, limit]
   );
   return rows.map((r) => ({
@@ -504,6 +528,7 @@ export async function getWordReviewLogs(wordId: string, limit: number = 20): Pro
     xpEarned: r.xp_earned,
     timestamp: r.timestamp,
     isScheduled: r.is_scheduled === null || r.is_scheduled === undefined ? null : r.is_scheduled === 1,
+    direction: (r.direction as CardDirection) || undefined,
   }));
 }
 

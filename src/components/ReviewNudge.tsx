@@ -125,6 +125,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         options: payload.microQuiz.options,
         targetMeaning: payload.microQuiz.targetMeaning,
         responseTimeMs: responseTime,
+        direction: payload.microQuiz.direction,
       });
       setQuizResult(res);
 
@@ -340,7 +341,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                   Quick Quiz (10s)
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-                  Bấm 1 câu cứu từ vựng
+                  {payload.microQuiz?.direction === "production" ? "Nhớ từ tiếng Anh" : "Bấm 1 câu cứu từ vựng"}
                 </span>
               </div>
               {secondsLeft !== null && (
@@ -352,19 +353,32 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
 
             {/* Target Word Display */}
             {payload.microQuiz ? (
-              <div className="flex items-baseline gap-2">
-                <span className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
-                  {payload.microQuiz.word}
-                </span>
-                {payload.microQuiz.phonetic && (
-                  <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-mono">
-                    {payload.microQuiz.phonetic}
-                  </span>
-                )}
-                {payload.microQuiz.partOfSpeech && (
-                  <span className="text-[10px] px-1 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 font-medium">
-                    {payload.microQuiz.partOfSpeech}
-                  </span>
+              <div className="flex flex-col gap-0.5">
+                {payload.microQuiz.direction === "production" ? (
+                  <div>
+                    <span className="text-[10px] font-semibold text-indigo-600 dark:text-indigo-400 block uppercase tracking-wider">
+                      Nghĩa tiếng Việt:
+                    </span>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white leading-snug block line-clamp-2">
+                      {payload.microQuiz.promptTitle || payload.microQuiz.targetMeaning}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-base font-extrabold text-slate-900 dark:text-white tracking-tight">
+                      {payload.microQuiz.promptTitle || payload.microQuiz.word}
+                    </span>
+                    {payload.microQuiz.phonetic && (
+                      <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-mono">
+                        {payload.microQuiz.phonetic}
+                      </span>
+                    )}
+                    {payload.microQuiz.partOfSpeech && (
+                      <span className="text-[10px] px-1 py-0.2 rounded bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 font-medium">
+                        {payload.microQuiz.partOfSpeech}
+                      </span>
+                    )}
+                  </div>
                 )}
               </div>
             ) : null}
@@ -427,7 +441,9 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                 <div className="flex items-center gap-1">
                   <Sparkles className="w-3 h-3" />
                   <span>
-                    {quizResult.isCorrect ? "Chính xác! +1 Streak 🔥" : "Đã ghi nhận ôn lại!"}
+                    {quizResult.isCorrect
+                      ? `Chính xác! +${quizResult.xpEarned ?? 10} XP 🔥`
+                      : `Chưa đúng! Đáp án: ${payload.microQuiz?.direction === "production" ? payload.microQuiz.word : quizResult.correctMeaning}`}
                   </span>
                 </div>
                 <span className="text-[10px] uppercase font-mono tracking-wider opacity-80">

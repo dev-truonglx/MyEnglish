@@ -1,9 +1,20 @@
 import { Rating } from "ts-fsrs";
-import { calculateUrgencyScore, generateMultipleChoiceQuestion } from "./smartReview";
+import {
+  calculateUrgencyScore,
+  generateMultipleChoiceQuestion,
+  saveReviewLog,
+  calculateXPReward,
+  awardXP,
+  cleanMeaningForOption,
+} from "./smartReview";
+import { isPlaceholderMeaning } from "./db";
 import { recordReview } from "./srs";
 import { recordDailyActivity } from "./streak";
-import type { WordDetail } from "@/types/database";
+import { getDueCards, practiceCards } from "./cards";
+import { checkAndUnlockAchievements } from "./achievements";
+import type { WordDetail, CardDirection, ReviewCard } from "@/types/database";
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 
 export type DuoToneLevel =
   | "level_1_encouraging"
@@ -22,6 +33,8 @@ export interface MicroQuizOption {
 export interface MicroQuizQuestion {
   wordId: string;
   word: string;
+  direction: CardDirection;
+  promptTitle?: string;
   phonetic?: string;
   partOfSpeech?: string;
   targetMeaning: string;
@@ -208,7 +221,10 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
 }
 
 /**
- * Algorithm: Select the single most urgent word for Micro-Quiz using FSRS urgency scoring
+ * Algorithm: Select the single most urgent card for Micro-Quiz using FSRS urgency scoring
+ * Supports both recognition (en_to_vn) and production (vn_to_en) cards.
+ * Avoids picking cards that were reviewed very recently (cooldown).
+ * Uses weighted selection among top candidate cards to avoid repeating the exact same word.
  */
 export function selectMicroQuizQuestion(
   dueWords: WordDetail[],
@@ -217,25 +233,66 @@ export function selectMicroQuizQuestion(
 ): MicroQuizQuestion | null {
   if (allWords.length === 0) return null;
 
-  // 1. Prioritize words from dueWords; if none are due, use all words
-  const candidatePool = dueWords.length > 0 ? dueWords : allWords;
+  // 1. Gather candidate cards: prioritize cards that are actually due
+  const dueCards = dueWords
+    .filter((w) => !isPlaceholderMeaning(w.meaning_vn))
+    .flatMap((w) => getDueCards(w, now));
 
-  // 2. Score urgency for all candidates using the FSRS urgency algorithm
-  const scored = candidatePool
-    .filter((w) => w.word && w.meaning_vn)
-    .map((w) => ({
-      word: w,
-      score: calculateUrgencyScore(w, now).urgencyScore,
-    }));
+  const candidatePool: ReviewCard[] =
+    dueCards.length > 0
+      ? dueCards
+      : practiceCards(allWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn)));
 
-  if (scored.length === 0) return null;
+  if (candidatePool.length === 0) return null;
+
+  // 2. Cooldown filter: deprioritize cards reviewed in the last 45 minutes
+  const RECENT_COOLDOWN_MS = 45 * 60 * 1000;
+  const nonRecentCandidates = candidatePool.filter((c) => {
+    const lastRev = c.srs?.last_review;
+    if (!lastRev) return true;
+    return now.getTime() - new Date(lastRev).getTime() > RECENT_COOLDOWN_MS;
+  });
+
+  // If all cards were reviewed recently, fall back to candidatePool
+  const activeCandidates = nonRecentCandidates.length > 0 ? nonRecentCandidates : candidatePool;
+
+  // 3. Score urgency for all candidates using the FSRS urgency algorithm
+  const scored = activeCandidates.map((c) => ({
+    card: c,
+    score: calculateUrgencyScore(c, now).urgencyScore,
+  }));
 
   // Sort highest urgency first
   scored.sort((a, b) => b.score - a.score);
-  const target = scored[0].word;
 
-  // 3. Generate 3 multiple choice options (1 correct, 2 plausible distractors)
-  const mcq = generateMultipleChoiceQuestion(target, allWords, "en_to_vn");
+  // 4. To avoid locking into a single word endlessly, take top K candidates and pick with weighted probability
+  const topK = scored.slice(0, Math.min(5, scored.length));
+  let targetCard: ReviewCard;
+
+  if (topK.length === 1) {
+    targetCard = topK[0].card;
+  } else {
+    // Weighted selection: higher urgency score has higher probability
+    const minScore = Math.min(...topK.map((item) => item.score));
+    const shiftedWeights = topK.map((item) => Math.max(1, Math.round(item.score - minScore + 5)));
+    const totalWeight = shiftedWeights.reduce((sum, w) => sum + w, 0);
+    let rand = Math.random() * totalWeight;
+    let chosenIdx = 0;
+    for (let i = 0; i < topK.length; i++) {
+      rand -= shiftedWeights[i];
+      if (rand <= 0) {
+        chosenIdx = i;
+        break;
+      }
+    }
+    targetCard = topK[chosenIdx].card;
+  }
+
+  // 5. Generate multiple choice question according to card direction
+  const isProduction = targetCard.direction === "production";
+  const promptType = isProduction ? "vn_to_en" : "en_to_vn";
+  const mcq = generateMultipleChoiceQuestion(targetCard, allWords, promptType);
+
   // Limit to 3 options for clean compact desktop notification/nudge
   const compactOptions = mcq.options.slice(0, 3);
 
@@ -247,12 +304,18 @@ export function selectMicroQuizQuestion(
     }
   }
 
+  const promptTitle = isProduction
+    ? cleanMeaningForOption(targetCard.meaning_vn)
+    : targetCard.word;
+
   return {
-    wordId: target.id,
-    word: target.word,
-    phonetic: target.phonetic || undefined,
-    partOfSpeech: target.part_of_speech || undefined,
-    targetMeaning: target.meaning_vn,
+    wordId: targetCard.id,
+    word: targetCard.word,
+    direction: targetCard.direction,
+    promptTitle,
+    phonetic: isProduction ? undefined : targetCard.phonetic || undefined,
+    partOfSpeech: targetCard.part_of_speech || undefined,
+    targetMeaning: targetCard.meaning_vn,
     options: compactOptions.map((o) => ({
       id: o.id,
       text: o.text,
@@ -268,10 +331,12 @@ export interface MicroQuizEvaluationResult {
   correctMeaning: string;
   responseTimeMs: number;
   streakUpdated: boolean;
+  xpEarned?: number;
 }
 
 /**
- * Algorithm: Evaluate user's Micro-Quiz response, record FSRS memory parameters, and update Streak
+ * Algorithm: Evaluate user's Micro-Quiz response, record FSRS memory parameters,
+ * persist review log, award XP, update Streak, check achievements, and notify all windows.
  */
 export async function evaluateMicroQuizAnswer(params: {
   wordId: string;
@@ -279,12 +344,15 @@ export async function evaluateMicroQuizAnswer(params: {
   options: MicroQuizOption[];
   targetMeaning: string;
   responseTimeMs: number;
+  direction?: CardDirection;
 }): Promise<MicroQuizEvaluationResult> {
   const { wordId, selectedChoiceId, options, targetMeaning, responseTimeMs } = params;
+  const direction: CardDirection = params.direction || "recognition";
   const picked = options.find((o) => o.id === selectedChoiceId);
   const isCorrect = picked ? picked.isCorrect : false;
+  const wrongAttempts = isCorrect ? 0 : 1;
 
-  // 1. Algorithmic Rating derivation (FSRS scale 1-4)
+  // 1. Algorithmic Rating derivation (FSRS scale 1-4 based on accuracy and response time)
   let rating: Rating;
   let ratingLabel: "Again" | "Hard" | "Good" | "Easy";
 
@@ -292,27 +360,68 @@ export async function evaluateMicroQuizAnswer(params: {
     rating = Rating.Again;
     ratingLabel = "Again";
   } else if (responseTimeMs < 3500) {
-    // Fast, confident answer
     rating = Rating.Easy;
     ratingLabel = "Easy";
   } else if (responseTimeMs < 8000) {
-    // Normal correct answer
     rating = Rating.Good;
     ratingLabel = "Good";
   } else {
-    // Hesitant answer (> 8s)
     rating = Rating.Hard;
     ratingLabel = "Hard";
   }
 
-  // 2. Persist to SQLite using FSRS algorithm
-  await recordReview(wordId, rating, "recognition");
+  // 2. Persist to SQLite using FSRS algorithm with the exact card direction
+  const srsResult = await recordReview(wordId, rating, direction);
 
-  // 3. Update Streak & daily activity
+  // 3. Calculate and award XP reward (identical to Dashboard & Popup)
+  const xpReward = calculateXPReward(
+    rating,
+    "multiple_choice",
+    wrongAttempts,
+    responseTimeMs,
+    false,
+    isCorrect
+  );
+  if (xpReward.totalXP > 0) {
+    awardXP(xpReward.totalXP);
+  }
+
+  // 4. Record review log in SQLite (identical to Dashboard & Popup)
+  await saveReviewLog({
+    wordId,
+    exerciseType: "multiple_choice",
+    responseTimeMs,
+    isCorrect,
+    wrongAttempts,
+    rating,
+    xpEarned: xpReward.totalXP,
+    timestamp: new Date().toISOString(),
+    isScheduled: true,
+    direction: srsResult.direction || direction,
+  }).catch((err) => console.warn("Failed to save micro-quiz review log:", err));
+
+  // 5. Update Streak & daily activity
   recordDailyActivity(1);
 
-  // 4. Reset consecutive skips because user interacted positively
+  // 6. Reset consecutive skips because user interacted positively
   resetConsecutiveSkipCount();
+
+  // 7. Check and unlock achievements
+  checkAndUnlockAchievements({
+    consecutiveCorrect: isCorrect ? 1 : 0,
+    sessionReviewCount: 1,
+    leechesSlain: 0,
+    responseTimeMs,
+    isCorrect,
+  });
+
+  // 8. Emit words-changed event to sync all windows (Dashboard, Popup, Tray)
+  try {
+    await emit("words-changed");
+  } catch {}
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("words-changed"));
+  }
 
   return {
     isCorrect,
@@ -321,6 +430,7 @@ export async function evaluateMicroQuizAnswer(params: {
     correctMeaning: targetMeaning,
     responseTimeMs,
     streakUpdated: true,
+    xpEarned: xpReward.totalXP,
   };
 }
 

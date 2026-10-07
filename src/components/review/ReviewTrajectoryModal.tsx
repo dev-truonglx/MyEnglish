@@ -1,5 +1,17 @@
-import { useMemo } from "react";
-import { X, Calendar, Clock, CheckCircle2, XCircle, Brain, Sparkles } from "lucide-react";
+import { useMemo, useState, useEffect } from "react";
+import {
+  X,
+  Calendar,
+  Clock,
+  CheckCircle2,
+  XCircle,
+  Brain,
+  Sparkles,
+  History,
+  ChevronDown,
+  ChevronUp,
+  RotateCcw,
+} from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import type { GrammarProgress } from "@/types/grammar";
 import {
@@ -8,6 +20,83 @@ import {
   formatNextReviewRelative,
   type ReviewStepProjection,
 } from "@/utils/reviewSchedule";
+import { getWordReviewLogs, type ReviewLogEntry } from "@/services/smartReview";
+
+function formatPastTime(
+  dateInput: string | Date | undefined | null,
+  now: Date = new Date()
+): { relative: string; exact: string; isPast: boolean } {
+  if (!dateInput) {
+    return { relative: "Chưa từng học", exact: "Chưa có dữ liệu", isPast: false };
+  }
+  const date = typeof dateInput === "string" ? new Date(dateInput) : dateInput;
+  if (isNaN(date.getTime())) {
+    return { relative: "Chưa từng học", exact: "Chưa có dữ liệu", isPast: false };
+  }
+
+  const exact = date.toLocaleDateString("vi-VN", {
+    hour: "2-digit",
+    minute: "2-digit",
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+
+  const diffMs = now.getTime() - date.getTime();
+  if (diffMs < 0) {
+    return { relative: "Vừa xong", exact, isPast: true };
+  }
+
+  const minutes = Math.floor(diffMs / 60000);
+  const hours = Math.floor(diffMs / 3600000);
+  const days = Math.floor(diffMs / 86400000);
+
+  let relative = "Vừa xong";
+  if (days >= 30) {
+    const months = Math.floor(days / 30);
+    relative = `${months} tháng trước`;
+  } else if (days >= 1) {
+    relative = days === 1 ? "Hôm qua" : `${days} ngày trước`;
+  } else if (hours >= 1) {
+    relative = `${hours} giờ trước`;
+  } else if (minutes >= 1) {
+    relative = `${minutes} phút trước`;
+  } else {
+    relative = "Vừa xong";
+  }
+
+  return { relative, exact, isPast: true };
+}
+
+const EXERCISE_NAME_MAP: Record<string, string> = {
+  multiple_choice: "Trắc nghiệm",
+  flip: "Flashcard",
+  cloze: "Điền từ",
+  spelling: "Chính tả / Gõ từ",
+  reverse_cloze: "Đoán nghĩa",
+  sentence_builder: "Ghép câu",
+  context_match: "Nối ngữ cảnh",
+  listening: "Nghe chép",
+};
+
+const RATING_NAME_MAP: Record<number, { label: string; badgeClass: string }> = {
+  1: {
+    label: "Again",
+    badgeClass: "bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-900",
+  },
+  2: {
+    label: "Hard",
+    badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-900",
+  },
+  3: {
+    label: "Good",
+    badgeClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900",
+  },
+  4: {
+    label: "Easy",
+    badgeClass: "bg-sky-100 text-sky-700 dark:bg-sky-950/70 dark:text-sky-300 border-sky-200 dark:border-sky-900",
+  },
+};
 
 interface ReviewTrajectoryModalProps {
   isOpen: boolean;
@@ -54,6 +143,40 @@ export default function ReviewTrajectoryModal({
     }
     return null;
   }, [word, grammarLesson]);
+
+  const [logs, setLogs] = useState<ReviewLogEntry[]>([]);
+  const [showAllLogs, setShowAllLogs] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen || !word?.id) {
+      setLogs([]);
+      setShowAllLogs(false);
+      return;
+    }
+    let cancelled = false;
+    getWordReviewLogs(word.id, 5)
+      .then((loaded) => {
+        if (!cancelled) setLogs(loaded);
+      })
+      .catch(() => {
+        if (!cancelled) setLogs([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, word?.id]);
+
+  const latestTimestamp = useMemo(() => {
+    if (logs.length > 0 && logs[0].timestamp) return logs[0].timestamp;
+    if (word?.srs?.last_review) return word.srs.last_review;
+    if (word?.srsProduction?.last_review) return word.srsProduction.last_review;
+    if (grammarLesson?.progress?.lastReview) return grammarLesson.progress.lastReview;
+    if (grammarLesson?.progress?.lastAttemptDate) return grammarLesson.progress.lastAttemptDate;
+    return null;
+  }, [logs, word, grammarLesson]);
+
+  const pastInfo = useMemo(() => formatPastTime(latestTimestamp), [latestTimestamp]);
 
   // Statistics
   const stats = useMemo(() => {
@@ -173,6 +296,155 @@ export default function ReviewTrajectoryModal({
             <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 font-mono">
               Độ khó (D): {difficulty ? `${Number(difficulty).toFixed(1)}/10` : "Mặc định"}
             </span>
+          </div>
+
+          {/* Recent Learning History */}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                <History className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                Lịch sử học gần nhất:
+              </span>
+              <span
+                className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full border ${
+                  pastInfo.isPast
+                    ? "bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800"
+                    : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-700"
+                }`}
+              >
+                {pastInfo.relative}
+              </span>
+            </div>
+
+            {pastInfo.isPast ? (
+              <div className="p-3 rounded-2xl bg-indigo-50/50 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 space-y-2">
+                <div className="flex items-center justify-between gap-2 text-xs flex-wrap">
+                  <div className="flex items-center gap-1.5 text-slate-700 dark:text-zinc-300 font-medium">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                    <span>Lần học gần nhất:</span>
+                    <strong className="font-semibold text-slate-900 dark:text-white font-mono">
+                      {pastInfo.exact}
+                    </strong>
+                  </div>
+                  {logs[0] && (
+                    <div className="flex items-center gap-1">
+                      {logs[0].isCorrect ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Đúng
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-bold bg-rose-100 text-rose-800 dark:bg-rose-950/80 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
+                          <XCircle className="w-3 h-3" />
+                          Chưa đúng
+                        </span>
+                      )}
+                      {RATING_NAME_MAP[logs[0].rating] && (
+                        <span
+                          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border ${
+                            RATING_NAME_MAP[logs[0].rating].badgeClass
+                          }`}
+                        >
+                          FSRS: {RATING_NAME_MAP[logs[0].rating].label}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {logs[0] && (
+                  <div className="flex items-center gap-2 flex-wrap text-[11px] text-slate-600 dark:text-zinc-400 pt-1.5 border-t border-indigo-100/70 dark:border-indigo-900/40">
+                    <span className="px-1.5 py-0.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-[10.5px]">
+                      Dạng bài: <strong>{EXERCISE_NAME_MAP[logs[0].exerciseType] || logs[0].exerciseType}</strong>
+                    </span>
+                    {logs[0].direction && (
+                      <span className="px-1.5 py-0.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-[10.5px]">
+                        Chiều:{" "}
+                        <strong>
+                          {logs[0].direction === "production" ? "Gợi nhớ (Vn → En)" : "Nhận diện (En → Vn)"}
+                        </strong>
+                      </span>
+                    )}
+                    {logs[0].responseTimeMs > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-[10.5px] font-mono">
+                        ⚡ {(logs[0].responseTimeMs / 1000).toFixed(1)}s
+                      </span>
+                    )}
+                    {logs[0].xpEarned > 0 && (
+                      <span className="px-1.5 py-0.5 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800/60 text-amber-700 dark:text-amber-300 text-[10.5px] font-bold">
+                        +{logs[0].xpEarned} XP
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Earlier logs toggle / list */}
+                {logs.length > 1 && (
+                  <div className="pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setShowAllLogs((prev) => !prev)}
+                      className="text-[11px] font-semibold text-indigo-600 dark:text-indigo-400 hover:underline flex items-center gap-1"
+                    >
+                      {showAllLogs ? (
+                        <>
+                          <ChevronUp className="w-3 h-3" /> Thu gọn lịch sử
+                        </>
+                      ) : (
+                        <>
+                          <ChevronDown className="w-3 h-3" /> Xem thêm {logs.length - 1} lần học trước đó
+                        </>
+                      )}
+                    </button>
+
+                    {showAllLogs && (
+                      <div className="mt-2 space-y-1.5 border-t border-indigo-100/60 dark:border-indigo-900/40 pt-2">
+                        {logs.slice(1).map((log) => {
+                          const logTime = formatPastTime(log.timestamp);
+                          const ratingBadge = RATING_NAME_MAP[log.rating];
+                          return (
+                            <div
+                              key={log.id}
+                              className="flex items-center justify-between gap-2 p-1.5 rounded-lg bg-white/80 dark:bg-zinc-900/80 border border-slate-200/60 dark:border-zinc-800 text-[10.5px]"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {log.isCorrect ? (
+                                  <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                                ) : (
+                                  <XCircle className="w-3 h-3 text-rose-500 shrink-0" />
+                                )}
+                                <span className="font-mono text-slate-700 dark:text-zinc-300 truncate">
+                                  {logTime.exact}
+                                </span>
+                                <span className="text-slate-400 dark:text-zinc-500 text-[9.5px]">
+                                  ({logTime.relative})
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-slate-600 dark:text-zinc-400">
+                                  {EXERCISE_NAME_MAP[log.exerciseType] || log.exerciseType}
+                                </span>
+                                {ratingBadge && (
+                                  <span className={`px-1 py-0.2 rounded text-[9px] font-bold border ${ratingBadge.badgeClass}`}>
+                                    {ratingBadge.label}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="p-3 rounded-2xl bg-slate-50 dark:bg-zinc-950/40 border border-slate-200/60 dark:border-zinc-800 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-2">
+                <RotateCcw className="w-4 h-4 text-slate-400 shrink-0" />
+                <span>Từ này chưa có lịch sử ôn tập. FSRS sẽ ghi nhận sau lần làm bài đầu tiên.</span>
+              </div>
+            )}
           </div>
 
           {/* Timeline Projections */}
