@@ -87,7 +87,7 @@ describe("duoMotivation algorithm", () => {
       });
       expect(state.tone).toBe("level_3_streak_fomo");
       expect(state.mascotMood).toBe("alarm");
-      expect(state.title).toContain("Cứu Streak");
+      expect(state.title).toContain("Chuỗi 7 ngày");
       expect(state.isMicroQuizPreferred).toBe(true);
     });
 
@@ -189,13 +189,24 @@ describe("duoMotivation algorithm", () => {
       },
     ];
 
-    it("selects the most urgent word and generates 3 multiple choice options", () => {
-      const q = selectMicroQuizQuestion(dummyWords, dummyWords);
+    it("asks a due, already-studied recognition card with 3 options (learning cards first)", () => {
+      const due = new Date(Date.now() - 60_000).toISOString();
+      const words = dummyWords.map((w) => ({ ...w, srs: { ...w.srs, next_review_date: due } })) as WordDetail[];
+      const q = selectMicroQuizQuestion(words, words);
       expect(q).not.toBeNull();
-      // "procrastinate" has 3 lapses and high difficulty, so it has higher urgency score than w1 and w3
-      expect(q?.word).toBe("procrastinate");
-      expect(q?.options.length).toBeLessThanOrEqual(3);
-      expect(q?.options.some((o) => o.isCorrect)).toBe(true);
+      expect(q?.scheduled).toBe(true);
+      expect(q?.direction).toBe("recognition");
+      expect(q?.options.length).toBe(3);
+      expect(q?.options.filter((o) => o.isCorrect)).toHaveLength(1);
+    });
+
+    it("never asks a brand-new word, and falls back to practice when nothing is due", () => {
+      const fresh = { ...dummyWords[0], id: "new", word: "brandnew", srs: { state: 0, reps: 0, next_review_date: new Date(0).toISOString() } } as WordDetail;
+      expect(selectMicroQuizQuestion([fresh], [fresh])).toBeNull();
+      const future = new Date(Date.now() + 86_400_000).toISOString();
+      const words = dummyWords.map((w) => ({ ...w, srs: { ...w.srs, next_review_date: future } })) as WordDetail[];
+      const q = selectMicroQuizQuestion([], words);
+      expect(q?.scheduled).toBe(false);
     });
   });
 
@@ -206,7 +217,7 @@ describe("duoMotivation algorithm", () => {
       { id: "opt3", text: "miễn cưỡng", isCorrect: false },
     ];
 
-    it("rates fast correct answer as Easy", async () => {
+    it("never rates a fast correct answer Easy (a 3-option pick proves recognition, not mastery)", async () => {
       const res = await evaluateMicroQuizAnswer({
         wordId: "w2",
         selectedChoiceId: "opt1",
@@ -215,8 +226,8 @@ describe("duoMotivation algorithm", () => {
         responseTimeMs: 2000,
       });
       expect(res.isCorrect).toBe(true);
-      expect(res.rating).toBe(Rating.Easy);
-      expect(res.ratingLabel).toBe("Easy");
+      expect(res.rating).toBe(Rating.Good);
+      expect(res.ratingLabel).toBe("Good");
     });
 
     it("rates normal speed correct answer as Good", async () => {
@@ -238,7 +249,7 @@ describe("duoMotivation algorithm", () => {
         selectedChoiceId: "opt1",
         options,
         targetMeaning: "trì hoãn, chần chừ",
-        responseTimeMs: 9000,
+        responseTimeMs: 16000,
       });
       expect(res.isCorrect).toBe(true);
       expect(res.rating).toBe(Rating.Hard);

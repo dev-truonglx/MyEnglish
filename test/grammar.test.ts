@@ -176,3 +176,17 @@ describe("recordGrammarExerciseAttempt & skipping", () => {
   });
 });
 
+
+describe("popup grammar comes in lesson pairs", () => {
+  it("returns exercises two per lesson so a lesson is graded on two answers", async () => {
+    vi.resetModules();
+    const db = await import("@/services/db");
+    await db.getDatabase();
+    const g = await import("@/services/grammarService");
+    const items = await g.getGrammarExercisesForReview(["A1", "A2"], 4);
+    expect(items).toHaveLength(4);
+    const perLesson = new Map<string, number>();
+    for (const i of items) perLesson.set(i.lesson.id, (perLesson.get(i.lesson.id) ?? 0) + 1);
+    for (const n of perLesson.values()) expect(n).toBe(g.MIN_LESSON_ANSWERS);
+  });
+});

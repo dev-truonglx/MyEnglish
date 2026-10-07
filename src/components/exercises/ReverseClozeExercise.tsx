@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { cleanMeaningForOption, wordFormsPattern } from "@/services/smartReview";
+import { generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
 
 interface ReverseClozeExerciseProps {
   word: WordDetail;
@@ -19,7 +19,8 @@ export default function ReverseClozeExercise({
   onSpeak,
   onFallback,
 }: ReverseClozeExerciseProps) {
-  const example = word.examples?.[0];
+  // Rotated example (the learner's own sentence first), only sentences that contain the word
+  const example = useMemo(() => pickExample(word), [word]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [wrongAttempts, setWrongAttempts] = useState(0);
@@ -32,46 +33,13 @@ export default function ReverseClozeExercise({
     }
   }, [example, onFallback]);
 
-  // Options generation
-  const options = useMemo(() => {
-    const correctOption = {
-      id: word.id,
-      text: cleanMeaningForOption(word.meaning_vn),
-      isCorrect: true,
-    };
-
-    const otherWords = allWords.filter(
-      (w) => w.id !== word.id && (w.meaning_vn || "").trim().length > 0
-    );
-    const shuffledOthers = [...otherWords].sort(() => 0.5 - Math.random());
-
-    // Skip distractors whose displayed text equals the correct one (or another distractor)
-    const usedTexts = new Set<string>([correctOption.text.trim().toLowerCase()]);
-    const distractorOptions: Array<{ id: string; text: string; isCorrect: boolean }> = [];
-    for (const w of shuffledOthers) {
-      if (distractorOptions.length >= 3) break;
-      const text = cleanMeaningForOption(w.meaning_vn);
-      const key = text.trim().toLowerCase();
-      if (!key || usedTexts.has(key)) continue;
-      usedTexts.add(key);
-      distractorOptions.push({ id: w.id, text, isCorrect: false });
-    }
-
-    // Fallbacks
-    const generic = ["Khả năng xử lý song song", "Bộ đệm lưu trữ tạm", "Độ trễ truyền tải mạng", "Kế thừa đa hình", "Kiểm thử tự động"]
-      .filter((t) => !usedTexts.has(t.toLowerCase()));
-    let fIdx = 0;
-    while (distractorOptions.length < 3 && fIdx < generic.length) {
-      distractorOptions.push({
-        id: `fb-${fIdx}`,
-        text: generic[fIdx % generic.length],
-        isCorrect: false,
-      });
-      fIdx++;
-    }
-
-    return [correctOption, ...distractorOptions].sort(() => 0.5 - Math.random());
-  }, [word, allWords]);
+  // Options: the shared generator (plausible distractors, never synonyms of the word)
+  const options = useMemo(
+    () => generateMultipleChoiceQuestion(word, allWords, "en_to_vn").options.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
+    // Options must not reshuffle while answering
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [word.id]
+  );
 
   useEffect(() => {
     setSelectedId(null);

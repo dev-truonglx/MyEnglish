@@ -17,6 +17,7 @@ import {
 import { updateWordTopic, PREDEFINED_TOPICS } from "@/services/db";
 import { parseTerms, parseCollocations } from "@/types/database";
 import { useWordsStore } from "@/stores/wordsStore";
+import { pipeline } from "@/services/pipeline";
 import { handleSpeak, type DashboardTab } from "./shared";
 
 interface WordInspectorProps {
@@ -42,6 +43,16 @@ export default function WordInspector({
   const selectedWord = useWordsStore((s) => s.selectedWord);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
   const setWords = useWordsStore((s) => s.setWords);
+  const allWords = useWordsStore((s) => s.words);
+  const inDeck = (term: string) => allWords.some((w) => w.word.trim().toLowerCase() === term.trim().toLowerCase());
+
+  /** Related terms are not added automatically (that bypassed the daily new-word limit); the learner chooses */
+  const addRelatedTerm = (term: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
+    pipeline.enqueue(term).then((res) =>
+      setMessage(res.accepted ? `Đã thêm "${term}" vào sổ từ, AI đang phân tích...` : `Không thể thêm "${term}": ${res.reason}`)
+    );
+  };
 
   const handleUpdateTopic = async (wordId: string, newTopic: string) => {
     const cleanTopic = newTopic.trim() || "General Tech";
@@ -244,6 +255,17 @@ export default function WordInspector({
                                 >
                                   <Volume2 className="w-3.5 h-3.5" />
                                 </button>
+                                {inDeck(s.word) ? (
+                                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">đã có trong sổ</span>
+                                ) : (
+                                  <button
+                                    onClick={(e) => addRelatedTerm(s.word, e)}
+                                    title="Thêm từ này vào sổ để học"
+                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/40"
+                                  >
+                                    + Thêm vào sổ
+                                  </button>
+                                )}
                               </div>
                               {s.meaning_vn && (
                                 <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">
@@ -394,6 +416,17 @@ export default function WordInspector({
                                 >
                                   <Volume2 className="w-3.5 h-3.5" />
                                 </button>
+                                {inDeck(a.word) ? (
+                                  <span className="text-[10px] text-slate-400 dark:text-zinc-500">đã có trong sổ</span>
+                                ) : (
+                                  <button
+                                    onClick={(e) => addRelatedTerm(a.word, e)}
+                                    title="Thêm từ này vào sổ để học"
+                                    className="text-[10px] font-semibold px-1.5 py-0.5 rounded border border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-900/40"
+                                  >
+                                    + Thêm vào sổ
+                                  </button>
+                                )}
                               </div>
                               {a.meaning_vn && (
                                 <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">

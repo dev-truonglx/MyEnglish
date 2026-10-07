@@ -33,7 +33,7 @@ export const BADGE_DEFINITIONS: Array<{
   {
     id: "first_word",
     title: "Bước Chân Đầu Tiên",
-    description: "Thêm từ vựng đầu tiên vào bộ sưu tập",
+    description: "Nhớ chắc từ đầu tiên (giữ được trong trí nhớ ít nhất 21 ngày)",
     emoji: "🌟",
     category: "learning",
     xpBonus: 50,
@@ -41,8 +41,8 @@ export const BADGE_DEFINITIONS: Array<{
   },
   {
     id: "vocab_50",
-    title: "Nhà Sưu Tầm",
-    description: "Bộ sưu tập đạt 50 từ vựng",
+    title: "Trí Nhớ Vững",
+    description: "Nhớ chắc 50 từ (ổn định ít nhất 21 ngày)",
     emoji: "📖",
     category: "learning",
     xpBonus: 100,
@@ -51,7 +51,7 @@ export const BADGE_DEFINITIONS: Array<{
   {
     id: "vocab_200",
     title: "Bách Khoa Toàn Thư",
-    description: "Bộ sưu tập đạt 200 từ vựng",
+    description: "Nhớ chắc 200 từ (ổn định ít nhất 21 ngày)",
     emoji: "📚",
     category: "learning",
     xpBonus: 250,
@@ -60,7 +60,7 @@ export const BADGE_DEFINITIONS: Array<{
   {
     id: "vocab_500",
     title: "Lexicon Master",
-    description: "Bộ sưu tập đạt mốc 500 từ vựng",
+    description: "Nhớ chắc 500 từ (ổn định ít nhất 21 ngày)",
     emoji: "🏛️",
     category: "learning",
     xpBonus: 500,
@@ -69,9 +69,9 @@ export const BADGE_DEFINITIONS: Array<{
   {
     id: "perfect_10",
     title: "Xạ Thủ Trí Nhớ",
-    description: "10 câu trả lời đúng ngay lần đầu liên tiếp trong 1 phiên",
+    description: "10 thẻ đến hạn liên tiếp nhớ đúng ngay lần đầu trong 1 phiên",
     emoji: "🎯",
-    category: "speed",
+    category: "mastery",
     xpBonus: 150,
     targetValue: 10,
   },
@@ -121,12 +121,12 @@ export const BADGE_DEFINITIONS: Array<{
     targetValue: 3,
   },
   {
-    id: "speed_demon",
-    title: "Phản Xạ Siêu Tốc",
-    description: "Trả lời đúng trong dưới 3 giây",
-    emoji: "⚡",
-    category: "speed",
-    xpBonus: 80,
+    id: "on_target",
+    title: "Đúng Nhịp Trí Nhớ",
+    description: "Một tuần có tỉ lệ nhớ thật đạt mục tiêu (ít nhất 30 lượt ôn đúng lịch)",
+    emoji: "🧠",
+    category: "mastery",
+    xpBonus: 150,
     targetValue: 1,
   },
   {
@@ -138,15 +138,6 @@ export const BADGE_DEFINITIONS: Array<{
     xpBonus: 200,
     targetValue: 10,
   },
-  {
-    id: "marathon_50",
-    title: "Marathon Runner",
-    description: "Ôn tập 50 lượt từ trong một phiên duy nhất",
-    emoji: "🏃",
-    category: "learning",
-    xpBonus: 300,
-    targetValue: 50,
-  },
 ];
 
 interface StoredAchievement {
@@ -155,6 +146,8 @@ interface StoredAchievement {
 
 export function getAchievements(context?: {
   totalWords?: number;
+  masteredWords?: number;
+  weekOnTarget?: boolean;
   currentStreak?: number;
   consecutiveCorrect?: number;
   sessionReviewCount?: number;
@@ -179,7 +172,10 @@ export function getAchievements(context?: {
       case "vocab_50":
       case "vocab_200":
       case "vocab_500":
-        currentValue = ctx.totalWords || 0;
+        currentValue = ctx.masteredWords || 0;
+        break;
+      case "on_target":
+        currentValue = ctx.weekOnTarget ? 1 : 0;
         break;
       case "streak_7":
       case "streak_30":
@@ -188,14 +184,8 @@ export function getAchievements(context?: {
       case "perfect_10":
         currentValue = ctx.consecutiveCorrect || 0;
         break;
-      case "marathon_50":
-        currentValue = ctx.sessionReviewCount || 0;
-        break;
       case "leech_slayer":
         currentValue = ctx.leechesSlain || 0;
-        break;
-      case "speed_demon":
-        currentValue = ctx.fastAnswers || 0;
         break;
       case "topic_master":
         currentValue = ctx.topicMasterCount || 0;
@@ -226,6 +216,8 @@ export function getAchievements(context?: {
 
 export interface AchievementCheckContext {
   totalWords?: number;        // whole collection size (not just this session)
+  masteredWords?: number;     // words with recognition stability >= 21 days
+  weekOnTarget?: boolean;     // this week's true retention reached the target (enough reviews)
   currentStreak?: number;     // real day streak
   consecutiveCorrect?: number;
   sessionReviewCount?: number;
@@ -258,12 +250,14 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
   };
 
   // Evaluate conditions
-  if (context.totalWords !== undefined) {
-    evaluateBadge("first_word", context.totalWords >= 1);
-    evaluateBadge("vocab_50", context.totalWords >= 50);
-    evaluateBadge("vocab_200", context.totalWords >= 200);
-    evaluateBadge("vocab_500", context.totalWords >= 500);
+  // Badges reward what was remembered, not how many words were added or how fast answers came
+  if (context.masteredWords !== undefined) {
+    evaluateBadge("first_word", context.masteredWords >= 1);
+    evaluateBadge("vocab_50", context.masteredWords >= 50);
+    evaluateBadge("vocab_200", context.masteredWords >= 200);
+    evaluateBadge("vocab_500", context.masteredWords >= 500);
   }
+  if (context.weekOnTarget) evaluateBadge("on_target", true);
 
   if (context.currentStreak !== undefined) {
     evaluateBadge("streak_7", context.currentStreak >= 7);
@@ -274,20 +268,12 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
     evaluateBadge("perfect_10", context.consecutiveCorrect >= 10);
   }
 
-  if (context.sessionReviewCount !== undefined) {
-    evaluateBadge("marathon_50", context.sessionReviewCount >= 50);
-  }
-
   if (context.leechesSlain !== undefined) {
     evaluateBadge("leech_slayer", context.leechesSlain >= 3);
   }
 
   if (context.topicMasterCount !== undefined) {
     evaluateBadge("topic_master", context.topicMasterCount >= 10);
-  }
-
-  if (context.isCorrect && context.responseTimeMs && context.responseTimeMs > 0 && context.responseTimeMs < 3000) {
-    evaluateBadge("speed_demon", true);
   }
 
   // Time based

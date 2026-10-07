@@ -1,3 +1,6 @@
+import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
+import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
+import { getQuietHours } from "@/services/reminderMoments";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
@@ -75,6 +78,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [notifFeedback, setNotifFeedback] = useState<string | null>(null);
   const [fsrsSettings, setFsrsSettings] = useState(() => getFSRSSettings());
   const [studyLimits, setStudyLimits] = useState(() => getStudyLimits());
+  const [pretestOn, setPretestOn] = useState(isPretestEnabled);
   const [testingNotif, setTestingNotif] = useState(false);
   const [testingDueWord, setTestingDueWord] = useState(false);
   const [testingPopup, setTestingPopup] = useState(false);
@@ -105,8 +109,6 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   };
 
   // API Key state (optional fallback)
-  const [apiKey, setApiKey] = useState("");
-  const [apiKeySaved, setApiKeySaved] = useState(false);
 
   // Custom CLI Path state
   const [customCliPath, setCustomCliPath] = useState("");
@@ -152,9 +154,9 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       checkCli();
     }
 
+    // A key used to be saved here in plain text but was never used: remove it
     try {
-      const savedKey = localStorage.getItem("myenglish_gemini_api_key");
-      if (savedKey) setApiKey(savedKey);
+      localStorage.removeItem("myenglish_gemini_api_key");
     } catch {}
 
     const syncSettings = () => {
@@ -274,19 +276,6 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     } finally {
       setTestingDueWord(false);
     }
-  };
-
-  const handleSaveApiKey = (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      if (apiKey.trim()) {
-        localStorage.setItem("myenglish_gemini_api_key", apiKey.trim());
-      } else {
-        localStorage.removeItem("myenglish_gemini_api_key");
-      }
-      setApiKeySaved(true);
-      setTimeout(() => setApiKeySaved(false), 2500);
-    } catch {}
   };
 
   const handleSaveCustomPath = (e: React.FormEvent) => {
@@ -1109,6 +1098,42 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                     onChange={(e) => handleUpdateReminder({ preferPrimaryMonitor: e.target.checked })}
                   />
                 </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Nhắc vào lúc chuyển việc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Ngoài chu kỳ trên, nhắc sớm hơn vào lúc bạn vừa quay lại máy (buổi sáng, sau khi rời máy hoặc
+                      máy ngủ), vừa tắt chia sẻ màn hình hoặc vừa thoát ứng dụng toàn màn hình. Chỉ khi có thẻ cần ôn,
+                      và cách lời nhắc trước ít nhất 20 phút.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.contextMoments}
+                    onChange={(e) => handleUpdateReminder({ contextMoments: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Né giờ bạn hay bỏ qua lời nhắc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Học từ 30 ngày gần nhất: giờ nào lời nhắc gần như luôn bị hoãn hoặc bỏ qua thì không nhắc theo
+                      chu kỳ vào giờ đó (lời nhắc lúc chuyển việc vẫn hiện).
+                      {getQuietHours().length > 0 && ` Hiện đang né: ${getQuietHours().map((h) => `${h}h`).join(", ")}.`}
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.avoidQuietHours}
+                    onChange={(e) => handleUpdateReminder({ avoidQuietHours: e.target.checked })}
+                  />
+                </label>
               </div>
 
               {/* Field 4: Words per Session */}
@@ -1410,13 +1435,13 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   key: "newCardsPerDay" as const,
                   title: "Số từ mới mỗi ngày",
                   desc: "Giới hạn số từ chưa học được đưa vào ôn mỗi ngày để lượng ôn tập không dồn ứ.",
-                  options: [5, 10, 20, 30],
+                  options: [3, 5, 8, 10, 20],
                 },
                 {
                   key: "maxSessionSize" as const,
                   title: "Số thẻ tối đa mỗi phiên",
                   desc: "Từ đến hạn được ưu tiên trước, từ mới xen kẽ đều trong phiên.",
-                  options: [15, 30, 50, 100],
+                  options: [20, 30, 40, 50, 100],
                 },
               ]).map((cfg) => (
                 <div key={cfg.key} className="space-y-1.5">
@@ -1429,7 +1454,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       {studyLimits[cfg.key]}
                     </span>
                   </div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-5 gap-2">
                     {cfg.options.map((val) => (
                       <button
                         key={val}
@@ -1450,7 +1475,26 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   </div>
                 </div>
               ))}
+              <label className="flex items-start justify-between gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800 cursor-pointer">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white">Đoán nghĩa trước khi học từ mới</div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                    Trước thẻ giới thiệu, đoán nghĩa từ trong một câu ví dụ (3 lựa chọn). Đoán trước, kể cả đoán sai, giúp nhớ lâu hơn. Không tính điểm.
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={pretestOn}
+                  onChange={(e) => {
+                    setPretestEnabled(e.target.checked);
+                    setPretestOn(e.target.checked);
+                  }}
+                  className="mt-1 accent-cyan-600"
+                />
+              </label>
             </div>
+
+            <AdvancedLearningSettings />
 
             <div className="text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">
               <p>
@@ -1496,36 +1540,14 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 </li>
                 <li>Đăng nhập bằng tài khoản Google (Gmail thông thường miễn phí).</li>
                 <li>Bấm nút <strong>"Create API key"</strong> và copy chuỗi key tạo ra.</li>
-                <li>Dán key vào ô bên dưới và bấm Lưu.</li>
+                <li>Khai báo key cho CLI theo hướng dẫn bên dưới.</li>
               </ol>
             </div>
 
-            <form onSubmit={handleSaveApiKey} className="space-y-3">
-              <label className="text-xs font-semibold text-slate-800 dark:text-zinc-200 block">
-                Cấu hình Gemini API Key:
-              </label>
-              <div className="flex gap-2">
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="AIzaSy..."
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-cyan-500 shadow-sm"
-                />
-                <button
-                  type="submit"
-                  className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold shadow-sm transition-all"
-                >
-                  Lưu cấu hình
-                </button>
-              </div>
-              {apiKeySaved && (
-                <div className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1.5 animate-in fade-in">
-                  <Check className="w-3.5 h-3.5" />
-                  <span>Đã lưu API Key thành công vào bộ nhớ ứng dụng!</span>
-                </div>
-              )}
-            </form>
+            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Khai báo key cho chính CLI (ví dụ biến môi trường <code className="font-mono">GEMINI_API_KEY</code> trong shell của bạn, hoặc lệnh đăng
+              nhập của CLI). Ứng dụng không lưu API key: mọi lời gọi AI đều đi qua CLI đã cấu hình trên máy.
+            </p>
           </div>
         </div>
       )}

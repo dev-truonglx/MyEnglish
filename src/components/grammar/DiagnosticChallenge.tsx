@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type FormEvent } from "react";
+import { GRAMMAR_PASS_SCORE } from "@/services/grammarService";
+import { handleSpeak } from "@/components/review/speech";
 import {
   Volume2,
   CheckCircle2,
@@ -172,19 +174,7 @@ export default function DiagnosticChallenge({
     [currentIndex]
   );
 
-  const speakText = useCallback((text: string) => {
-    try {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "en-US";
-        utterance.rate = 0.95;
-        window.speechSynthesis.speak(utterance);
-      }
-    } catch (e) {
-      console.warn("TTS error:", e);
-    }
-  }, []);
+  const speakText = useCallback((text: string) => handleSpeak(text, 0.95), []);
 
   // Split sentence for error_spotting clickable tokens
   const wordsForErrorSpotting = useMemo(() => {
@@ -320,7 +310,7 @@ export default function DiagnosticChallenge({
         if (e.key === "Enter") {
           e.preventDefault();
           const scorePercent = exerciseList.length > 0 ? Math.round((correctCount / exerciseList.length) * 100) : 0;
-          if (onNextLesson && scorePercent >= 70) {
+          if (onNextLesson && scorePercent >= GRAMMAR_PASS_SCORE) {
             onNextLesson();
           } else {
             handleRestart();
@@ -455,7 +445,7 @@ export default function DiagnosticChallenge({
   if (isCompletedAll) {
     const total = exerciseList.length;
     const scorePercent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
-    const passed = scorePercent >= 70;
+    const passed = scorePercent >= GRAMMAR_PASS_SCORE;
     const skippedCount = exerciseList.filter((e) => skippedIds.has(e.id)).length;
     const unmastered = exerciseList.filter((e) => !outcomes[e.id]);
 

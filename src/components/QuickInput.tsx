@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, type FormEvent, type KeyboardEvent } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { looksLikeSentence, sentenceContainsWord, stashPendingContext } from "@/services/contextHandover";
 import { listen } from "@tauri-apps/api/event";
 import { Sparkles, CornerDownLeft, X, Terminal, ArrowUpRight, Clipboard } from "lucide-react";
 
@@ -65,6 +66,8 @@ export default function QuickInput({
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [fromClipboard, setFromClipboard] = useState(false);
+  // The clipboard held a sentence: the learner picks the word from it, and the sentence is kept as context
+  const [contextSentence, setContextSentence] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   // Latest typed value for mount-time listeners
   const wordRef = useRef("");
@@ -114,6 +117,7 @@ export default function QuickInput({
     }
 
     const candidate = sanitizeCandidateWord(clipText);
+    setContextSentence(!candidate && looksLikeSentence(clipText) ? clipText.replace(/\s+/g, " ").trim() : null);
     if (candidate) {
       setWord(candidate);
       setFromClipboard(true);
@@ -222,9 +226,12 @@ export default function QuickInput({
     setFeedback(null);
 
     try {
+      // Hand the sentence the word came from to the main window (it saves it as the word's first example)
+      if (contextSentence && sentenceContainsWord(contextSentence, clean)) stashPendingContext(clean, contextSentence);
       await invoke("submit_word", { word: clean });
       setWord("");
       setFromClipboard(false);
+      setContextSentence(null);
       setFeedback(`Word "${clean}" queued for AI enrichment!`);
       if (onSubmitted) {
         onSubmitted(clean);
@@ -325,6 +332,34 @@ export default function QuickInput({
             </button>
           </div>
         </form>
+
+        {contextSentence && (
+          <div className="mt-2 px-1 text-[11px] text-slate-600 dark:text-slate-300 leading-relaxed">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-cyan-600 dark:text-cyan-400 mr-1.5">
+              Câu ngữ cảnh — bấm vào từ muốn học:
+            </span>
+            {contextSentence.split(" ").map((tok, i) => {
+              const clean = tok.replace(/^[^A-Za-z]+|[^A-Za-z'’-]+$/g, "");
+              return clean ? (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => {
+                    setWord(clean.toLowerCase());
+                    inputRef.current?.focus();
+                  }}
+                  className={`mr-1 rounded px-0.5 hover:bg-cyan-100 dark:hover:bg-cyan-900/40 ${
+                    word.trim().toLowerCase() === clean.toLowerCase() ? "bg-cyan-100 dark:bg-cyan-900/50 font-semibold" : ""
+                  }`}
+                >
+                  {tok}
+                </button>
+              ) : (
+                <span key={i} className="mr-1">{tok}</span>
+              );
+            })}
+          </div>
+        )}
 
         {/* Footer shortcuts helper */}
         <div className="mt-2 pt-2 border-t border-slate-200 dark:border-slate-800/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 px-1">

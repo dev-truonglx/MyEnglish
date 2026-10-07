@@ -10,8 +10,10 @@ import {
   GenSeedStrategyWithCardId,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getAllWords, getDueWordsFromDb, countDueWords, SRS_COLUMNS } from "./db";
+import { getDatabase, getAllWords, getDueWordsFromDb, countDueCards, SRS_COLUMNS } from "./db";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
+import { getStoredWeights } from "./fsrsOptimizer";
+import { applyComebackToWork, resolveComeback, type ComebackStatus } from "./comeback";
 
 export { Rating, State };
 
@@ -135,10 +137,13 @@ export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
   const request_retention = customSettings?.requestRetention ?? current.requestRetention;
   const maximum_interval = customSettings?.maximumInterval ?? current.maximumInterval;
 
-  const key = `${request_retention}|${maximum_interval}`;
+  // Personal weights from the optimizer, when the learner applied them
+  const personal = getStoredWeights();
+  const key = `${request_retention}|${maximum_interval}|${personal?.computedAt ?? "default"}`;
   if (cachedScheduler?.key === key) return cachedScheduler.scheduler;
 
   const params = generatorParameters({
+    ...(personal ? { w: personal.w } : {}),
     request_retention,
     maximum_interval,
     // Fuzz spreads out cards added on the same day so reviews don't pile up on one date
@@ -371,20 +376,15 @@ export async function recordReview(
   );
 
   // Once a word is known by recognition, start training recall with its own production card.
-  // It becomes due tomorrow so both directions are not drilled in the same session.
-  // Kế thừa một phần sức mạnh từ thẻ Recognition để FSRS không coi đây là từ hoàn toàn xa lạ.
+  // It becomes due tomorrow so both directions are not drilled in the same session. It starts as a New
+  // card: FSRS sets its initial stability from the first recall grade, which is the real evidence of how
+  // well the word can be produced (copying the recognition stability would overstate it, and a non-new
+  // card would also bypass the daily limit of new recall cards).
   if (direction === "recognition" && updatedCard.state === State.Review) {
-    const inheritedDiff = Math.min(10, Number((updatedCard.difficulty + 1.5).toFixed(4)));
-    const inheritedStab = Math.max(1, Number((updatedCard.stability * 0.5).toFixed(4)));
     await db.execute(
       `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
-       VALUES ($1, $2, 1, 1, 0, $3, $4, 0)`,
-      [
-        wordId, 
-        new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString(),
-        inheritedStab,
-        inheritedDiff
-      ]
+       VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
+      [wordId, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()]
     );
   }
 
@@ -440,11 +440,35 @@ export async function triggerDesktopNotification(title: string, body: string): P
 }
 
 /**
+ * What is left to study today (reviews due + new cards the daily budget still allows). Also shows it on
+ * the menu-bar / tray icon.
+ */
+export async function countTodayWork(): Promise<{
+  reviews: number;
+  newToday: number;
+  total: number;
+  comeback: ComebackStatus | null;
+}> {
+  const { todayWorkFromCounts, getNewCardsIntroducedToday } = await import("./smartReview");
+  const [counts, introduced] = await Promise.all([
+    countDueCards(),
+    getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 })),
+  ]);
+  const limits = getStudyLimits();
+  const full = todayWorkFromCounts(counts, introduced, limits.newCardsPerDay);
+  // After a break, only today's share of the backlog is counted (see comeback.ts)
+  const comeback = resolveComeback(full.reviews, limits.maxSessionSize);
+  const work = applyComebackToWork(full, comeback);
+  invoke("set_tray_due_count", { reviews: work.reviews, newCards: work.newToday }).catch(() => {});
+  return { ...work, comeback };
+}
+
+/**
  * Trigger an OS notification if reviews are due
  */
 export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Promise<number> {
   try {
-    const dueCount = await countDueWords();
+    const dueCount = (await countTodayWork()).total;
     if (dueCount === 0) {
       if (sendIfZero) {
         await triggerDesktopNotification(
@@ -457,7 +481,7 @@ export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Pro
 
     await triggerDesktopNotification(
       "MyEnglish • Ôn tập từ vựng!",
-      `Bạn có ${dueCount} từ vựng cần ôn tập hôm nay. Dành 3 phút ôn ngay nhé!`
+      `Còn ${dueCount} thẻ cần học hôm nay (~${Math.max(1, Math.round(dueCount * 0.2))} phút).`
     );
 
     return dueCount;
@@ -567,6 +591,14 @@ import {
   sendDuoDesktopNotification,
 } from "./duoMotivation";
 import { computeStreak, getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
+import {
+  detectMoment,
+  getQuietHours,
+  refreshQuietHours,
+  MIN_GAP_AFTER_REMINDER_MS,
+  MOMENT_WINDOW_MS,
+  type ReminderMoment,
+} from "./reminderMoments";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -675,17 +707,58 @@ class SRSBackgroundWorker {
     }
   }
 
+  private lastTrayRefresh = 0;
+  private lastQuietRefresh = 0;
+  /** Previous reading of the computer's state, to notice transitions */
+  private lastObservation: { at: number; blockers: PopupBlockers | null } | null = null;
+  /** The last transition seen, usable for MOMENT_WINDOW_MS */
+  private pendingMoment: { kind: ReminderMoment; at: number } | null = null;
+  /** The moment this tick's reminder is shown for (null = by the clock) */
+  private activeMoment: ReminderMoment | null = null;
+
+  /** Read the computer's state (at most every 10 s) and remember the latest transition */
+  private async observeMoment(now: number): Promise<ReminderMoment | null> {
+    const prev = this.lastObservation;
+    if (!prev || now - prev.at >= 10_000) {
+      const blockers = await invoke<PopupBlockers>("get_popup_blockers").catch(() => null);
+      this.lastObservation = { at: now, blockers };
+      if (prev) {
+        const logs = getActivityLogs();
+        const kind = detectMoment(prev.blockers, blockers, now - prev.at, {
+          hour: new Date(now).getHours(),
+          studiedToday: (logs[getLocalDateString()] || 0) > 0,
+        });
+        if (kind) this.pendingMoment = { kind, at: now };
+      }
+    }
+    if (this.pendingMoment && now - this.pendingMoment.at > MOMENT_WINDOW_MS) this.pendingMoment = null;
+    return this.pendingMoment?.kind ?? null;
+  }
+
   public async tick(forceTrigger: boolean = false) {
     if (this.isTicking && !forceTrigger) return;
     this.isTicking = true;
 
     try {
+      // Keep the menu-bar / tray count fresh (once a minute), whatever the reminder settings
+      if (Date.now() - this.lastTrayRefresh > 60 * 1000) {
+        this.lastTrayRefresh = Date.now();
+        countTodayWork().catch(() => {});
+      }
       const settings = getReminderSettings();
+      this.activeMoment = null;
       if (!forceTrigger) {
         if (!settings.enabled || settings.intervalMinutes === 0) return;
-        if (isSnoozed()) return;
 
         const now = Date.now();
+        // Natural transitions (back at the computer, screen share over...) may bring the reminder forward
+        const moment = settings.contextMoments ? await this.observeMoment(now) : null;
+        if (settings.avoidQuietHours && now - this.lastQuietRefresh > 60 * 60 * 1000) {
+          this.lastQuietRefresh = now;
+          refreshQuietHours().catch(() => {});
+        }
+        if (isSnoozed()) return;
+
         const lastDisplay = getLastPopupDisplayTime();
 
         // Nếu chưa từng hiển thị lần nào (hoặc lần đầu mở app),
@@ -696,15 +769,23 @@ class SRSBackgroundWorker {
         }
 
         // ĐIỀU KIỆN CỐT LÕI: Thời gian lần tiếp theo hiển thị phải tính từ lần cuối cùng popup hiển thị!
+        // A transition moment can come earlier, but never right after the previous reminder.
+        const momentReady = !!moment && now - lastDisplay >= MIN_GAP_AFTER_REMINDER_MS;
         const nextTime = getNextReminderTime();
-        if (now < nextTime) {
+        if (now < nextTime && !momentReady) {
           return; // Chưa đến giờ hiển thị tiếp theo
         }
+        // A clock reminder in an hour where reminders are almost always ignored waits for a better hour
+        if (!momentReady && settings.avoidQuietHours && getQuietHours().includes(new Date(now).getHours())) {
+          return;
+        }
+        this.activeMoment = momentReady ? moment : null;
       }
 
       if (!forceTrigger) {
+        const work = await countTodayWork();
         if (settings.triggerCondition === "due_only") {
-          if ((await countDueWords()) === 0) return;
+          if (work.total === 0) return;
         } else {
           const db = await getDatabase();
           const rows = await db.select<{ cnt: number }[]>(`SELECT COUNT(*) as cnt FROM words;`);
@@ -735,7 +816,7 @@ class SRSBackgroundWorker {
 
       // Gentle start: a small corner card that doesn't take focus; the user opens the review from it,
       // otherwise it snoozes itself after a countdown (triggerReviewNudge records the display time)
-      const dueCount = await countDueWords();
+      const { total: dueCount, comeback } = await countTodayWork();
       let motivation = undefined;
       let microQuiz = undefined;
 
@@ -754,25 +835,32 @@ class SRSBackgroundWorker {
           todayCount,
           dailyGoal,
           hour: new Date().getHours(),
+          comeback,
+          moment: this.activeMoment,
         });
 
         const dueWords = await getDueWordsFromDb();
         const allWords = await getAllWords();
         microQuiz = selectMicroQuizQuestion(dueWords, allWords);
 
-        // Also trigger native OS notification if user has been skipping or during streak emergency
-        if (
-          consecutiveSkips >= 2 ||
-          motivation.tone === "level_3_streak_fomo" ||
-          motivation.tone === "level_4_drama_resignation"
-        ) {
-          sendDuoDesktopNotification(motivation, dueCount).catch(() => {});
+        // An OS notification only when the streak is at risk late in the day, at most once a day.
+        // Snoozing / skipping is the learner's choice and is never escalated into more notifications.
+        if (motivation.tone === "level_3_streak_fomo") {
+          const todayKey = `myenglish_streak_notice_${getLocalDateString()}`;
+          try {
+            if (!localStorage.getItem(todayKey)) {
+              localStorage.setItem(todayKey, "1");
+              sendDuoDesktopNotification(motivation, dueCount).catch(() => {});
+            }
+          } catch {}
         }
       } catch (err) {
         console.warn("Error preparing Duo motivation payload:", err);
       }
 
-      await triggerReviewNudge(dueCount, { motivation, microQuiz });
+      await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
+      // The moment was used: the next one has to be a new transition
+      this.pendingMoment = null;
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
     } finally {

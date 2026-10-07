@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "review-nudge",
+  "description": "Reminder nudge card: payload hand-off and hover polling",
+  "windows": [
+    "review-nudge"
+  ],
+  "permissions": [
+    "allow-take-review-nudge-payload",
+    "allow-is-cursor-over-nudge"
+  ]
+}

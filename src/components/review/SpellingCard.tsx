@@ -23,7 +23,7 @@ interface SpellingCardProps {
   handleShowAnswer: () => void;
 }
 
-/** MODE 3: SPELLING PRACTICE (listen / read the meaning, then type the word) */
+/** MODE 3: SPELLING RECALL (read the meaning, then type the word; audio only after answering) */
 export default function SpellingCard({
   currentWord,
   hasCheckedAnswer,
@@ -52,22 +52,16 @@ export default function SpellingCard({
                 Luyện gõ chính tả (Spelling Recall)
               </span>
               <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Gõ từ và nhấn Enter. Đúng sẽ tự động chuyển, sai sẽ cho nhập lại.
+                Đọc nghĩa, tự nhớ ra từ tiếng Anh rồi nhấn Enter. Phát âm sẽ được đọc sau khi trả lời.
               </p>
             </div>
 
             {/* Audio & Clue Card */}
             <div className="p-5 md:p-6 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-center space-y-3.5 max-w-lg mx-auto w-full shadow-inner shrink-0">
-              <button
-                onClick={() => handleSpeak(currentWord.word)}
-                className="mx-auto px-5 py-2 rounded-full bg-emerald-100 hover:bg-emerald-200 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-800 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-500/30 transition-all flex items-center gap-2 text-xs font-semibold shadow-xs hover:scale-105 active:scale-95"
-              >
-                <Volume2 className="w-4 h-4" />
-                <span>Nghe phát âm</span>
-              </button>
-
-              {currentWord.phonetic && (
-                <div className="text-sm font-mono text-emerald-700 dark:text-emerald-400 font-semibold">{currentWord.phonetic}</div>
+              {/* No audio or IPA before answering: hearing the word would turn recall into dictation.
+                  The pronunciation plays as feedback once the answer is checked. */}
+              {currentWord.part_of_speech && (
+                <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">({currentWord.part_of_speech})</div>
               )}
 
               <div className="p-3 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-sm">

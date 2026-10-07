@@ -9,12 +9,13 @@
  * 5. XP System — gamified experience points
  */
 
-import type { WordDetail, SRSReview, ReviewCard, CardDirection } from "@/types/database";
+import { parseTerms, type WordDetail, type WordExample, type SRSReview, type ReviewCard, type CardDirection } from "@/types/database";
 import Database from "@tauri-apps/plugin-sql";
 import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
-import { getCardRetrievability, getFSRSSettings, getStudyLimits } from "./srs";
+import { getCardRetrievability, getStudyLimits } from "./srs";
 import { directionForExercise, getDueCards } from "./cards";
+import { persistKeyNow } from "./storageBackup";
 
 // ─── 1. RETRIEVABILITY ──────────────────────────────────────────────────────
 
@@ -130,13 +131,33 @@ export function isLeech(srs: Partial<SRSReview>, settings?: LeechSettings): bool
   return lapses >= threshold;
 }
 
+/** A word is a leech when either of its cards is (recall cards are forgotten more often). */
+export function isLeechWord(word: WordDetail, settings?: LeechSettings): boolean {
+  const s = settings || getLeechSettings();
+  return isLeech(word.srs, s) || (!!word.srsProduction && isLeech(word.srsProduction, s));
+}
+
 /**
  * Get all leech words from a word list
  */
 export function getLeechWords(words: WordDetail[], settings?: LeechSettings): WordDetail[] {
   const s = settings || getLeechSettings();
   if (!s.enabled) return [];
-  return words.filter((w) => isLeech(w.srs, s));
+  return words.filter((w) => isLeechWord(w, s));
+}
+
+/** Suspended words (leech action "suspend", or suspended by hand) are left out of every review session. */
+export function isSuspended(word: Partial<WordDetail>): boolean {
+  return !!word.suspended;
+}
+
+/**
+ * A leech whose action is "relearn" is studied again like a new word before its next quiz: the word,
+ * meaning, examples and memory hook are shown first, and the quiz comes a few cards later.
+ */
+export function needsRelearnIntro(card: ReviewCard, settings?: LeechSettings): boolean {
+  const s = settings || getLeechSettings();
+  return s.enabled && s.action === "relearn" && isLeech(card.srs, s);
 }
 
 // ─── 3. ADAPTIVE QUEUE ORDERING ─────────────────────────────────────────────
@@ -146,67 +167,48 @@ export interface WordPriority {
   word: string;
   urgencyScore: number;
   factors: {
-    overdueness: number;      // Based on retrievability drop
-    difficulty: number;       // FSRS difficulty 1-10
-    leechBonus: number;       // Extra priority for leeches
-    lapsePenalty: number;     // Extra for frequently forgotten words
+    /** Retrievability now (0..1) */
+    retrievability: number;
+    /** Retrievability the card loses if its review waits one more day (0..1) */
+    dailyLoss: number;
+    /** Learning / relearning cards are on minute-level steps and always go first */
+    shortTerm: boolean;
+    isDue: boolean;
   };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 /**
- * Calculate composite urgency score for a word.
- * Higher score = should be reviewed sooner.
+ * Review priority of a card (higher = review sooner), from the FSRS memory model rather than hand-tuned weights:
+ *  - learning / relearning cards first: their minute-level steps only work if they come back soon
+ *  - review cards by how much memory is lost if the review waits one more day: R(now) - R(now + 1 day).
+ *    A card just reaching its due date with low stability loses the most; a card with high stability
+ *    loses little; a card overdue for weeks is already mostly forgotten and loses little more.
+ *    When the backlog is larger than a session, this keeps the most memory per review.
+ *  - cards that are not due are pushed far behind due cards (used by practice / micro-quiz fallbacks).
+ * Leeches get no bonus: drilling them first makes sessions heavy, they are spread and capped instead.
  */
-export function calculateUrgencyScore(
-  word: WordDetail,
-  now: Date = new Date()
-): WordPriority {
+export function calculateUrgencyScore(word: WordDetail, now: Date = new Date()): WordPriority {
   const srs = word.srs;
-  const isNew = (srs.state ?? 0) === 0 && (srs.reps ?? 0) === 0;
-  const leechSettings = getLeechSettings();
-
-  // Factor 1: Overdueness — how far retrievability has dropped below the user's target retention.
-  // New cards have no memory yet, so they are not "overdue".
-  const targetRetention = getFSRSSettings().requestRetention;
-  const R = isNew ? targetRetention : calculateRetrievability(srs, now);
-  const overdueness = Math.max(0, (targetRetention - R) * 50);
-
-  // Factor 2: Difficulty — harder words get slight priority
-  const difficulty = isNew ? 0 : srs.difficulty ?? 5;
-
-  // Factor 3: Leech bonus — leeches get strong priority
-  const leechBonus = isLeech(srs, leechSettings) ? 25 : 0;
-
-  // Factor 4: Lapse penalty — more lapses = more forgotten = more urgency
-  const lapsePenalty = Math.min(15, (srs.lapses ?? 0) * 3);
-
+  const state = srs.state ?? 0;
+  const isNew = state === 0 && (srs.reps ?? 0) === 0;
   const isDue = srs.next_review_date ? new Date(srs.next_review_date).getTime() <= now.getTime() : true;
-  // If card is not due yet, heavily downweight its urgency so it never outranks truly due cards
-  const dueWeight = isDue ? 1 : 0.05;
+  const shortTerm = state === 1 || state === 3;
+  const R = isNew ? 0 : calculateRetrievability(srs, now);
+  const dailyLoss = isNew || shortTerm ? 0 : Math.max(0, R - calculateRetrievability(srs, new Date(now.getTime() + DAY_MS)));
 
-  // Recent review cooldown: if reviewed within 60 minutes and already in Review state, heavily scale down urgency
-  let cooldownWeight = 1;
-  // Chỉ áp dụng cooldown cho thẻ đã học xong (State.Review = 2), KHÔNG phạt thẻ đang học (Learning/Relearning)
-  if (srs.last_review && srs.state === 2) {
-    const elapsedMinutes = (now.getTime() - new Date(srs.last_review).getTime()) / (60 * 1000);
-    if (elapsedMinutes < 60) {
-      cooldownWeight = Math.max(0.01, elapsedMinutes / 60);
-    }
-  }
-
-  const rawScore = overdueness + difficulty + leechBonus + lapsePenalty;
-  const urgencyScore = rawScore * dueWeight * cooldownWeight;
+  let score: number;
+  if (isNew) score = 0;
+  else if (shortTerm) score = 200 + Math.min(50, (now.getTime() - new Date(srs.next_review_date).getTime()) / 60000);
+  else score = 100 * dailyLoss;
+  if (!isDue) score *= 0.01;
 
   return {
     wordId: word.id,
     word: word.word,
-    urgencyScore,
-    factors: {
-      overdueness,
-      difficulty,
-      leechBonus,
-      lapsePenalty,
-    },
+    urgencyScore: score,
+    factors: { retrievability: R, dailyLoss, shortTerm, isDue },
   };
 }
 
@@ -215,8 +217,7 @@ function topicOf(word: WordDetail): string {
 }
 
 /**
- * Sort words for optimal review order using urgency scoring.
- * Returns a new array sorted by urgency (highest first), interleaved so that
+ * Sort words for optimal review order (highest priority first), interleaved so that
  * no more than 2 consecutive words share a topic when an alternative exists.
  */
 export function smartSortReviewQueue<T extends WordDetail>(
@@ -228,10 +229,12 @@ export function smartSortReviewQueue<T extends WordDetail>(
     score: calculateUrgencyScore(w, now).urgencyScore,
   }));
   scored.sort((a, b) => b.score - a.score);
+  return interleaveTopics(scored.map((s) => s.word));
+}
 
+function interleaveTopics<T extends WordDetail>(ordered: T[]): T[] {
   const result: T[] = [];
-  const remaining = scored.map((s) => s.word);
-
+  const remaining = [...ordered];
   while (remaining.length > 0) {
     let chosen = 0;
     const n = result.length;
@@ -242,7 +245,6 @@ export function smartSortReviewQueue<T extends WordDetail>(
     }
     result.push(remaining.splice(chosen, 1)[0]);
   }
-
   return result;
 }
 
@@ -256,8 +258,8 @@ export interface NewCardCounts {
 }
 
 /**
- * Cards that received their first *scheduled* review today (local day), per direction.
- * Practice answers (is_scheduled = 0) never consume the budget, even if they came first.
+ * Cards started today (local day), per direction: their first scheduled review, or the introduction
+ * card shown before a new word's first quiz. Other practice answers never consume the budget.
  */
 export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const db = await getDatabase();
@@ -265,7 +267,7 @@ export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
     `SELECT COALESCE(direction, 'recognition') AS direction, COUNT(*) AS cnt FROM (
        SELECT word_id, COALESCE(direction, 'recognition') AS direction, MIN(timestamp) AS first_seen
        FROM review_logs
-       WHERE is_scheduled IS NULL OR is_scheduled = 1
+       WHERE is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro'
        GROUP BY word_id, COALESCE(direction, 'recognition')
      ) WHERE first_seen >= $1
      GROUP BY direction`,
@@ -279,35 +281,132 @@ export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   return counts;
 }
 
+export interface TodayWork {
+  /** Reviews due now (studied cards, both directions) */
+  reviews: number;
+  /** New cards a session may still introduce today (daily budget left, both directions) */
+  newToday: number;
+  /** reviews + newToday: what is actually left to do today */
+  total: number;
+}
+
+/**
+ * What is left to study today. Counting every new word as "due" made the number never reach 0; new
+ * words only count up to what the daily new-card budget still allows.
+ */
+export function todayWorkFromCounts(
+  counts: { reviews: number; newWaiting: number; newRecallWaiting?: number },
+  introduced: NewCardCounts,
+  newCardsPerDay: number = getStudyLimits().newCardsPerDay
+): TodayWork {
+  const newToday =
+    Math.min(counts.newWaiting, Math.max(0, newCardsPerDay - introduced.recognition)) +
+    Math.min(counts.newRecallWaiting ?? 0, Math.max(0, newCardsPerDay - introduced.production));
+  return { reviews: counts.reviews, newToday, total: counts.reviews + newToday };
+}
+
+/** Same as todayWorkFromCounts, from words already loaded in memory. */
+export function summarizeTodayWork(words: WordDetail[], introduced: NewCardCounts, now: Date = new Date()): TodayWork {
+  let reviews = 0;
+  let newWaiting = 0;
+  let newRecallWaiting = 0;
+  for (const w of words) {
+    if (isPlaceholderMeaning(w.meaning_vn) || isSuspended(w)) continue;
+    for (const c of getDueCards(w, now)) {
+      if (isBuriedBySibling(c, now)) continue;
+      if (!isNewCard(c)) reviews++;
+      else if (c.direction === "recognition") newWaiting++;
+      else newRecallWaiting++;
+    }
+  }
+  return todayWorkFromCounts({ reviews, newWaiting, newRecallWaiting }, introduced);
+}
+
+/** Leeches allowed in one session: more of them makes a session discouraging and slow */
+export const MAX_LEECHES_PER_SESSION = 4;
+
+function isSameLocalDay(iso: string | null | undefined, now: Date): boolean {
+  if (!iso) return false;
+  const d = new Date(iso);
+  return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
+}
+
+/**
+ * The other card of the same word was reviewed (on schedule) today: a review card waits until tomorrow,
+ * otherwise it would be answered from a memory refreshed minutes ago (Anki's "bury siblings").
+ * Learning cards are never buried: their short steps must run.
+ */
+export function isBuriedBySibling(card: ReviewCard, now: Date = new Date()): boolean {
+  if ((card.srs.state ?? 0) !== 2) return false;
+  const sibling = card.direction === "recognition" ? card.srsProduction : card.srsRecognition;
+  return !!sibling && isSameLocalDay(sibling.last_review, now);
+}
+
+/**
+ * How many new cards a session may introduce, given the due reviews. New words create future reviews,
+ * so the more reviews are waiting, the fewer new words are added:
+ *  - reviews fit in the session: new cards fill the rest (at least 20% of the session)
+ *  - up to 2 sessions of reviews waiting: 20% of the session
+ *  - more than that: none, until the backlog is cleared
+ */
+export function newCardAllowance(dueReviewCount: number, maxSessionSize: number): number {
+  const reserve = Math.ceil(maxSessionSize * 0.2);
+  if (dueReviewCount <= maxSessionSize) return Math.max(reserve, maxSessionSize - dueReviewCount);
+  if (dueReviewCount <= maxSessionSize * 2) return reserve;
+  return 0;
+}
+
 /**
  * Build a study session from due words:
- *  - every word contributes at most one due card per session (if both directions are due, the more
- *    urgent one), so recognition and recall of the same word are never drilled back to back
- *  - due review/learning cards first, ordered by urgency
- *  - cards never reviewed are a separate, budgeted stage per direction (newCardsPerDay each):
- *    brand-new words (recognition) and newly unlocked recall cards (production), oldest first,
- *    spread evenly through the session
- *  - whole session capped at maxSessionSize
+ *  - every word contributes at most one due card per session (the higher-priority one); a review card
+ *    whose sibling was reviewed today waits until tomorrow
+ *  - due review/learning cards ordered by FSRS priority (see calculateUrgencyScore), at most
+ *    MAX_LEECHES_PER_SESSION leeches, spread through the session
+ *  - cards never reviewed are a separate, budgeted stage per direction (newCardsPerDay each), limited
+ *    further by the review backlog (newCardAllowance), oldest first, spread evenly through the session
+ *  - whole session capped at maxSessionSize (or `options.maxCards`, today's share after a break)
+ *  - `options.noNewCards`: reviews only (while a comeback plan clears the backlog)
  */
 export function buildReviewSession(
   dueWords: WordDetail[],
   alreadyToday: NewCardCounts | number,
-  now: Date = new Date()
+  now: Date = new Date(),
+  options: { maxCards?: number; noNewCards?: boolean } = {}
 ): ReviewCard[] {
-  const limits = getStudyLimits();
+  const stored = getStudyLimits();
+  const limits = {
+    newCardsPerDay: options.noNewCards ? 0 : stored.newCardsPerDay,
+    maxSessionSize: Math.max(1, Math.min(stored.maxSessionSize, options.maxCards ?? stored.maxSessionSize)),
+  };
+  const leechSettings = getLeechSettings();
   const introduced: NewCardCounts =
     typeof alreadyToday === "number" ? { recognition: alreadyToday, production: 0 } : alreadyToday;
   // Words still waiting for AI analysis have no real meaning to review yet
-  const ready = dueWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
+  const ready = dueWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w));
   const cards = ready.flatMap((w) => {
-    const due = getDueCards(w, now);
+    const due = getDueCards(w, now).filter((c) => !isBuriedBySibling(c, now));
     if (due.length <= 1) return due;
     return [due.reduce((a, b) =>
       calculateUrgencyScore(b, now).urgencyScore > calculateUrgencyScore(a, now).urgencyScore ? b : a
     )];
   });
 
-  const reviewCards = smartSortReviewQueue(cards.filter((c) => !isNewCard(c)), now);
+  // Review cards by priority, leeches capped
+  const byPriority = cards
+    .filter((c) => !isNewCard(c))
+    .map((c) => ({ c, score: calculateUrgencyScore(c, now).urgencyScore }))
+    .sort((a, b) => b.score - a.score)
+    .map((x) => x.c);
+  const reviewCards: ReviewCard[] = [];
+  let leeches = 0;
+  for (const c of byPriority) {
+    if (isLeech(c.srs, leechSettings)) {
+      if (leeches >= MAX_LEECHES_PER_SESSION) continue;
+      leeches++;
+    }
+    reviewCards.push(c);
+  }
+
   const oldestFirst = (a: ReviewCard, b: ReviewCard) =>
     new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime() ||
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
@@ -319,11 +418,8 @@ export function buildReviewSession(
   // Recall cards of known words first: they are cheaper and unlock real usage of the word
   const newCards = [...newOf("production", introduced.production), ...newOf("recognition", introduced.recognition)];
 
-  // Guarantee up to 20% of the session for new cards so users don't get stuck only reviewing old cards
-  const maxNewCards = Math.ceil(limits.maxSessionSize * 0.2);
-  const newSlice = newCards.slice(0, maxNewCards);
-  const maxReviewCards = limits.maxSessionSize - newSlice.length;
-  const reviewSlice = reviewCards.slice(0, maxReviewCards);
+  const newSlice = newCards.slice(0, Math.min(limits.maxSessionSize, newCardAllowance(reviewCards.length, limits.maxSessionSize)));
+  const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, limits.maxSessionSize - newSlice.length), leechSettings));
   if (newSlice.length === 0) return reviewSlice;
   if (reviewSlice.length === 0) return newSlice;
 
@@ -342,26 +438,138 @@ export function buildReviewSession(
   return result;
 }
 
+/** Keep the priority order but move leeches so they are evenly spaced instead of bunched together */
+function spreadLeeches(cards: ReviewCard[], settings: LeechSettings): ReviewCard[] {
+  const leeches = cards.filter((c) => isLeech(c.srs, settings));
+  if (leeches.length <= 1 || leeches.length === cards.length) return cards;
+  const others = cards.filter((c) => !isLeech(c.srs, settings));
+  const result: ReviewCard[] = [];
+  const gap = (others.length + 1) / leeches.length;
+  let nextAt = gap / 2;
+  let li = 0;
+  for (let i = 0; i < others.length; i++) {
+    while (li < leeches.length && i >= nextAt) {
+      result.push(leeches[li++]);
+      nextAt += gap;
+    }
+    result.push(others[i]);
+  }
+  while (li < leeches.length) result.push(leeches[li++]);
+  return result;
+}
+
 // ─── 3b. RATING DERIVATION ─────────────────────────────────────────────────
 
 
-/** Correct answers slower than this (ms) are graded Hard */
+/** Correct answers slower than this (ms) are graded Hard, until the learner has enough history */
 const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
-  multiple_choice: 20000,
-  context_match: 40000,
-  meaning_match: 60000,
-  sentence_builder: 60000,
-  reverse_cloze: 30000,
-  spelling: 30000,
-  cloze: 35000,
-  listening: 35000,
+  multiple_choice: 15000,
+  context_match: 30000,
+  meaning_match: 45000,
+  sentence_builder: 40000,
+  reverse_cloze: 20000,
+  spelling: 20000,
+  cloze: 25000,
+  listening: 20000,
 };
+
+// ─── Free writing (AI-graded own sentence) ───────────────────────────────────
+
+const FREE_WRITING_KEY = "myenglish_free_writing_v1";
+/** AI-graded sentences per day: each takes 10–40 s of AI time */
+export const FREE_WRITING_PER_DAY = 5;
+
+export function freeWritingUsedToday(): number {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FREE_WRITING_KEY) || "{}");
+    return raw.date === new Date().toDateString() ? Number(raw.count) || 0 : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function recordFreeWritingUse(): void {
+  try {
+    localStorage.setItem(FREE_WRITING_KEY, JSON.stringify({ date: new Date().toDateString(), count: freeWritingUsedToday() + 1 }));
+  } catch {}
+}
+
+/**
+ * Grade of an AI-checked sentence: the word must be used, with the right meaning. Producing a correct
+ * sentence of your own is the strongest recall evidence (generation effect), but a sentence with errors
+ * still shows the word was recalled, so it is Hard rather than Again unless the word was misused.
+ */
+export function ratingFromSentenceGrade(g: { correct: boolean; score: number; usesTargetWord: boolean }): Rating {
+  if (!g.usesTargetWord || g.score < 50) return Rating.Again;
+  if (!g.correct || g.score < 80) return Rating.Hard;
+  return Rating.Good;
+}
+
+/** A correct answer this many times slower than the learner's own typical time was a struggle */
+const SLOW_FACTOR = 2.5;
+/** Correct scheduled answers needed per exercise type before the personal threshold is used */
+const MIN_TIMING_SAMPLES = 20;
+
+/** Median time of the learner's correct, scheduled answers per exercise type (loaded from review_logs) */
+let typicalResponseMs: Partial<Record<ExerciseType, number>> = {};
+
+export function setTypicalResponseTimes(times: Partial<Record<ExerciseType, number>>): void {
+  typicalResponseMs = { ...times };
+}
+
+/**
+ * Load the learner's median response time per exercise type from the last 200 correct scheduled answers
+ * of each type. Called when a session starts; grading falls back to fixed thresholds without it.
+ */
+export async function loadTypicalResponseTimes(): Promise<Partial<Record<ExerciseType, number>>> {
+  try {
+    const db = await getDatabase();
+    const rows = await db.select<Array<{ exercise_type: string; response_time_ms: number }>>(
+      `SELECT exercise_type, response_time_ms FROM (
+         SELECT exercise_type, response_time_ms,
+                ROW_NUMBER() OVER (PARTITION BY exercise_type ORDER BY timestamp DESC) AS rn
+         FROM review_logs
+         WHERE is_scheduled = 1 AND rating >= 3 AND response_time_ms > 0
+       ) WHERE rn <= 200`
+    );
+    const byType = new Map<string, number[]>();
+    for (const r of rows) {
+      const list = byType.get(r.exercise_type) ?? [];
+      list.push(r.response_time_ms);
+      byType.set(r.exercise_type, list);
+    }
+    const times: Partial<Record<ExerciseType, number>> = {};
+    for (const [type, list] of byType) {
+      if (list.length < MIN_TIMING_SAMPLES) continue;
+      list.sort((a, b) => a - b);
+      times[type as ExerciseType] = list[Math.floor(list.length / 2)];
+    }
+    setTypicalResponseTimes(times);
+    return times;
+  } catch {
+    return typicalResponseMs;
+  }
+}
+
+/**
+ * "Too slow" threshold: 2.5x the learner's own median for this exercise when known (so slow readers and
+ * typists are not punished), bounded to 60%–150% of the fixed default.
+ */
+export function slowThresholdMs(exerciseType: ExerciseType): number | undefined {
+  const fallback = SLOW_RESPONSE_MS[exerciseType];
+  if (!fallback) return undefined;
+  const typical = typicalResponseMs[exerciseType];
+  if (!typical) return fallback;
+  return Math.min(fallback * 1.5, Math.max(fallback * 0.6, typical * SLOW_FACTOR));
+}
 
 export interface AnswerOutcome {
   exerciseType: ExerciseType;
   wrongAttempts: number;
   usedHint?: boolean;
   nearMiss?: boolean; // Accepted with a small typo
+  /** Picked a synonym / near-synonym of the target: the meaning was known, the exact word was not */
+  confusedWithSynonym?: boolean;
   responseTimeMs: number;
   srs?: Partial<SRSReview>;
 }
@@ -369,23 +577,19 @@ export interface AnswerOutcome {
 /**
  * Map an exercise outcome to an FSRS grade following FSRS semantics:
  *  - any wrong attempt means the memory failed -> Again
- *  - hint / small typo -> Hard
+ *  - picked a synonym of the target, hint, small typo -> Hard
  *  - correct on first try -> Good
- *  - a correct but very slow answer -> Hard
- *  - super fast correct answer -> Easy
+ *  - a correct but very slow answer (relative to the learner's own speed) -> Hard
+ *  - automatic grading never gives Easy (Easy stays a manual choice on recall flip cards).
+ *    Speed-based Easy was tried twice: in simulation G,G,E,E schedules 19 -> 136 days against
+ *    11 -> 46 for G,G,G,G, far beyond what a 2-second multiple-choice answer proves.
  */
 export function deriveRating(outcome: AnswerOutcome): Rating {
+  if (outcome.confusedWithSynonym) return Rating.Hard;
   if (outcome.wrongAttempts > 0) return Rating.Again;
   if (outcome.usedHint || outcome.nearMiss) return Rating.Hard;
-  
-  // Super fast response (< 3s) gets Easy, as it shows strong mastery.
-  // For long reading exercises, < 5s gets Easy.
-  const isReadingExercise = outcome.exerciseType === "context_match" || outcome.exerciseType === "sentence_builder" || outcome.exerciseType === "cloze";
-  const fastThreshold = isReadingExercise ? 5000 : 3000;
-  if (outcome.responseTimeMs > 0 && outcome.responseTimeMs < fastThreshold) return Rating.Easy;
-
   // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
-  const slowMs = SLOW_RESPONSE_MS[outcome.exerciseType];
+  const slowMs = slowThresholdMs(outcome.exerciseType);
   if (slowMs && outcome.responseTimeMs > slowMs) return Rating.Hard;
   return Rating.Good;
 }
@@ -437,12 +641,25 @@ export function matchTypedAnswer(input: string, target: string, sentence?: strin
 
 // ─── 4. REVIEW LOG ──────────────────────────────────────────────────────────
 
-export type ExerciseType = "flip" | "cloze" | "spelling" | "multiple_choice" | "context_match" | "meaning_match" | "sentence_builder" | "reverse_cloze" | "listening";
+export type ExerciseType =
+  | "flip"
+  | "cloze"
+  | "spelling"
+  | "multiple_choice"
+  | "context_match"
+  | "meaning_match"
+  | "sentence_builder"
+  | "reverse_cloze"
+  | "listening"
+  | "free_writing";
+
+/** "intro" = a new (or relearned) word was shown before its first quiz; not a graded answer */
+export type LoggedExerciseType = ExerciseType | "intro";
 
 export interface ReviewLogEntry {
   id: string;
   wordId: string;
-  exerciseType: ExerciseType;
+  exerciseType: LoggedExerciseType;
   responseTimeMs: number;
   isCorrect: boolean;
   wrongAttempts: number;
@@ -451,6 +668,38 @@ export interface ReviewLogEntry {
   timestamp: string;       // ISO
   isScheduled: boolean | null; // true = updated the FSRS schedule, false = practice only, null = legacy row
   direction?: CardDirection | null; // card the answer was recorded on (null = legacy row, recognition)
+  /**
+   * Recognition credited from a correct recall answer (is_scheduled = 2): a real FSRS update, but kept
+   * apart from direct answers so the optimizer can include or exclude it.
+   */
+  implicit?: boolean;
+  /** Card memory state just before this answer (for true retention, calibration and the optimizer) */
+  before?: ReviewLogBefore | null;
+}
+
+export interface ReviewLogBefore {
+  state: number;
+  stability: number;
+  difficulty: number;
+  /** Retrievability FSRS predicted at the moment of the answer (null for new cards) */
+  retrievability: number | null;
+  /** Days since the card's previous review (null for new cards) */
+  elapsedDays: number | null;
+}
+
+/** Memory state of a card row right before an answer, as stored in review_logs. */
+export function reviewLogBefore(srs: Partial<SRSReview> | null | undefined, now: Date = new Date()): ReviewLogBefore | null {
+  if (!srs) return null;
+  const state = srs.state ?? 0;
+  const isNew = state === 0 && (srs.reps ?? 0) === 0;
+  const last = srs.last_review ? new Date(srs.last_review).getTime() : NaN;
+  return {
+    state,
+    stability: srs.stability ?? 0,
+    difficulty: srs.difficulty ?? 0,
+    retrievability: isNew ? null : calculateRetrievability(srs, now),
+    elapsedDays: Number.isFinite(last) ? Math.max(0, (now.getTime() - last) / DAY_MS) : null,
+  };
 }
 
 /**
@@ -485,13 +734,17 @@ export async function initReviewLogsTable(existingDb?: Database): Promise<void> 
 export async function saveReviewLog(entry: Omit<ReviewLogEntry, "id">): Promise<string> {
   const db = await getDatabase();
   const id = crypto.randomUUID();
+  const b = entry.before;
+  const round = (n: number | null | undefined, digits: number) => (n == null ? null : Number(n.toFixed(digits)));
   await db.execute(
-    `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled, direction)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+    `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp,
+       is_scheduled, direction, state_before, stability_before, difficulty_before, r_predicted, elapsed_days_before)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
     [
       id, entry.wordId, entry.exerciseType, entry.responseTimeMs, entry.isCorrect ? 1 : 0, entry.wrongAttempts,
-      entry.rating, entry.xpEarned, entry.timestamp, entry.isScheduled ? 1 : 0,
-      entry.direction ?? directionForExercise(entry.exerciseType),
+      entry.rating, entry.xpEarned, entry.timestamp, entry.implicit ? 2 : entry.isScheduled ? 1 : 0,
+      entry.direction ?? (entry.exerciseType === "intro" ? "recognition" : directionForExercise(entry.exerciseType)),
+      b ? b.state : null, round(b?.stability, 4), round(b?.difficulty, 4), round(b?.retrievability, 4), round(b?.elapsedDays, 3),
     ]
   );
   return id;
@@ -685,74 +938,53 @@ export interface XPReward {
   bonusReasons: string[];
 }
 
-export function calculateXPReward(
-  rating: Rating,
-  exerciseType: ExerciseType,
-  wrongAttempts: number,
-  responseTimeMs: number,
-  isLeechWord: boolean,
-  isFirstTry: boolean,
-  consecutiveCorrect: number = 0
-): XPReward {
+export interface XPInput {
+  rating: Rating;
+  exerciseType: ExerciseType;
+  /** The answer moved the FSRS schedule (practice and retries only earn a token amount) */
+  scheduled: boolean;
+  direction: CardDirection;
+  /** Retrievability just before the answer (null for new cards) */
+  retrievabilityBefore?: number | null;
+  isLeechWord?: boolean;
+}
+
+/** XP for one correct practice answer: enough to feel progress, too little to farm */
+export const PRACTICE_XP = 1;
+
+/**
+ * XP rewards remembering, not volume or speed:
+ *  - nothing for a forgotten card or a skip (Again)
+ *  - practice answers (not due, retries, practice-only exercises) earn PRACTICE_XP when correct
+ *  - scheduled answers: Hard 6, Good 10, Easy 12; +4 for recall (producing the word is harder)
+ *  - "desirable difficulty" bonus: remembering a word FSRS expected to be fading (R < 80%) is worth +5,
+ *    because those are the reviews that strengthen memory the most
+ *  - remembering a leech +5
+ * No speed bonus and no combo multiplier: both reward fast guessing.
+ */
+export function calculateXPReward(input: XPInput): XPReward {
+  const { rating, scheduled, direction, retrievabilityBefore, isLeechWord } = input;
   const bonusReasons: string[] = [];
-  let baseXP = 0;
+  if (rating === Rating.Again) return { baseXP: 0, bonusXP: 0, totalXP: 0, bonusReasons };
+  if (!scheduled) {
+    return { baseXP: PRACTICE_XP, bonusXP: 0, totalXP: PRACTICE_XP, bonusReasons: ["Luyện thêm"] };
+  }
+
+  const baseXP = rating === Rating.Hard ? 6 : rating === Rating.Easy ? 12 : 10;
   let bonusXP = 0;
-
-  // Base XP by rating
-  switch (rating) {
-    case Rating.Again: baseXP = 5; break;
-    case Rating.Hard: baseXP = 8; break;
-    case Rating.Good: baseXP = 10; break;
-    case Rating.Easy: baseXP = 15; break;
-    default: baseXP = 5;
+  if (direction === "production") {
+    bonusXP += 4;
+    bonusReasons.push("Tự nhớ ra từ +4");
   }
-
-  // Exercise difficulty bonus (harder exercises = more XP)
-  if (exerciseType === "spelling" || exerciseType === "listening") {
+  if (retrievabilityBefore != null && retrievabilityBefore < 0.8) {
     bonusXP += 5;
-    bonusReasons.push("Luyện gõ/nghe +5");
-  } else if (exerciseType === "cloze" || exerciseType === "reverse_cloze" || exerciseType === "sentence_builder") {
-    bonusXP += 3;
-    bonusReasons.push("Bài tập nâng cao +3");
+    bonusReasons.push("🧠 Cứu từ sắp quên +5");
   }
-
-  // First try bonus
-  if (isFirstTry && wrongAttempts === 0 && (rating === Rating.Good || rating === Rating.Easy)) {
+  if (isLeechWord) {
     bonusXP += 5;
-    bonusReasons.push("🎯 Đúng ngay +5");
+    bonusReasons.push("🗡️ Thắng từ hay quên +5");
   }
-
-  // Speed bonus (< 5 seconds for correct answer)
-  if (responseTimeMs > 0 && responseTimeMs < 5000 && rating >= Rating.Good) {
-    bonusXP += 3;
-    bonusReasons.push("⚡ Nhanh +3");
-  }
-
-  // Leech slayer bonus
-  if (isLeechWord && (rating === Rating.Good || rating === Rating.Easy)) {
-    bonusXP += 10;
-    bonusReasons.push("🗡️ Leech Slayer +10");
-  }
-
-  // Combo multiplier
-  let totalXP = baseXP + bonusXP;
-  if (consecutiveCorrect >= 10) {
-    totalXP = Math.round(totalXP * 1.5);
-    bonusReasons.push("🔥 Combo x10! (+50%)");
-  } else if (consecutiveCorrect >= 5) {
-    totalXP = Math.round(totalXP * 1.2);
-    bonusReasons.push("🔥 Combo x5! (+20%)");
-  } else if (consecutiveCorrect >= 3) {
-    totalXP = Math.round(totalXP * 1.1);
-    bonusReasons.push("🔥 Combo x3! (+10%)");
-  }
-
-  return {
-    baseXP,
-    bonusXP,
-    totalXP,
-    bonusReasons,
-  };
+  return { baseXP, bonusXP, totalXP: baseXP + bonusXP, bonusReasons };
 }
 
 /**
@@ -771,6 +1003,8 @@ export function awardXP(amount: number): { previousLevel: number; newLevel: numb
     const today = getTodayStr();
     logs[today] = (logs[today] || 0) + amount;
     localStorage.setItem(XP_LOG_KEY, JSON.stringify(logs));
+    persistKeyNow(XP_STORAGE_KEY);
+    persistKeyNow(XP_LOG_KEY);
 
     const newState = getXPState();
     const leveledUp = newState.level > previousState.level;
@@ -861,39 +1095,43 @@ function randomFrom<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
+/** Stability (days) below which a card still needs cues; above MATURE it gets the hardest formats */
+export const YOUNG_STABILITY_DAYS = 3;
+export const MATURE_STABILITY_DAYS = 21;
+
 /**
- * Automatically choose optimal exercise type based on FSRS memory state:
- * - State 0 (New): Recognition focus (Flip, Multiple Choice, Context Match)
- * - State 1 (Learning): Mix recognition & production (Multiple Choice, Sentence Builder, Cloze)
- * - State 3 (Relearning): High-urgency production (Spelling, Listening)
- * - State 2 (Review): Challenge recall (Cloze, Spelling, Reverse Cloze, Listening)
+ * Choose the exercise for a card from its memory strength, so the format gets harder as the memory gets
+ * stronger (desirable difficulty) while every format stays valid evidence for that card's direction
+ * (see exerciseDirection). Within a band the format varies to give different retrieval cues.
+ *
+ * Recognition (understand the English word):
+ *  - new: "flip", shown as an introduction first (asking about a word never seen is a guess)
+ *  - learning / relearning / young (S < 3d) / leech: multiple choice (cued, quick feedback)
+ *  - S 3–21d: multiple choice, listening (audio → meaning), reading in context
+ *  - S >= 21d: listening, reading in context, matching
+ * Production (produce the English word):
+ *  - learning / relearning / young / leech: cloze (the sentence is a cue), else spelling
+ *  - S 3–21d: cloze or spelling
+ *  - S >= 21d: spelling from the meaning alone
+ * Sentence building is practice only (it does not test the meaning) and is never picked here.
  */
 export function selectExerciseType(card: WordDetail & { direction?: CardDirection }): ExerciseType {
-  const { state = 0, difficulty = 5, reps = 0 } = card.srs || {};
-  const hasExamples = card.examples && card.examples.length > 0 && card.examples[0].sentence_en.trim().length > 0;
-  const withExamples = (types: ExerciseType[], fallback: ExerciseType[]): ExerciseType =>
-    randomFrom(hasExamples ? types : fallback);
+  const { state = 0, reps = 0, stability = 0 } = card.srs || {};
+  const hasExamples = (card.examples || []).some((e) => e.sentence_en?.trim() && maskWordInSentence(e.sentence_en, card.word));
+  const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
 
   if ((card.direction ?? "recognition") === "production") {
-    // Recall the English word. Leeches and forgotten cards get the hardest drills.
-    if (isLeech(card.srs) || state === 3) return randomFrom(["spelling", "listening"]);
-    // Still learning recall: a sentence context (cloze) makes the first attempts easier
-    if (state === 0 || state === 1 || reps === 0) return withExamples(["cloze", "spelling"], ["spelling"]);
-    if (difficulty >= 7) return randomFrom(["spelling", "listening"]);
-    return withExamples(["cloze", "spelling", "listening"], ["spelling", "listening"]);
+    if (state === 0 || reps === 0 || young) return hasExamples ? "cloze" : "spelling";
+    if (stability < MATURE_STABILITY_DAYS) return hasExamples ? randomFrom<ExerciseType>(["cloze", "spelling"]) : "spelling";
+    return "spelling";
   }
 
-  // Recognition: understand the word when reading/hearing it.
-  // A brand-new word is shown first (flip card): quizzing a word never seen means guessing, and a
-  // lucky guess would be graded Good and push the next review too far.
   if (state === 0 || reps === 0) return "flip";
-  if (state === 1 || state === 3 || isLeech(card.srs)) {
-    return withExamples(["multiple_choice", "sentence_builder", "meaning_match", "flip"], ["multiple_choice", "meaning_match", "flip"]);
+  if (young) return "multiple_choice";
+  if (stability < MATURE_STABILITY_DAYS) {
+    return randomFrom<ExerciseType>(hasExamples ? ["multiple_choice", "listening", "context_match", "reverse_cloze"] : ["multiple_choice", "listening"]);
   }
-  return withExamples(
-    ["multiple_choice", "meaning_match", "context_match", "reverse_cloze", "sentence_builder"],
-    ["multiple_choice", "meaning_match", "flip"]
-  );
+  return randomFrom<ExerciseType>(hasExamples ? ["listening", "context_match", "reverse_cloze", "meaning_match"] : ["listening", "meaning_match", "multiple_choice"]);
 }
 
 // ─── 8. EXERCISE DATA GENERATORS ────────────────────────────────────────────
@@ -931,8 +1169,64 @@ export function cleanMeaningForOption(meaning: string): string {
 }
 
 /**
+ * The example sentence for a context exercise. Rotates through the word's examples by review count, so
+ * the learner meets the word in different sentences instead of memorising one sentence; the sentence the
+ * learner originally met the word in (source "user_context") comes first in the rotation.
+ * Only sentences that actually contain the word (so it can be blanked) are used.
+ */
+export function pickExample(word: WordDetail, rotation: number = word.srs?.reps ?? 0): WordExample | undefined {
+  const usable = (word.examples || []).filter((e) => e.sentence_en?.trim() && maskWordInSentence(e.sentence_en, word.word));
+  if (usable.length === 0) return undefined;
+  const ordered = [...usable.filter((e) => e.source === "user_context"), ...usable.filter((e) => e.source !== "user_context")];
+  return ordered[Math.abs(Math.floor(rotation)) % ordered.length];
+}
+
+/** Comma / "hoặc" separated senses of a Vietnamese meaning, lowercased, without explanations in brackets */
+function meaningSenses(meaning: string): string[] {
+  const first = (meaning || "").split(/[;\n.]/)[0].replace(/\([^)]*\)/g, " ").toLowerCase();
+  return first
+    .split(/,|\/|\bhoặc\b/)
+    .map((x) => x.replace(/["'“”‘’]/g, "").replace(/\s+/g, " ").trim())
+    .filter((x) => x.length > 0 && x.split(" ").length <= 6);
+}
+
+function syllables(text: string): Set<string> {
+  return new Set(text.split(" ").filter(Boolean));
+}
+
+/**
+ * Whether two words are too close in meaning to be told apart from the meaning alone: listed as
+ * synonyms of each other, or sharing a sense ("nhanh" / "nhanh chóng"). Such a word must not be a
+ * distractor: the question would have two right answers and the learner would be graded Again unfairly.
+ */
+export function areConfusable(a: WordDetail, b: WordDetail): boolean {
+  const aw = a.word.trim().toLowerCase();
+  const bw = b.word.trim().toLowerCase();
+  if (aw === bw) return true;
+  const synonymsOf = (w: WordDetail) => new Set(parseTerms(w.synonyms).map((t) => t.word.trim().toLowerCase()));
+  if (synonymsOf(a).has(bw) || synonymsOf(b).has(aw)) return true;
+
+  const sa = meaningSenses(a.meaning_vn);
+  const sb = meaningSenses(b.meaning_vn);
+  for (const x of sa) {
+    for (const y of sb) {
+      if (x === y) return true;
+      const X = syllables(x);
+      const Y = syllables(y);
+      let shared = 0;
+      X.forEach((t) => {
+        if (Y.has(t)) shared++;
+      });
+      // "nhanh" vs "nhanh chóng": every syllable of the shorter sense is in the longer one
+      if (shared > 0 && shared === Math.min(X.size, Y.size) && Math.min(X.size, Y.size) <= 2) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Generate 4 options for multiple choice quiz:
- * Prioritizes distractors from the same topic and similar difficulty.
+ * Prioritizes distractors from the same topic and similar difficulty, never synonyms of the target.
  */
 export function generateMultipleChoiceQuestion(
   targetWord: WordDetail,
@@ -940,7 +1234,7 @@ export function generateMultipleChoiceQuestion(
   promptType: "en_to_vn" | "vn_to_en" = "en_to_vn"
 ): MultipleChoiceQuestion {
   const otherWords = allWords.filter(
-    (w) => w.id !== targetWord.id && w.word.trim().toLowerCase() !== targetWord.word.trim().toLowerCase()
+    (w) => w.id !== targetWord.id && !isPlaceholderMeaning(w.meaning_vn) && !areConfusable(targetWord, w)
   );
 
   // Plausible distractors are harder to rule out: same topic first, then same part of speech.
@@ -1065,7 +1359,7 @@ export interface SentenceBuilderData {
 }
 
 export function prepareSentenceBuilder(word: WordDetail): SentenceBuilderData | null {
-  const example = word.examples?.[0];
+  const example = pickExample(word) ?? word.examples?.[0];
   if (!example || !example.sentence_en || example.sentence_en.trim().length === 0) {
     return null;
   }
@@ -1125,25 +1419,31 @@ export interface ContextMatchPair {
 
 export function prepareContextMatch(
   primaryWord: WordDetail,
-  allWords: WordDetail[]
+  allWords: WordDetail[],
+  excludeIds: ReadonlySet<string> = new Set()
 ): ContextMatchPair[] {
   const pairs: ContextMatchPair[] = [];
   const usedWords = new Set<string>();
   const usedMeanings = new Set<string>();
 
+  const chosen: WordDetail[] = [];
   const tryAdd = (w: WordDetail): boolean => {
     const wordKey = w.word.trim().toLowerCase();
     const meaningKey = cleanMeaningForOption(w.meaning_vn || "").trim().toLowerCase();
     if (!wordKey || usedWords.has(wordKey) || (meaningKey && usedMeanings.has(meaningKey))) return false;
+    // Synonyms could fill each other's blanks: the pairing would be ambiguous
+    if (chosen.some((c) => areConfusable(c, w))) return false;
 
-    // Use the first example where the word can actually be masked
-    for (const ex of w.examples || []) {
+    // The reviewed word uses its rotated example; others the first example where the word can be masked
+    const ordered = w.id === primaryWord.id ? [pickExample(w), ...(w.examples || [])] : w.examples || [];
+    for (const ex of ordered) {
       const sentence = ex?.sentence_en?.trim();
       if (!sentence) continue;
       const masked = maskWordInSentence(sentence, w.word);
       if (!masked) continue;
       usedWords.add(wordKey);
       if (meaningKey) usedMeanings.add(meaningKey);
+      chosen.push(w);
       pairs.push({
         wordId: w.id,
         word: w.word,
@@ -1160,7 +1460,7 @@ export function prepareContextMatch(
   if (!tryAdd(primaryWord)) return [];
 
   const shuffledOthers = allWords
-    .filter((w) => w.id !== primaryWord.id && w.examples && w.examples.length > 0)
+    .filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id) && !isPlaceholderMeaning(w.meaning_vn) && w.examples && w.examples.length > 0)
     .sort(() => 0.5 - Math.random());
   for (const other of shuffledOthers) {
     if (pairs.length >= 3) break;
@@ -1181,28 +1481,40 @@ export function escapeRegExp(text: string): string {
  * Uses \w lookarounds instead of \b so words like "c++", "c#" or ".net" still match.
  */
 export function wordFormsPattern(word: string): string {
+  // Longest first so "stopped" wins over "stop"
+  const alts = wordForms(word).map(escapeRegExp).sort((a, b) => b.length - a.length).join("|");
+  return `(?<![\\w])(?:${alts})(?![\\w])`;
+}
+
+/** `word` plus its common inflections (-s, -es, -ed, -d, -ing, y -> ies/ied, doubled final consonant) */
+export function wordForms(word: string): string[] {
   const w = word.trim();
-  const forms = new Set<string>([escapeRegExp(w)]);
+  const forms = new Set<string>([w]);
   if (/^[a-z]+$/i.test(w)) {
     const lower = w.toLowerCase();
     const suffixes = ["s", "es", "ed", "d", "ing"];
-    suffixes.forEach((s) => forms.add(escapeRegExp(w + s)));
+    suffixes.forEach((s) => forms.add(w + s));
     if (lower.endsWith("e")) {
-      forms.add(escapeRegExp(w.slice(0, -1) + "ing"));
+      forms.add(w.slice(0, -1) + "ing");
     }
     if (/[^aeiou]y$/.test(lower)) {
-      forms.add(escapeRegExp(w.slice(0, -1) + "ies"));
-      forms.add(escapeRegExp(w.slice(0, -1) + "ied"));
+      forms.add(w.slice(0, -1) + "ies");
+      forms.add(w.slice(0, -1) + "ied");
     }
     if (/[^aeiou][aeiou][bdgklmnprt]$/.test(lower)) {
       const last = w.slice(-1);
-      forms.add(escapeRegExp(w + last + "ed"));
-      forms.add(escapeRegExp(w + last + "ing"));
+      forms.add(w + last + "ed");
+      forms.add(w + last + "ing");
     }
   }
-  // Longest first so "stopped" wins over "stop"
-  const alts = [...forms].sort((a, b) => b.length - a.length).join("|");
-  return `(?<![\\w])(?:${alts})(?![\\w])`;
+  return [...forms];
+}
+
+/** Blank every occurrence of `word` and its inflections; null when the sentence does not contain it. */
+export function maskAllWordForms(sentence: string, word: string, blank = "______"): string | null {
+  if (!word.trim()) return null;
+  const re = new RegExp(wordFormsPattern(word), "gi");
+  return re.test(sentence) ? sentence.replace(re, blank) : null;
 }
 
 /** Replace the first occurrence of `word` (or an inflection) with a blank; null when not found. */
@@ -1329,18 +1641,21 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
   cutoff.setDate(cutoff.getDate() - days);
   const cutoffStr = cutoff.toISOString();
 
-  const logs = await db.select<Array<{
+  // Scheduled answers only: practice, retries and introductions would inflate accuracy.
+  // An answer counts as remembered when it was not graded Again (Hard is a pass in FSRS).
+  const rawLogs = await db.select<Array<{
     exercise_type: string;
     response_time_ms: number;
-    is_correct: number;
+    rating: number;
     timestamp: string;
   }>>(
-    `SELECT exercise_type, response_time_ms, is_correct, timestamp
+    `SELECT exercise_type, response_time_ms, rating, timestamp
      FROM review_logs
-     WHERE timestamp >= $1
+     WHERE timestamp >= $1 AND exercise_type != 'intro' AND (is_scheduled IS NULL OR is_scheduled = 1)
      ORDER BY timestamp ASC`,
     [cutoffStr]
   );
+  const logs = rawLogs.map((l) => ({ ...l, is_correct: l.rating > 1 ? 1 : 0 }));
 
   const totalReviews = logs.length;
   const correctReviews = logs.filter((l) => l.is_correct === 1).length;
@@ -1358,9 +1673,11 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
     spelling: 0,
     multiple_choice: 0,
     context_match: 0,
+    meaning_match: 0,
     sentence_builder: 0,
     reverse_cloze: 0,
     listening: 0,
+    free_writing: 0,
   };
 
   logs.forEach((log) => {
@@ -1396,31 +1713,50 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
 }
 
 
+export interface MeaningMatchPair {
+  wordId: string;
+  word: string;
+  meaningVN: string;
+}
+
+/** Pairs shown in the word ↔ meaning matching game (the reviewed word + up to 3 others) */
+export const MEANING_MATCH_PAIRS = 4;
+
+/**
+ * Pairs for the matching game. The extra words must not leak or blur the answer:
+ *  - never words that are still to come in this session (`excludeIds`): seeing their meaning now would
+ *    turn their own question into a memory of a few seconds ago
+ *  - never words confusable with another pair (synonyms / shared sense), never words still being analysed
+ *  - words already known (reviewed before) are preferred, so the game does not introduce new words
+ */
 export function prepareMeaningMatch(
   primaryWord: WordDetail,
-  allWords: WordDetail[]
-): { wordId: string; word: string; meaningVN: string }[] {
-  const pairs: { wordId: string; word: string; meaningVN: string }[] = [];
-  const usedWords = new Set<string>();
+  allWords: WordDetail[],
+  excludeIds: ReadonlySet<string> = new Set()
+): MeaningMatchPair[] {
+  const pairs: MeaningMatchPair[] = [];
+  const chosen: WordDetail[] = [];
   const usedMeanings = new Set<string>();
 
   const tryAdd = (w: WordDetail): boolean => {
-    const wordKey = w.word.trim().toLowerCase();
-    const meaningKey = cleanMeaningForOption(w.meaning_vn || "").trim().toLowerCase();
-    if (!wordKey || !meaningKey || usedWords.has(wordKey) || usedMeanings.has(meaningKey)) return false;
-    
-    usedWords.add(wordKey);
+    const meaning = cleanMeaningForOption(w.meaning_vn || "");
+    const meaningKey = meaning.trim().toLowerCase();
+    if (!w.word.trim() || !meaningKey || isPlaceholderMeaning(w.meaning_vn) || usedMeanings.has(meaningKey)) return false;
+    if (chosen.some((c) => areConfusable(c, w))) return false;
     usedMeanings.add(meaningKey);
-    pairs.push({ wordId: w.id, word: w.word, meaningVN: meaningKey });
+    chosen.push(w);
+    pairs.push({ wordId: w.id, word: w.word, meaningVN: meaning });
     return true;
   };
 
-  tryAdd(primaryWord);
+  if (!tryAdd(primaryWord)) return [];
 
-  const shuffled = [...allWords].sort(() => 0.5 - Math.random());
-  for (const w of shuffled) {
-    if (pairs.length >= 5) break;
-    if (w.id === primaryWord.id) continue;
+  const candidates = allWords
+    .filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id))
+    .sort(() => 0.5 - Math.random())
+    .sort((a, b) => Number((b.srs?.reps ?? 0) > 0) - Number((a.srs?.reps ?? 0) > 0));
+  for (const w of candidates) {
+    if (pairs.length >= MEANING_MATCH_PAIRS) break;
     tryAdd(w);
   }
 

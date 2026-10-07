@@ -17,6 +17,7 @@ import { pipeline, type PipelineItem } from "@/services/pipeline";
 import { parseTerms, parseCollocations } from "@/types/database";
 import { useWordsStore } from "@/stores/wordsStore";
 import { PAGE_CONTAINER, handleSpeak, type DashboardTab } from "./shared";
+import StarterDecksPanel from "./StarterDecksPanel";
 
 interface CaptureTabProps {
   inputWord: string;
@@ -55,9 +56,10 @@ export default function CaptureTab({
     const clean = inputWord.trim();
     if (!clean) return;
 
-    setMessage(`Analyzing "${clean}" with Gemini CLI...`);
     setInputWord("");
-    pipeline.enqueue(clean);
+    pipeline.enqueue(clean).then((res) =>
+      setMessage(res.accepted ? `Analyzing "${clean}" with Gemini CLI...` : `Không thể thêm "${clean}": ${res.reason}`)
+    );
   };
 
   return (
@@ -111,6 +113,8 @@ export default function CaptureTab({
           ))}
         </div>
       </form>
+
+      <StarterDecksPanel />
 
       {/* Live Pipeline Queue */}
       {pipelineQueue.length > 0 && (

@@ -12,6 +12,7 @@ import {
   type WeeklySummary,
 } from "@/services/progress";
 import { getFSRSSettings } from "@/services/srs";
+import { checkAndUnlockAchievements } from "@/services/achievements";
 
 /** "Tuần này": answers, words, active days, real retention vs target, and the weekly topic challenge */
 export default function WeeklyProgressCard({ words }: { words: WordDetail[] }) {
@@ -31,7 +32,12 @@ export default function WeeklyProgressCard({ words }: { words: WordDetail[] }) {
     getReviewLogsSince(startOfWeek())
       .then((logs) => {
         if (cancelled) return;
-        setWeek(summarizeWeek(logs, words, getFSRSSettings().requestRetention));
+        const summary = summarizeWeek(logs, words, getFSRSSettings().requestRetention);
+        setWeek(summary);
+        // Badge for a week whose true retention reached the target over enough reviews
+        if (summary.reviewAnswers >= 30 && summary.retention !== null && summary.retention >= summary.targetRetention) {
+          checkAndUnlockAchievements({ weekOnTarget: true });
+        }
         const c = getTopicChallenge(words, logs);
         if (c && claimTopicChallengeReward(c)) {
           setJustRewarded(true);

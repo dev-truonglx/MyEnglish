@@ -23,13 +23,16 @@ import ReviewTimeFilterBar from "../dashboard/ReviewTimeFilterBar";
 import ReviewTrajectoryModal from "../review/ReviewTrajectoryModal";
 import { formatNextReviewRelative, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 
-export default function GrammarHub() {
+export default function GrammarHub({ initialLessonId = null }: { initialLessonId?: string | null } = {}) {
   const [selectedLevel, setSelectedLevel] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<"all" | "due" | "mastered" | "learning">("all");
   const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeLessonId, setActiveLessonId] = useState<string | null>(null);
-  const [activeLessonInitialTab, setActiveLessonInitialTab] = useState<"diagnostic" | "practice" | "handbook">("diagnostic");
+  // Opened from elsewhere (e.g. a mistake category in the Writing tab): straight to the lesson's handbook
+  const [activeLessonId, setActiveLessonId] = useState<string | null>(initialLessonId);
+  const [activeLessonInitialTab, setActiveLessonInitialTab] = useState<"diagnostic" | "practice" | "handbook">(
+    initialLessonId ? "handbook" : "diagnostic"
+  );
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [trajectoryLesson, setTrajectoryLesson] = useState<{
     id: string;

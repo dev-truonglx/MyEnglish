@@ -1,6 +1,6 @@
 import type { WordDetail } from "@/types/database";
 
-export type DashboardTab = "library" | "capture" | "review" | "analytics" | "guide" | "grammar";
+export type DashboardTab = "library" | "capture" | "reading" | "writing" | "review" | "analytics" | "guide" | "grammar";
 export type FilterMode = "all" | "due" | "mastered" | "leech";
 export type ViewMode = "gallery" | "table";
 
@@ -22,13 +22,4 @@ export interface LibraryStats {
 }
 
 /** Text-To-Speech Pronunciation (module-level, so its identity is stable for memoized cards) */
-export function handleSpeak(text: string, e?: React.MouseEvent) {
-  if (e) e.stopPropagation();
-  if ("speechSynthesis" in window) {
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "en-US";
-    utterance.rate = 0.9;
-    window.speechSynthesis.speak(utterance);
-  }
-}
+export { handleSpeak } from "../review/speech";

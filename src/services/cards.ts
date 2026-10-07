@@ -5,18 +5,38 @@
 import type { CardDirection, ReviewCard, SRSReview, WordDetail } from "@/types/database";
 import type { ExerciseType } from "./smartReview";
 
-/** Exercises that only require recognising the word or its meaning among options */
-const RECOGNITION_EXERCISE_TYPES: ReadonlySet<ExerciseType> = new Set<ExerciseType>([
-  "flip",
-  "multiple_choice",
-  "context_match",
-  "sentence_builder",
-  "reverse_cloze",
-]);
+/**
+ * Which card an exercise is valid evidence for.
+ *  - recognition: understand the English word when reading / hearing it (pick or match its meaning)
+ *  - production: produce the English word from its meaning (typed, with or without a sentence)
+ *  - null: practice only. Rebuilding a shuffled sentence does not test the word's meaning, so it never
+ *    moves a schedule.
+ */
+const EXERCISE_DIRECTION: Record<ExerciseType, CardDirection | null> = {
+  flip: "recognition",
+  multiple_choice: "recognition",
+  context_match: "recognition",
+  meaning_match: "recognition",
+  reverse_cloze: "recognition",
+  listening: "recognition",
+  spelling: "production",
+  cloze: "production",
+  free_writing: "production",
+  sentence_builder: null,
+};
 
-/** Which card an exercise trains: producing the English word (typing/dictation) vs recognising it. */
+export function exerciseDirection(exerciseType: ExerciseType): CardDirection | null {
+  return EXERCISE_DIRECTION[exerciseType] ?? null;
+}
+
+/** Which card an exercise trains (practice-only exercises are logged against recognition). */
 export function directionForExercise(exerciseType: ExerciseType): CardDirection {
-  return RECOGNITION_EXERCISE_TYPES.has(exerciseType) ? "recognition" : "production";
+  return exerciseDirection(exerciseType) ?? "recognition";
+}
+
+/** Whether an answer to this exercise may update the FSRS schedule of a card of this direction. */
+export function isValidEvidence(exerciseType: ExerciseType, direction: CardDirection): boolean {
+  return exerciseDirection(exerciseType) === direction;
 }
 
 /** Recognition schedule of a word or card (on a production card `srs` is the production schedule). */

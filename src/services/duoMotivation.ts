@@ -2,19 +2,20 @@ import { Rating } from "ts-fsrs";
 import {
   calculateUrgencyScore,
   generateMultipleChoiceQuestion,
-  saveReviewLog,
-  calculateXPReward,
-  awardXP,
-  cleanMeaningForOption,
+  isBuriedBySibling,
+  isNewCard,
+  isSuspended,
 } from "./smartReview";
-import { isPlaceholderMeaning } from "./db";
-import { recordReview } from "./srs";
-import { recordDailyActivity } from "./streak";
-import { getDueCards, practiceCards } from "./cards";
+import { getWordsByIds, isPlaceholderMeaning } from "./db";
+import { getDueCards, toCard } from "./cards";
 import { checkAndUnlockAchievements } from "./achievements";
+import { popupAnswerRating } from "./popupSession";
+import { recordCardAnswer, schedulingDecision } from "./reviewRecorder";
+import { celebrationFor } from "./celebrations";
+import { minutesFor, type ComebackStatus } from "./comeback";
+import type { ReminderMoment } from "./reminderMoments";
 import type { WordDetail, CardDirection, ReviewCard } from "@/types/database";
 import { invoke } from "@tauri-apps/api/core";
-import { emit } from "@tauri-apps/api/event";
 
 export type DuoToneLevel =
   | "level_1_encouraging"
@@ -34,6 +35,8 @@ export interface MicroQuizQuestion {
   wordId: string;
   word: string;
   direction: CardDirection;
+  /** A due card (the answer is a scheduled review) rather than practice */
+  scheduled?: boolean;
   promptTitle?: string;
   phonetic?: string;
   partOfSpeech?: string;
@@ -56,6 +59,10 @@ export interface MotivationEvaluationParams {
   todayCount: number;
   dailyGoal: number;
   hour: number;
+  /** Back after a break: welcome and today's share only, never streak pressure or guilt */
+  comeback?: ComebackStatus | null;
+  /** Shown at a natural transition (back at the computer, screen share over...) */
+  moment?: ReminderMoment | null;
 }
 
 const CONSECUTIVE_SKIPS_KEY = "myenglish_duo_consecutive_skips_v1";
@@ -98,7 +105,52 @@ export function resetConsecutiveSkipCount(): void {
  * Algorithm: Determine user's psychological state and select Duolingo-style messaging tone
  */
 export function evaluateMotivationState(params: MotivationEvaluationParams): DuoMotivationState {
-  const { dueCount, consecutiveSkips, streak, todayCount, dailyGoal, hour } = params;
+  const { dueCount, consecutiveSkips, streak, todayCount, dailyGoal, hour, comeback } = params;
+
+  // 0. Back after a break: the streak is gone and the pile is big, pressure here makes people quit
+  if (comeback && !comeback.caughtUp && comeback.todayRemaining > 0) {
+    const minutes = minutesFor(comeback.todayRemaining);
+    const first = comeback.dayNumber === 1 && comeback.todayDone === 0;
+    return {
+      tone: "level_1_encouraging",
+      title: first ? "Chào mừng bạn quay lại 👋" : `Kế hoạch quay lại · ngày ${comeback.dayNumber}`,
+      message: first
+        ? `Không cần ôn hết một lúc. Hôm nay chỉ ${comeback.todayRemaining} thẻ dễ quên nhất (~${minutes} phút).`
+        : `Còn ${comeback.todayRemaining} thẻ của phần hôm nay (~${minutes} phút). Một câu nhanh ngay đây cũng được.`,
+      mascotMood: "happy",
+      isMicroQuizPreferred: true,
+    };
+  }
+
+  // 0b. A natural transition: say why now, keep it short and optional
+  if (params.moment && dueCount > 0) {
+    const minutes = minutesFor(Math.min(dueCount, 10));
+    const moments: Record<ReminderMoment, { title: string; message: string; quiz: boolean }> = {
+      morning: {
+        title: "Chào buổi sáng ☀️",
+        message: `Khởi động ngày mới với vài thẻ (~${minutes} phút) trước khi vào việc?`,
+        quiz: false,
+      },
+      back: {
+        title: "Chào mừng quay lại máy 👋",
+        message: `Trước khi vào việc tiếp: ôn nhanh vài thẻ, khoảng ${minutes} phút.`,
+        quiz: false,
+      },
+      after_share: {
+        title: "Vừa trình bày xong?",
+        message: "Nghỉ tay một chút với 1 câu ôn nhanh rồi quay lại việc.",
+        quiz: true,
+      },
+      after_fullscreen: {
+        title: "Vừa xong một việc?",
+        message: "Tranh thủ 1 câu ôn trước khi bắt đầu việc tiếp theo.",
+        quiz: true,
+      },
+    };
+    const m = moments[params.moment];
+    return { tone: "level_1_encouraging", title: m.title, message: m.message, mascotMood: "happy", isMicroQuizPreferred: m.quiz };
+  }
+
   const isGoalReached = todayCount >= dailyGoal;
   const isLateEvening = hour >= 20 || hour < 4;
   const isLunchTime = hour >= 11 && hour <= 13;
@@ -108,16 +160,12 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   if (consecutiveSkips >= 3) {
     const dramaMessages = [
       {
-        title: "Tôi ổn mà... thật đấy 🥀",
-        message: "Từ vựng đang ngồi khóc một góc trong cơ sở dữ liệu. Nhưng thôi, bạn bận thì mình tự học vậy...",
+        title: "Chỉ 1 câu khi bạn rảnh tay",
+        message: `Có ${dueCount} thẻ đang chờ. Một câu trắc nghiệm ~10 giây cũng giúp giữ trí nhớ — hoặc cứ hoãn nếu đang bận.`,
       },
       {
-        title: "Cú xanh giận rồi đấy! 🪦",
-        message: "Bạn đã lướt qua tôi 3 lần liên tiếp. Chỉ đúng 1 từ duy nhất thôi mà bạn cũng tiếc sao?",
-      },
-      {
-        title: "Lời nhắn cuối cùng hôm nay 🥺",
-        message: "Nếu bạn không ôn, những từ này sẽ bay màu khỏi não bạn mãi mãi. Bấm 1 cái cứu chúng đi!",
+        title: "Ôn ngắn, lúc nào cũng được",
+        message: "Ôn muộn vài giờ không sao: FSRS sẽ tính lại lịch theo đúng lúc bạn ôn.",
       },
     ];
     const picked = dramaMessages[consecutiveSkips % dramaMessages.length];
@@ -134,12 +182,12 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   if (!isGoalReached && (isLateEvening || (streak > 0 && hour >= 19))) {
     const fomoMessages = [
       {
-        title: `🔥 Cứu Streak ${streak > 0 ? streak : 1} ngày!`,
-        message: `Chỉ còn vài tiếng nữa là hết ngày! Hoàn thành nốt mục tiêu để không bị đóng băng chuỗi nhé!`,
+        title: `Chuỗi ${streak > 0 ? streak : 1} ngày`,
+        message: `Hôm nay: ${todayCount}/${dailyGoal}. Vài câu là giữ được chuỗi (và bạn còn lượt đóng băng nếu cần).`,
       },
       {
-        title: "Báo động đỏ trước giờ ngủ 🚨",
-        message: `Mục tiêu hôm nay: ${todayCount}/${dailyGoal} từ. Làm nhanh 1 câu để bảo vệ chuỗi học!`,
+        title: "Trước khi kết thúc ngày",
+        message: `Mục tiêu hôm nay: ${todayCount}/${dailyGoal} thẻ. Ôn ~2 phút nếu bạn muốn giữ nhịp.`,
       },
     ];
     const picked = fomoMessages[consecutiveSkips % fomoMessages.length];
@@ -156,16 +204,12 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   if (consecutiveSkips >= 1) {
     const guiltMessages = [
       {
-        title: "Lại bấm Hoãn nữa à? 👀",
-        message: "Đừng để từ vựng bơ vơ quá lâu! 30 giây thôi là xong ngay mà.",
+        title: "Khi nào rảnh tay",
+        message: `${dueCount} thẻ đang chờ, khoảng ${Math.max(1, Math.round(dueCount * 0.2))} phút. Hoặc thử 1 câu nhanh ngay đây.`,
       },
       {
-        title: "Tiếng Anh nhớ bạn rồi đó! 🥺",
-        message: "Biết bạn bận, vậy làm đúng 1 câu trắc nghiệm nhanh 10 giây này thôi nhé?",
-      },
-      {
-        title: "Deadline dí quá hả bạn ơi? 🏃",
-        message: "Nghỉ tay 1 chút, kiểm tra nhanh trí nhớ với 1 từ vựng này rồi làm tiếp nha!",
+        title: "Một câu nhanh?",
+        message: "Một câu trắc nghiệm ~10 giây, rồi quay lại việc đang làm.",
       },
     ];
     const picked = guiltMessages[(consecutiveSkips - 1) % guiltMessages.length];
@@ -221,10 +265,13 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
 }
 
 /**
- * Algorithm: Select the single most urgent card for Micro-Quiz using FSRS urgency scoring
- * Supports both recognition (en_to_vn) and production (vn_to_en) cards.
- * Avoids picking cards that were reviewed very recently (cooldown).
- * Uses weighted selection among top candidate cards to avoid repeating the exact same word.
+ * The nudge's one-question quiz: "what does <English word> mean?" with 3 options. It is a recognition
+ * question, so only recognition cards are asked:
+ *  - a due recognition card that was already studied (never a brand-new word: it has not been introduced)
+ *    -> the answer is a scheduled review, graded like the popup (never Easy)
+ *  - nothing due -> a word studied before, as practice (logged, schedule untouched)
+ * Cards reviewed in the last 45 minutes are avoided, and the pick is weighted among the top 5 so the
+ * same word is not asked every time.
  */
 export function selectMicroQuizQuestion(
   dueWords: WordDetail[],
@@ -232,95 +279,58 @@ export function selectMicroQuizQuestion(
   now: Date = new Date()
 ): MicroQuizQuestion | null {
   if (allWords.length === 0) return null;
+  const usable = (w: WordDetail) => !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w);
 
-  // 1. Gather candidate cards: prioritize cards that are actually due
   const dueCards = dueWords
-    .filter((w) => !isPlaceholderMeaning(w.meaning_vn))
-    .flatMap((w) => getDueCards(w, now));
-
-  const candidatePool: ReviewCard[] =
-    dueCards.length > 0
-      ? dueCards
-      : practiceCards(allWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn)));
-
+    .filter(usable)
+    .flatMap((w) => getDueCards(w, now))
+    .filter((c) => c.direction === "recognition" && !isNewCard(c) && !isBuriedBySibling(c, now));
+  const scheduled = dueCards.length > 0;
+  const candidatePool: ReviewCard[] = scheduled
+    ? dueCards
+    : allWords.filter((w) => usable(w) && (w.srs.reps ?? 0) > 0).map((w) => toCard(w, "recognition"));
   if (candidatePool.length === 0) return null;
 
-  // 2. Cooldown filter: deprioritize cards reviewed in the last 45 minutes
   const RECENT_COOLDOWN_MS = 45 * 60 * 1000;
-  const nonRecentCandidates = candidatePool.filter((c) => {
+  const nonRecent = candidatePool.filter((c) => {
     const lastRev = c.srs?.last_review;
-    if (!lastRev) return true;
-    return now.getTime() - new Date(lastRev).getTime() > RECENT_COOLDOWN_MS;
+    return !lastRev || now.getTime() - new Date(lastRev).getTime() > RECENT_COOLDOWN_MS;
   });
+  const active = nonRecent.length > 0 ? nonRecent : candidatePool;
 
-  // If all cards were reviewed recently, fall back to candidatePool
-  const activeCandidates = nonRecentCandidates.length > 0 ? nonRecentCandidates : candidatePool;
-
-  // 3. Score urgency for all candidates using the FSRS urgency algorithm
-  const scored = activeCandidates.map((c) => ({
-    card: c,
-    score: calculateUrgencyScore(c, now).urgencyScore,
-  }));
-
-  // Sort highest urgency first
-  scored.sort((a, b) => b.score - a.score);
-
-  // 4. To avoid locking into a single word endlessly, take top K candidates and pick with weighted probability
+  const scored = active
+    .map((c) => ({ card: c, score: calculateUrgencyScore(c, now).urgencyScore }))
+    .sort((a, b) => b.score - a.score);
   const topK = scored.slice(0, Math.min(5, scored.length));
-  let targetCard: ReviewCard;
-
-  if (topK.length === 1) {
-    targetCard = topK[0].card;
-  } else {
-    // Weighted selection: higher urgency score has higher probability
-    const minScore = Math.min(...topK.map((item) => item.score));
-    const shiftedWeights = topK.map((item) => Math.max(1, Math.round(item.score - minScore + 5)));
-    const totalWeight = shiftedWeights.reduce((sum, w) => sum + w, 0);
-    let rand = Math.random() * totalWeight;
-    let chosenIdx = 0;
+  let targetCard = topK[0].card;
+  if (topK.length > 1) {
+    const total = topK.reduce((sum, _, i) => sum + (topK.length - i), 0);
+    let rand = Math.random() * total;
     for (let i = 0; i < topK.length; i++) {
-      rand -= shiftedWeights[i];
+      rand -= topK.length - i;
       if (rand <= 0) {
-        chosenIdx = i;
+        targetCard = topK[i].card;
         break;
       }
     }
-    targetCard = topK[chosenIdx].card;
   }
 
-  // 5. Generate multiple choice question according to card direction
-  const isProduction = targetCard.direction === "production";
-  const promptType = isProduction ? "vn_to_en" : "en_to_vn";
-  const mcq = generateMultipleChoiceQuestion(targetCard, allWords, promptType);
-
-  // Limit to 3 options for clean compact desktop notification/nudge
-  const compactOptions = mcq.options.slice(0, 3);
-
-  // Ensure correct option is always present in compact options
-  if (!compactOptions.some((o) => o.isCorrect)) {
-    const correctOpt = mcq.options.find((o) => o.isCorrect);
-    if (correctOpt) {
-      compactOptions[compactOptions.length - 1] = correctOpt;
-    }
-  }
-
-  const promptTitle = isProduction
-    ? cleanMeaningForOption(targetCard.meaning_vn)
-    : targetCard.word;
+  const mcq = generateMultipleChoiceQuestion(targetCard, allWords, "en_to_vn");
+  const correctOpt = mcq.options.find((o) => o.isCorrect);
+  const compactOptions = [...mcq.options.filter((o) => !o.isCorrect).slice(0, 2), ...(correctOpt ? [correctOpt] : [])].sort(
+    () => 0.5 - Math.random()
+  );
 
   return {
     wordId: targetCard.id,
     word: targetCard.word,
-    direction: targetCard.direction,
-    promptTitle,
-    phonetic: isProduction ? undefined : targetCard.phonetic || undefined,
+    direction: "recognition",
+    scheduled,
+    promptTitle: targetCard.word,
+    phonetic: targetCard.phonetic || undefined,
     partOfSpeech: targetCard.part_of_speech || undefined,
     targetMeaning: targetCard.meaning_vn,
-    options: compactOptions.map((o) => ({
-      id: o.id,
-      text: o.text,
-      isCorrect: o.isCorrect,
-    })),
+    options: compactOptions.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
   };
 }
 
@@ -332,11 +342,22 @@ export interface MicroQuizEvaluationResult {
   responseTimeMs: number;
   streakUpdated: boolean;
   xpEarned?: number;
+  /** The answer moved the word's schedule (false = practice) */
+  scheduled?: boolean;
+  /** Short praise when the word reached long-term memory or was remembered just before fading */
+  praise?: string | null;
 }
 
+const RATING_LABEL: Record<number, MicroQuizEvaluationResult["ratingLabel"]> = {
+  [Rating.Again]: "Again",
+  [Rating.Hard]: "Hard",
+  [Rating.Good]: "Good",
+  [Rating.Easy]: "Easy",
+};
+
 /**
- * Algorithm: Evaluate user's Micro-Quiz response, record FSRS memory parameters,
- * persist review log, award XP, update Streak, check achievements, and notify all windows.
+ * Grade the micro-quiz answer through the same path as the popup and flashcards (recordCardAnswer):
+ * the schedule only moves when the recognition card is due; otherwise the answer is practice.
  */
 export async function evaluateMicroQuizAnswer(params: {
   wordId: string;
@@ -347,90 +368,54 @@ export async function evaluateMicroQuizAnswer(params: {
   direction?: CardDirection;
 }): Promise<MicroQuizEvaluationResult> {
   const { wordId, selectedChoiceId, options, targetMeaning, responseTimeMs } = params;
-  const direction: CardDirection = params.direction || "recognition";
   const picked = options.find((o) => o.id === selectedChoiceId);
   const isCorrect = picked ? picked.isCorrect : false;
-  const wrongAttempts = isCorrect ? 0 : 1;
+  const rating = popupAnswerRating(isCorrect, "multiple_choice", responseTimeMs);
 
-  // 1. Algorithmic Rating derivation (FSRS scale 1-4 based on accuracy and response time)
-  let rating: Rating;
-  let ratingLabel: "Again" | "Hard" | "Good" | "Easy";
-
-  if (!isCorrect) {
-    rating = Rating.Again;
-    ratingLabel = "Again";
-  } else if (responseTimeMs < 3500) {
-    rating = Rating.Easy;
-    ratingLabel = "Easy";
-  } else if (responseTimeMs < 8000) {
-    rating = Rating.Good;
-    ratingLabel = "Good";
-  } else {
-    rating = Rating.Hard;
-    ratingLabel = "Hard";
+  // Re-read the word: the nudge payload may be minutes old
+  const [word] = await getWordsByIds([wordId]).catch(() => [] as WordDetail[]);
+  let xpEarned = 0;
+  let scheduled = false;
+  let praise: string | null = null;
+  if (word) {
+    const card = toCard(word, "recognition");
+    const decision = schedulingDecision({ card, exerciseType: "multiple_choice" });
+    // Brand-new words are never graded from a 3-option guess
+    scheduled = decision.scheduled && !isNewCard(card);
+    const recorded = await recordCardAnswer({
+      card,
+      exerciseType: "multiple_choice",
+      rating,
+      wrongAttempts: isCorrect ? 0 : 1,
+      responseTimeMs,
+      scheduled,
+      countsForDailyGoal: true,
+    });
+    xpEarned = recorded.xp.totalXP;
+    praise = celebrationFor({ ...recorded, direction: "recognition", word: word.word })?.title ?? null;
   }
 
-  // 2. Persist to SQLite using FSRS algorithm with the exact card direction
-  const srsResult = await recordReview(wordId, rating, direction);
-
-  // 3. Calculate and award XP reward (identical to Dashboard & Popup)
-  const xpReward = calculateXPReward(
-    rating,
-    "multiple_choice",
-    wrongAttempts,
-    responseTimeMs,
-    false,
-    isCorrect
-  );
-  if (xpReward.totalXP > 0) {
-    awardXP(xpReward.totalXP);
-  }
-
-  // 4. Record review log in SQLite (identical to Dashboard & Popup)
-  await saveReviewLog({
-    wordId,
-    exerciseType: "multiple_choice",
-    responseTimeMs,
-    isCorrect,
-    wrongAttempts,
-    rating,
-    xpEarned: xpReward.totalXP,
-    timestamp: new Date().toISOString(),
-    isScheduled: true,
-    direction: srsResult.direction || direction,
-  }).catch((err) => console.warn("Failed to save micro-quiz review log:", err));
-
-  // 5. Update Streak & daily activity
-  recordDailyActivity(1);
-
-  // 6. Reset consecutive skips because user interacted positively
   resetConsecutiveSkipCount();
-
-  // 7. Check and unlock achievements
-  checkAndUnlockAchievements({
-    consecutiveCorrect: isCorrect ? 1 : 0,
-    sessionReviewCount: 1,
-    leechesSlain: 0,
-    responseTimeMs,
-    isCorrect,
-  });
-
-  // 8. Emit words-changed event to sync all windows (Dashboard, Popup, Tray)
-  try {
-    await emit("words-changed");
-  } catch {}
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(new CustomEvent("words-changed"));
+  if (scheduled) {
+    checkAndUnlockAchievements({
+      consecutiveCorrect: isCorrect ? 1 : 0,
+      sessionReviewCount: 1,
+      leechesSlain: 0,
+      responseTimeMs,
+      isCorrect,
+    });
   }
 
   return {
     isCorrect,
     rating,
-    ratingLabel,
+    ratingLabel: RATING_LABEL[rating],
     correctMeaning: targetMeaning,
     responseTimeMs,
     streakUpdated: true,
-    xpEarned: xpReward.totalXP,
+    xpEarned,
+    scheduled,
+    praise,
   };
 }
 

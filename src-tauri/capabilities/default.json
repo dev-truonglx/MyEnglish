@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capability for the main window",
-  "windows": ["main"],
+  "description": "Capability for the main window: all plugins and every app command",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "opener:default",
@@ -12,6 +14,32 @@
     "notification:default",
     "updater:default",
     "process:default",
-    "autostart:default"
+    "autostart:default",
+    "allow-toggle-quick-input",
+    "allow-hide-quick-input",
+    "allow-show-main-window",
+    "allow-submit-word",
+    "allow-enrich-word-with-gemini",
+    "allow-generate-grammar-exercises-ai",
+    "allow-generate-vocabulary-recommendations-ai",
+    "allow-get-clipboard-text",
+    "allow-check-cli-status",
+    "allow-send-desktop-notification",
+    "allow-trigger-review-navigation",
+    "allow-show-review-popup",
+    "allow-hide-review-popup",
+    "allow-show-review-nudge",
+    "allow-hide-review-nudge",
+    "allow-is-cursor-over-nudge",
+    "allow-take-review-nudge-payload",
+    "allow-prepare-update-exit",
+    "allow-cancel-update-exit",
+    "allow-get-popup-blockers",
+    "allow-log-debug",
+    "allow-set-tray-due-count",
+    "allow-export-backup",
+    "allow-grade-sentence-ai",
+    "allow-correct-writing-ai",
+    "allow-compute-fsrs-parameters"
   ]
 }

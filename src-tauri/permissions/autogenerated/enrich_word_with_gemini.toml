@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-enrich-word-with-gemini"
+description = "Enables the enrich_word_with_gemini command without any pre-configured scope."
+commands.allow = ["enrich_word_with_gemini"]
+
+[[permission]]
+identifier = "deny-enrich-word-with-gemini"
+description = "Denies the enrich_word_with_gemini command without any pre-configured scope."
+commands.deny = ["enrich_word_with_gemini"]

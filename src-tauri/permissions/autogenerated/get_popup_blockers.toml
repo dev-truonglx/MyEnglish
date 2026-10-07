@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-popup-blockers"
+description = "Enables the get_popup_blockers command without any pre-configured scope."
+commands.allow = ["get_popup_blockers"]
+
+[[permission]]
+identifier = "deny-get-popup-blockers"
+description = "Denies the get_popup_blockers command without any pre-configured scope."
+commands.deny = ["get_popup_blockers"]

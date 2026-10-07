@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import type { GrammarLevel } from "@/types/grammar";
+import PlacementTest from "./PlacementTest";
 import {
   assessUserProficiency,
   setUserOverrideLevel,
@@ -44,6 +45,7 @@ export default function ProficiencyAssessmentCard({
   const [actionNotice, setActionNotice] = useState<{ type: "success" | "error" | "info"; text: string } | null>(null);
   const [autoReplenishSettings, setAutoReplenishSettings] = useState<AutoReplenishSettings>(getAutoReplenishSettings);
   const [showOverrideMenu, setShowOverrideMenu] = useState(false);
+  const [showPlacement, setShowPlacement] = useState(false);
 
   const profile: UserProficiencyProfile = useMemo(() => {
     return assessUserProficiency(words);
@@ -174,6 +176,22 @@ export default function ProficiencyAssessmentCard({
             </div>
           </div>
 
+          {showPlacement && (
+            <PlacementTest
+              onClose={() => setShowPlacement(false)}
+              onDone={(lvl) => {
+                setShowPlacement(false);
+                handleSetOverride(lvl);
+              }}
+            />
+          )}
+          <button
+            onClick={() => setShowPlacement(true)}
+            title="5 câu mỗi cấp độ, dừng sớm khi gặp mức khó — khoảng 1–3 phút"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:hover:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 transition-colors"
+          >
+            Kiểm tra trình độ
+          </button>
           <div className="relative">
             <button
               onClick={() => setShowOverrideMenu(!showOverrideMenu)}

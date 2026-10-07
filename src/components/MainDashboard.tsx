@@ -1,11 +1,13 @@
 import { useEffect, useState, useMemo, useRef, useCallback, lazy, Suspense } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
+import { takePendingContext, pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { getDueCards, isWordDue, practiceCards, getNextReviewDate } from "@/services/cards";
 import { formatNextReviewRelative, compareNextReview, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
+import { applyComebackToWork, resolveComeback } from "@/services/comeback";
+import { shouldShowOnboarding } from "@/services/onboarding";
 import {
   getRetrievabilityInfo,
   isLeech,
@@ -13,6 +15,8 @@ import {
   smartSortReviewQueue,
   buildReviewSession,
   getNewCardsIntroducedToday,
+  summarizeTodayWork,
+  type NewCardCounts,
 } from "@/services/smartReview";
 import LevelUpModal from "./LevelUpModal";
 
@@ -22,6 +26,9 @@ const AnalyticsView = lazy(() => import("./AnalyticsView"));
 const CliGuideView = lazy(() => import("./CliGuideView"));
 const FocusReviewModal = lazy(() => import("./FocusReviewModal"));
 const GrammarHub = lazy(() => import("./grammar/GrammarHub"));
+const OnboardingFlow = lazy(() => import("./OnboardingFlow"));
+const ReadingTab = lazy(() => import("./dashboard/ReadingTab"));
+const WritingTab = lazy(() => import("./dashboard/WritingTab"));
 
 function TabFallback() {
   return (
@@ -81,6 +88,11 @@ export default function MainDashboard({
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
   const [activeTab, setActiveTab] = useState<DashboardTab>("library");
+  // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
+  const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(null);
+  useEffect(() => {
+    if (activeTab !== "grammar") setGrammarLessonToOpen(null);
+  }, [activeTab]);
   const [inputWord, setInputWord] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
@@ -107,10 +119,23 @@ export default function MainDashboard({
   }, [words, activityVersion]);
   const effectiveLevel = currentProficiency.effectiveLevel;
 
-  const streakStats = useMemo(() => {
-    // Reviewing everything due today also completes the daily goal
-    return calculateStreakAndGoal(words, words.filter((w) => isWordDue(w)).length);
+  // New cards already introduced today: "due" only counts new words the daily budget still allows
+  const [introducedToday, setIntroducedToday] = useState<NewCardCounts>({ recognition: 0, production: 0 });
+  useEffect(() => {
+    getNewCardsIntroducedToday().then(setIntroducedToday).catch(() => {});
   }, [words, activityVersion]);
+  const fullTodayWork = useMemo(() => summarizeTodayWork(words, introducedToday), [words, introducedToday, activityVersion]);
+  // Back after a break: the backlog is spread over a few days and only today's share is counted
+  const comeback = useMemo(
+    () => resolveComeback(fullTodayWork.reviews, getStudyLimits().maxSessionSize),
+    [fullTodayWork.reviews, activityVersion]
+  );
+  const todayWork = useMemo(() => applyComebackToWork(fullTodayWork, comeback), [fullTodayWork, comeback]);
+
+  const streakStats = useMemo(() => {
+    // Finishing what is left today (reviews + budgeted new words) also completes the daily goal
+    return calculateStreakAndGoal(words, todayWork.total);
+  }, [words, activityVersion, todayWork.total]);
 
   const handleCopyCode = (code: string) => {
     if (navigator.clipboard) {
@@ -182,6 +207,18 @@ export default function MainDashboard({
   // Auto-start requested by "open-review-tab"; consumed once words are loaded
   const [pendingAutoStart, setPendingAutoStart] = useState(false);
 
+  // First run (no words yet): goal -> level -> minutes per day, then the first session
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  useEffect(() => {
+    if (shouldShowOnboarding(words.length, loading)) setShowOnboarding(true);
+  }, [words.length, loading]);
+  const handleOnboardingFinish = async (startNow: boolean) => {
+    setShowOnboarding(false);
+    await refreshWords();
+    setActivityVersion((v) => v + 1);
+    if (startNow) setPendingAutoStart(true);
+  };
+
   useEffect(() => {
     refreshWords({ showLoading: true });
     // Resume AI analysis for words left with a placeholder meaning (app closed mid-analysis / failed)
@@ -212,8 +249,11 @@ export default function MainDashboard({
     listen<{ word: string }>("word-submitted", (event) => {
       if (isCancelled) return;
       const w = event.payload.word;
-      setMessage(`Received "${w}" from Quick Input. Gemini AI is analyzing...`);
-      pipeline.enqueue(w);
+      pipeline.enqueue(w, { context: takePendingContext(w) }).then((res) => {
+        setMessage(
+          res.accepted ? `Received "${w}" from Quick Input. Gemini AI is analyzing...` : `Không thể thêm "${w}": ${res.reason}`
+        );
+      });
     })
       .then((fn) => {
         if (isCancelled) {
@@ -319,8 +359,16 @@ export default function MainDashboard({
     let session: ReviewCard[] = [];
     if (onlyDue) {
       const due = pool.filter((w) => isWordDue(w, now));
-      const newToday = await getNewCardsIntroducedToday().catch(() => 0);
-      session = buildReviewSession(due, newToday, now);
+      const newToday = await getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 }));
+      // Comeback plan: today's share first (then normal-sized extra sessions), no new words until caught up.
+      // Computed here, not read from render state, since older closures may call this.
+      const backlog = summarizeTodayWork(useWordsStore.getState().words, newToday, now).reviews;
+      const cb = resolveComeback(backlog, getStudyLimits().maxSessionSize, now);
+      const plan = cb && !cb.caughtUp ? cb : null;
+      session = buildReviewSession(due, newToday, now, {
+        maxCards: plan && plan.todayRemaining > 0 ? plan.todayRemaining : undefined,
+        noNewCards: !!plan,
+      });
     }
 
     if (session.length > 0) {
@@ -477,8 +525,8 @@ export default function MainDashboard({
     return { dueWords, learnedCount, leechCount: leechIds.size, perTopic };
   }, [words, nowTick]);
 
-  // Due review count
-  const dueCount = libraryStats.dueWords.length;
+  // What a review session will actually contain today: due reviews + new words within the daily budget
+  const dueCount = todayWork.total;
 
   // Per-card derived data (parsed synonyms + FSRS retrievability), computed once per words change
   const cardMeta = useMemo(() => {
@@ -665,6 +713,19 @@ export default function MainDashboard({
         )}
 
         <Suspense fallback={<TabFallback />}>
+        {/* READING MODE: real text with the learner's words highlighted */}
+        {activeTab === "reading" && <ReadingTab />}
+
+        {/* WRITING: daily standup corrected by AI + the learner's mistake notebook */}
+        {activeTab === "writing" && (
+          <WritingTab
+            onOpenGrammarLesson={(id) => {
+              setGrammarLessonToOpen(id);
+              setActiveTab("grammar");
+            }}
+          />
+        )}
+
         {/* TAB 3: DAILY REVIEW WITH INTERACTIVE FLASHCARD SESSION */}
         {activeTab === "review" && (
           isReviewing ? (
@@ -686,6 +747,7 @@ export default function MainDashboard({
           ) : (
             <ReviewTab
               dueCount={dueCount}
+              comeback={comeback}
               libraryStats={libraryStats}
               availableTopics={availableTopics}
               handleStartReview={handleStartReview}
@@ -722,7 +784,7 @@ export default function MainDashboard({
         )}
 
         {/* TAB 6: GRAMMAR HUB (A1 - C1 ROADMAP & DIAGNOSTIC PRACTICE) */}
-        {activeTab === "grammar" && <GrammarHub />}
+        {activeTab === "grammar" && <GrammarHub key={grammarLessonToOpen ?? "hub"} initialLessonId={grammarLessonToOpen} />}
         </Suspense>
       </main>
 
@@ -755,6 +817,12 @@ export default function MainDashboard({
             onClose={() => setShowReviewModalPreview(false)}
             isPreview={true}
           />
+        </Suspense>
+      )}
+
+      {showOnboarding && (
+        <Suspense fallback={null}>
+          <OnboardingFlow onFinish={handleOnboardingFinish} />
         </Suspense>
       )}
 

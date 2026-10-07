@@ -123,20 +123,7 @@ async function runGrammarInit(): Promise<void> {
   try {
     const db = await getDatabase();
     if (db) {
-      await db.execute(`
-        CREATE TABLE IF NOT EXISTS grammar_progress (
-          lesson_id TEXT PRIMARY KEY,
-          diagnostic_status TEXT DEFAULT 'unattempted',
-          score INTEGER DEFAULT 0,
-          mastery INTEGER DEFAULT 0,
-          reps INTEGER DEFAULT 0,
-          lapses INTEGER DEFAULT 0,
-          last_attempt_date TIMESTAMP,
-          next_review_date TIMESTAMP,
-          streak INTEGER DEFAULT 0,
-          first_try_bonus INTEGER DEFAULT 0
-        );
-      `);
+      // The table itself is created by the versioned schema in db.ts (getDatabase runs it)
       // Older databases were created without these columns (errors mean the column exists)
       for (const column of [
         "first_try_bonus INTEGER DEFAULT 0",
@@ -280,11 +267,12 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** A failed attempt soon after the last scheduled review is not counted again (same session) */
 const SAME_SESSION_MS = 12 * 60 * 60 * 1000;
 
-/** Score (%) below which a diagnostic counts as failed */
-const DIAGNOSTIC_PASS_SCORE = 60;
-
-/** Score (%) at or above which a practice attempt counts as a successful recall */
-const PRACTICE_PASS_SCORE = 60;
+/** Score (%) at or above which a lesson attempt passes (diagnostic and practice, everywhere in the UI) */
+export const GRAMMAR_PASS_SCORE = 60;
+const DIAGNOSTIC_PASS_SCORE = GRAMMAR_PASS_SCORE;
+const PRACTICE_PASS_SCORE = GRAMMAR_PASS_SCORE;
+/** Answers to one lesson needed in a popup session before the lesson's schedule is updated */
+export const MIN_LESSON_ANSWERS = 2;
 
 /**
  * FSRS grade for a lesson result: < 60% Again, < 80% Hard, otherwise Good.
@@ -663,6 +651,10 @@ export async function mineGrammarExercisesFromVocabulary(
         // Whole-word match of the vocabulary word (escaped, so "c++" / ".net" are safe)
         const wordMatch = new RegExp(wordFormsPattern(rawWord), "i").exec(textEn);
         if (!wordMatch) continue;
+
+        // The blank must test grammar: when the word appears in its base form, the answer would just be
+        // a copy of the hint. Only inflected forms (deploys, deployed, deploying) make a real exercise.
+        if (wordMatch[0].toLowerCase() === rawWord.toLowerCase()) continue;
 
         // Stable id scoped to the lesson
         const id = `mined-${lessonId}-${w.id}-${ex.id || exIdx}`;
@@ -1068,13 +1060,24 @@ export async function getGrammarExercisesForReview(
   // Map back to lesson
   const exerciseToLesson = new Map(pairs.map((p) => [p.exercise.id, p.lesson]));
 
-  const result: Array<{ exercise: import("@/types/grammar").GrammarExercise; lesson: import("@/types/grammar").GrammarLesson }> = [];
+  // Exercises come in pairs from the same lesson: one question is too little evidence to reschedule a
+  // whole grammar point (see MIN_LESSON_ANSWERS). Lessons keep the priority order of their best exercise.
+  const byLesson = new Map<string, Array<{ exercise: import("@/types/grammar").GrammarExercise; lesson: import("@/types/grammar").GrammarLesson }>>();
   for (const ex of preparedExercises) {
     const lesson = exerciseToLesson.get(ex.id);
-    if (lesson) {
-      result.push({ exercise: ex, lesson });
+    if (!lesson) continue;
+    const list = byLesson.get(lesson.id) ?? [];
+    if (list.length < MIN_LESSON_ANSWERS) list.push({ exercise: ex, lesson });
+    byLesson.set(lesson.id, list);
+  }
+  const result: Array<{ exercise: import("@/types/grammar").GrammarExercise; lesson: import("@/types/grammar").GrammarLesson }> = [];
+  for (const list of byLesson.values()) {
+    if (list.length < MIN_LESSON_ANSWERS && count - result.length >= MIN_LESSON_ANSWERS) continue;
+    for (const item of list) {
       if (result.length >= count) break;
+      result.push(item);
     }
+    if (result.length >= count) break;
   }
 
   return result;

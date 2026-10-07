@@ -91,6 +91,32 @@ export async function backupLocalStorageToDb(): Promise<void> {
   for (const [key, value] of changed) lastBackedUp.set(key, value);
 }
 
+/**
+ * Write one key to SQLite right away (fire-and-forget). Used for progress that must survive a crash
+ * between periodic backups (XP, daily activity / streak). Any window may call it.
+ */
+export function persistKeyNow(key: string): void {
+  if (!isBackedUpKey(key)) return;
+  let value: string | null = null;
+  try {
+    value = localStorage.getItem(key);
+  } catch {
+    return;
+  }
+  if (value === null || lastBackedUp.get(key) === value) return;
+  const v = value;
+  getDatabase()
+    .then((db) =>
+      db.execute(
+        `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2, $3)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`,
+        [key, v, new Date().toISOString()]
+      )
+    )
+    .then(() => lastBackedUp.set(key, v))
+    .catch(() => {});
+}
+
 /** Run only in the main window after a successful restore (other windows share localStorage). */
 export function startLocalStorageBackup(): void {
   if (backupTimer !== null) return;

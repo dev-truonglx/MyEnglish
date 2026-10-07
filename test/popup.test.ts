@@ -4,9 +4,11 @@ import type { PopupBlockers } from "@/services/srs";
 // Native commands are mocked per test: get_popup_blockers returns `blockers`, other calls are recorded
 let blockers: PopupBlockers | Error;
 const invokeCalls: string[] = [];
+const invokeArgs: Array<{ cmd: string; args: unknown }> = [];
 vi.mock("@tauri-apps/api/core", () => ({
-  invoke: vi.fn(async (cmd: string) => {
+  invoke: vi.fn(async (cmd: string, args?: unknown) => {
     invokeCalls.push(cmd);
+    invokeArgs.push({ cmd, args });
     if (cmd === "get_popup_blockers") {
       if (blockers instanceof Error) throw blockers;
       return blockers;
@@ -20,6 +22,7 @@ const none: PopupBlockers = { fullscreen_app: null, screen_sharing_app: null, fo
 
 beforeEach(() => {
   invokeCalls.length = 0;
+  invokeArgs.length = 0;
   blockers = { ...none };
 });
 
@@ -81,17 +84,74 @@ describe("nudge payload", () => {
 });
 
 describe("background worker", () => {
-  async function setup(respectFocus: boolean) {
+  async function setup(
+    respectFocus: boolean,
+    opts: { contextMoments?: boolean; intervalMinutes?: 15 | 60; lastPopupAgoMs?: number } = {}
+  ) {
     vi.resetModules();
     const db = await import("@/services/db");
     const srs = await import("@/services/srs");
     const reminders = await import("@/services/reminderSettings");
     await db.insertEnrichedWord({ word: "latency", meaning_vn: "độ trễ", synonyms: [], antonyms: [], examples: [] });
-    reminders.saveReminderSettings({ enabled: true, intervalMinutes: 15, triggerCondition: "due_only", respectFocus, snoozedUntil: null });
-    reminders.recordPopupDisplayed(Date.now() - 60 * 60 * 1000); // last popup an hour ago -> due now
+    reminders.saveReminderSettings({
+      enabled: true,
+      intervalMinutes: opts.intervalMinutes ?? 15,
+      triggerCondition: "due_only",
+      respectFocus,
+      snoozedUntil: null,
+      contextMoments: opts.contextMoments ?? false,
+    });
+    // By default the last popup was an hour ago -> due now
+    reminders.recordPopupDisplayed(Date.now() - (opts.lastPopupAgoMs ?? 60 * 60 * 1000));
     invokeCalls.length = 0;
+    invokeArgs.length = 0;
     return srs.srsWorker;
   }
+
+  const nudgePayload = () =>
+    (invokeArgs.find((c) => c.cmd === "show_review_nudge")?.args as { payload: Record<string, any> } | undefined)?.payload;
+
+  it("brings the reminder forward when the learner comes back to the computer", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T14:00:00"));
+    // Clock reminder only every hour, the last one 30 minutes ago
+    const worker = await setup(true, { contextMoments: true, intervalMinutes: 60, lastPopupAgoMs: 30 * 60 * 1000 });
+    blockers = { ...none, idle_seconds: 9 * 60 }; // away
+    await worker.tick();
+    expect(invokeCalls).not.toContain("show_review_nudge");
+
+    vi.setSystemTime(new Date("2026-10-05T14:00:20"));
+    blockers = { ...none, idle_seconds: 20 }; // back, and pausing
+    await worker.tick();
+    expect(invokeCalls).toContain("show_review_nudge");
+    expect(nudgePayload()?.moment).toBe("back");
+    expect(nudgePayload()?.motivation?.title).toMatch(/quay lại máy/);
+  });
+
+  it("a moment never comes right after the previous reminder", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T14:00:00"));
+    const worker = await setup(true, { contextMoments: true, intervalMinutes: 60, lastPopupAgoMs: 5 * 60 * 1000 });
+    blockers = { ...none, screen_sharing_app: "Zoom" };
+    await worker.tick();
+    vi.setSystemTime(new Date("2026-10-05T14:00:20"));
+    blockers = { ...none };
+    await worker.tick();
+    expect(invokeCalls).not.toContain("show_review_nudge");
+  });
+
+  it("the clock reminder skips hours where reminders are always ignored", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T14:30:00"));
+    const worker = await setup(false);
+    localStorage.setItem("myenglish_quiet_hours_v1", JSON.stringify({ day: "2026-10-05", hours: [14] }));
+    await worker.tick();
+    expect(invokeCalls).not.toContain("show_review_nudge");
+
+    vi.setSystemTime(new Date("2026-10-05T15:01:00"));
+    await worker.tick();
+    expect(invokeCalls).toContain("show_review_nudge");
+  });
 
   it("postpones the reminder while an app is full screen and shows the corner nudge once free", async () => {
     const worker = await setup(true);

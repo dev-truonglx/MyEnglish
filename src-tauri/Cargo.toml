@@ -29,6 +29,9 @@ tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-autostart = "2.7.0"
 arboard = "3.6.1"
+# FSRS parameter optimizer (fsrs-rs, the engine Anki uses). 6.x = FSRS-6 with 21 parameters,
+# matching ts-fsrs 5.x on the frontend. Pure Rust (ndarray/rayon), no burn/libtorch at runtime.
+fsrs = "6.6"
 
 # mac-notification-sys pulls in objc2 which only compiles on Apple platforms.
 # Must be guarded so Windows cross-build (Linux Docker) doesn't try to compile it.

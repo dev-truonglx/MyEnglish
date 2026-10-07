@@ -20,6 +20,9 @@ interface GradingBarProps {
   /** Grade of a correct typed answer waiting for the user to continue */
   pendingRating: Rating | null;
   onContinue: () => void;
+  /** A new word's introduction card: one "continue" button, nothing is graded */
+  introMode?: boolean;
+  onIntroDone?: () => void;
 }
 
 const RATING_LABEL: Record<number, string> = {
@@ -45,10 +48,22 @@ export default function GradingBar({
   allowEasy,
   pendingRating,
   onContinue,
+  introMode = false,
+  onIntroDone,
 }: GradingBarProps) {
   return (
     <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
-      {pendingRating !== null ? (
+      {introMode ? (
+        <button
+          onClick={onIntroDone}
+          disabled={isAdvancing}
+          autoFocus
+          className="w-full h-full rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md"
+        >
+          <span>Đã đọc kỹ từ mới — học tiếp (sẽ hỏi lại sau vài thẻ)</span>
+          <kbd className="px-2 py-0.5 rounded bg-white/20 text-[11px] font-mono">Enter ↵</kbd>
+        </button>
+      ) : pendingRating !== null ? (
         <button
           onClick={onContinue}
           disabled={isAdvancing}
@@ -61,7 +76,7 @@ export default function GradingBar({
           </span>
           <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
         </button>
-      ) : ["multiple_choice", "sentence_builder", "context_match", "listening", "reverse_cloze"].includes(
+      ) : ["multiple_choice", "sentence_builder", "context_match", "meaning_match", "listening", "reverse_cloze", "free_writing"].includes(
         effectiveExerciseType
       ) ? (
         <div className="w-full flex items-center justify-between px-3">

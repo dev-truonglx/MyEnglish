@@ -1,5 +1,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { getNextReviewDate, isWordDue } from "@/services/cards";
+import { handleSpeak } from "./review/speech";
 import { Volume2, Trash2, ArrowUpDown, ChevronRight, Tag, Sparkles, Clock } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import { formatNextReviewRelative, compareNextReview, type ReviewTimeRelativeInfo } from "@/utils/reviewSchedule";
@@ -93,17 +94,6 @@ export default function WordTableView({
 
   const visibleWords = useMemo(() => sortedWords.slice(0, visibleCount), [sortedWords, visibleCount]);
   const remaining = sortedWords.length - visibleWords.length;
-
-  const handleSpeak = (text: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if ("speechSynthesis" in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = "en-US";
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-    }
-  };
 
   if (words.length === 0) {
     return null;

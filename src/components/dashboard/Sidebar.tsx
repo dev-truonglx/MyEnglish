@@ -17,6 +17,8 @@ import {
   CheckCircle2,
   Download,
   GraduationCap,
+  BookOpenText,
+  NotebookPen,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PipelineItem } from "@/services/pipeline";
@@ -309,6 +311,32 @@ export default function Sidebar({
             {pipelineQueue.some((i) => i.status === "analyzing") && (
               <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab("reading")}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "reading"
+              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+              }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <BookOpenText className="w-4 h-4" />
+              <span>Đọc (Reading)</span>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setActiveTab("writing")}
+            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "writing"
+              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+              }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <NotebookPen className="w-4 h-4" />
+              <span>Viết & Sổ lỗi</span>
+            </div>
           </button>
 
           <button

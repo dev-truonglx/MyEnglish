@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-take-review-nudge-payload"
+description = "Enables the take_review_nudge_payload command without any pre-configured scope."
+commands.allow = ["take_review_nudge_payload"]
+
+[[permission]]
+identifier = "deny-take-review-nudge-payload"
+description = "Denies the take_review_nudge_payload command without any pre-configured scope."
+commands.deny = ["take_review_nudge_payload"]

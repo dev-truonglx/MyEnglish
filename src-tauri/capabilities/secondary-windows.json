@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "secondary-windows",
-  "description": "Quick input, review popup and reminder nudge: database access and notifications only (no updater, process, opener or shortcuts)",
+  "description": "Quick input, review popup and reminder nudge: database access, notifications and the app commands of the shared review/reminder services (ErrorBoundary, srs.ts, reminderSettings.ts, duoMotivation.ts, logger.ts) which every window loads. No updater, process, opener or shortcuts.",
   "windows": [
     "quick-input",
     "review-popup",
@@ -11,6 +11,16 @@
     "core:default",
     "sql:default",
     "sql:allow-execute",
-    "notification:default"
+    "notification:default",
+    "allow-log-debug",
+    "allow-send-desktop-notification",
+    "allow-get-popup-blockers",
+    "allow-show-review-popup",
+    "allow-hide-review-popup",
+    "allow-show-review-nudge",
+    "allow-hide-review-nudge",
+    "allow-set-tray-due-count",
+    "allow-show-main-window",
+    "allow-trigger-review-navigation"
   ]
 }

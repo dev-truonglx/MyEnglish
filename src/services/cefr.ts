@@ -21,3 +21,10 @@ export function isWithinLevel(wordLevel: CefrLevel | null | undefined, learnerLe
   if (!wordLevel || !target) return true;
   return cefrRank(wordLevel) <= cefrRank(target);
 }
+
+/** Exactly one CEFR level above the learner (the "i+1" stretch zone). */
+export function isOneLevelAbove(wordLevel: CefrLevel | null | undefined, learnerLevel: string): boolean {
+  const target = normalizeCefr(learnerLevel);
+  if (!wordLevel || !target) return false;
+  return cefrRank(wordLevel) === cefrRank(target) + 1;
+}

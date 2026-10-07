@@ -1,4 +1,5 @@
 import type { WordDetail } from "@/types/database";
+import { persistKeyNow } from "./storageBackup";
 
 const REVIEWS_STORAGE_KEY = "myenglish_study_logs_v1";
 const GOAL_STORAGE_KEY = "myenglish_daily_goal_v1";
@@ -101,6 +102,7 @@ export function recordDailyActivity(count: number = 1): void {
     const today = getLocalDateString();
     logs[today] = (logs[today] || 0) + count;
     localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
+    persistKeyNow(REVIEWS_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
   } catch (err) {
     console.warn("Failed to record activity log:", err);

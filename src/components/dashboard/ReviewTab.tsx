@@ -3,9 +3,13 @@ import { checkAndNotifyDueReviews } from "@/services/srs";
 import { useWordsStore } from "@/stores/wordsStore";
 import { DUE_LIST_LIMIT, PAGE_CONTAINER, type LibraryStats } from "./shared";
 import WeeklyProgressCard from "../WeeklyProgressCard";
+import ComebackCard from "./ComebackCard";
+import type { ComebackStatus } from "@/services/comeback";
 
 interface ReviewTabProps {
   dueCount: number;
+  /** Back after a break: today's share of the backlog replaces the queue overview */
+  comeback?: ComebackStatus | null;
   libraryStats: LibraryStats;
   availableTopics: string[];
   handleStartReview: (onlyDue?: boolean, topicFilter?: string) => void;
@@ -15,6 +19,7 @@ interface ReviewTabProps {
 /** TAB 3 landing: queue overview, start/practice buttons, per-topic review and due list */
 export default function ReviewTab({
   dueCount,
+  comeback,
   libraryStats,
   availableTopics,
   handleStartReview,
@@ -22,6 +27,7 @@ export default function ReviewTab({
 }: ReviewTabProps) {
   const words = useWordsStore((s) => s.words);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
+  const inComeback = !!comeback && !comeback.caughtUp;
 
   const handleTestNotification = async () => {
     try {
@@ -48,7 +54,10 @@ export default function ReviewTab({
 
       <WeeklyProgressCard words={words} />
 
+      {comeback && <ComebackCard comeback={comeback} onStart={() => handleStartReview(true)} />}
+
       {/* Status Banner */}
+      {!inComeback && (
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-gradient-to-r dark:from-zinc-900 dark:via-zinc-900/90 dark:to-zinc-950 p-6 space-y-4 shadow-sm">
         <div className="flex items-center justify-between">
           <div className="space-y-1">
@@ -93,6 +102,7 @@ export default function ReviewTab({
           </button>
         </div>
       </div>
+      )}
 
       {/* Study & Review by Topic */}
       {availableTopics.length > 0 && (
@@ -164,8 +174,8 @@ export default function ReviewTab({
         </div>
       )}
 
-      {/* List of due words */}
-      {dueCount > 0 ? (
+      {/* List of due words (hidden during a comeback plan: the whole pile is what it avoids showing) */}
+      {inComeback ? null : dueCount > 0 ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-600 dark:text-zinc-400 font-medium">
             <span>Due Words Waiting in Queue</span>

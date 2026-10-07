@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { handleSpeak } from "@/components/review/speech";
 import {
   ArrowLeft,
   BookOpen,
@@ -37,19 +38,7 @@ export default function GrammarLessonView({
   }, [lesson.id, initialTab]);
   const progress: GrammarProgress = getLessonProgress(lesson.id);
 
-  const speakText = useCallback((text: string) => {
-    try {
-      if ("speechSynthesis" in window) {
-        window.speechSynthesis.cancel();
-        const utterance = new SpeechSynthesisUtterance(text);
-        utterance.lang = "en-US";
-        utterance.rate = 0.95;
-        window.speechSynthesis.speak(utterance);
-      }
-    } catch (e) {
-      console.warn("TTS error:", e);
-    }
-  }, []);
+  const speakText = useCallback((text: string) => handleSpeak(text, 0.95), []);
 
   const getLevelColor = (level: string) => {
     switch (level) {

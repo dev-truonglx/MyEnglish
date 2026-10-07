@@ -4,7 +4,7 @@ import { initReviewLogsTable } from "./smartReview";
 import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 9;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -22,6 +22,7 @@ export const WORD_COLUMNS = [
   "code_snippet",
   "topic",
   "cefr_level",
+  "suspended",
   "created_at",
 ].join(", ");
 
@@ -32,6 +33,7 @@ export const EXAMPLE_COLUMNS = [
   "sentence_en",
   "sentence_vn",
   "grammar_analysis",
+  "source",
 ].join(", ");
 
 /** Columns selected for SRSReview records */
@@ -105,6 +107,7 @@ export async function initSchema(db: Database): Promise<void> {
       code_snippet TEXT,
       topic TEXT DEFAULT 'General Tech',
       cefr_level TEXT,
+      suspended INTEGER DEFAULT 0,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
@@ -117,6 +120,7 @@ export async function initSchema(db: Database): Promise<void> {
       sentence_en TEXT NOT NULL,
       sentence_vn TEXT,
       grammar_analysis TEXT NOT NULL,
+      source TEXT,
       FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
     );
   `);
@@ -217,10 +221,18 @@ async function runMigrations(db: Database): Promise<void> {
   const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
   const version = versionRows[0]?.user_version ?? 0;
 
+  // Expected, harmless failures of idempotent steps (re-running ALTER/CREATE on an upgraded file)
+  const isBenign = (err: unknown) => /duplicate column name|already exists/i.test(String(err));
+  let failures = 0;
   const tryExec = async (sql: string) => {
     try {
       await db.execute(sql);
-    } catch {}
+    } catch (err) {
+      if (isBenign(err)) return;
+      failures++;
+      console.error(`[DB] Migration step failed: ${sql.trim().split("\n")[0].slice(0, 120)}`, err);
+      logTerminal("DB", `Migration step failed: ${String(err)}`);
+    }
   };
 
   if (version < 1) {
@@ -358,8 +370,71 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`DELETE FROM review_logs WHERE word_id NOT IN (SELECT id FROM words);`);
   }
 
+  if (version < 7) {
+    // Memory state of the card just before each answer: true retention (answers to cards in Review state),
+    // calibration (predicted R vs remembered) and clean training data for the FSRS optimizer
+    await initReviewLogsTable(db);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN state_before INTEGER;`);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN stability_before REAL;`);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN difficulty_before REAL;`);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN r_predicted REAL;`);
+    await tryExec(`ALTER TABLE review_logs ADD COLUMN elapsed_days_before REAL;`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_review_logs_sched_time ON review_logs(is_scheduled, timestamp);`);
+    // One meaning of "correct" everywhere: not graded Again (Hard is a pass in FSRS)
+    await tryExec(`UPDATE review_logs SET is_correct = CASE WHEN rating > 1 THEN 1 ELSE 0 END WHERE rating BETWEEN 1 AND 4;`);
+    // Leech action "suspend" / suspended by hand: left out of every session
+    await tryExec(`ALTER TABLE words ADD COLUMN suspended INTEGER DEFAULT 0;`);
+    // "user_context" = the sentence the learner met the word in
+    await tryExec(`ALTER TABLE examples ADD COLUMN source TEXT;`);
+  }
+  if (version < 8) {
+    // Learning moments and reminder outcomes: words reaching long-term memory, and what happened to each
+    // reminder (shown / opened / snoozed / ignored) and session, to see and tune study habits
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS learning_events (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL,
+        word_id TEXT,
+        direction TEXT,
+        at TIMESTAMP NOT NULL,
+        meta TEXT
+      );
+    `);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_learning_events_type_at ON learning_events(type, at);`);
+  }
+  if (version < 9) {
+    // The learner's own mistakes (from AI-corrected writing), reviewed as cards with their own FSRS schedule
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS mistakes (
+        id TEXT PRIMARY KEY,
+        wrong_text TEXT NOT NULL,
+        right_text TEXT NOT NULL,
+        why_vn TEXT,
+        category TEXT,
+        sentence TEXT,
+        source TEXT NOT NULL,
+        word_id TEXT,
+        occurrences INTEGER DEFAULT 1,
+        created_at TIMESTAMP NOT NULL,
+        stability REAL DEFAULT 0,
+        difficulty REAL DEFAULT 0,
+        state INTEGER DEFAULT 0,
+        reps INTEGER DEFAULT 0,
+        lapses INTEGER DEFAULT 0,
+        last_review TIMESTAMP,
+        next_review_date TIMESTAMP NOT NULL,
+        scheduled_days INTEGER DEFAULT 0,
+        learning_steps INTEGER DEFAULT 0
+      );
+    `);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_due ON mistakes(next_review_date);`);
+  }
+
+  // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
+  // steps are retried on the next launch (later blocks still run, so new columns always exist)
   if (version < SCHEMA_VERSION) {
-    await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    if (failures === 0) await db.execute(`PRAGMA user_version = ${SCHEMA_VERSION};`);
+    else console.error(`[DB] ${failures} migration step(s) failed; schema version kept at ${version}, retrying next launch`);
   }
 }
 
@@ -540,21 +615,22 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     const rows = validExamples.map((example, i) => {
       const exampleId = crypto.randomUUID();
       exampleIds.push(exampleId);
-      params.push(exampleId, wordId, example.sentence_en, example.sentence_vn || null, example.grammar_analysis || "");
-      const o = i * 5;
-      return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5})`;
+      params.push(exampleId, wordId, example.sentence_en, example.sentence_vn || null, example.grammar_analysis || "", example.source ?? null);
+      const o = i * 6;
+      return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6})`;
     });
     await db.execute(
-      `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis) VALUES ${rows.join(", ")}`,
+      `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source) VALUES ${rows.join(", ")}`,
       params
     );
   }
   if (existingList.length > 0) {
+    // Re-enrichment replaces AI examples; the learner's own sentences are always kept
     const keepPlaceholders = exampleIds.map((_, i) => `$${i + 2}`).join(", ");
     await db.execute(
       exampleIds.length > 0
-        ? `DELETE FROM examples WHERE word_id = $1 AND id NOT IN (${keepPlaceholders});`
-        : `DELETE FROM examples WHERE word_id = $1;`,
+        ? `DELETE FROM examples WHERE word_id = $1 AND id NOT IN (${keepPlaceholders}) AND COALESCE(source, '') != 'user_context';`
+        : `DELETE FROM examples WHERE word_id = $1 AND COALESCE(source, '') != 'user_context';`,
       [wordId, ...exampleIds]
     );
   }
@@ -661,9 +737,9 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
     db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
       `SELECT word_id, COUNT(*) as total,
-              SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
-              SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
-       FROM review_logs WHERE word_id IN (${wordFilterSql}) GROUP BY word_id;`,
+              SUM(CASE WHEN rating > 1 THEN 1 ELSE 0 END) as correct,
+              SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as wrong
+       FROM review_logs WHERE word_id IN (${wordFilterSql}) AND exercise_type != 'intro' GROUP BY word_id;`,
       params
     ).catch(() => []),
   ]);
@@ -738,14 +814,85 @@ export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDet
     UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
     UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)`;
   const words = await db.select<Word[]>(
-    `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) ORDER BY created_at DESC;`,
+    `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) AND COALESCE(suspended, 0) = 0 ORDER BY created_at DESC;`,
     [nowIso]
   );
   return hydrateWords(db, words, dueFilter, [nowIso]);
 }
 
 /**
- * Count words with at least one due card, without loading them.
+ * Save the sentence the learner met a word in as one of its examples (source "user_context").
+ * Context exercises show it first: the learner's own context is the strongest memory hook.
+ * Duplicates are ignored. Returns whether it was saved.
+ */
+export async function addUserContextExample(wordId: string, sentence: string, sentenceVn?: string | null): Promise<boolean> {
+  const clean = sentence.replace(/\s+/g, " ").trim();
+  if (clean.length < 8 || clean.length > 400) return false;
+  const db = await getDatabase();
+  const existing = await db.select<Array<{ id: string }>>(
+    `SELECT id FROM examples WHERE word_id = $1 AND LOWER(TRIM(sentence_en)) = LOWER($2) LIMIT 1;`,
+    [wordId, clean]
+  );
+  if (existing.length > 0) return false;
+  await db.execute(
+    `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source) VALUES ($1, $2, $3, $4, '', 'user_context')`,
+    [crypto.randomUUID(), wordId, clean, sentenceVn ?? null]
+  );
+  return true;
+}
+
+/** Words by id with examples and both schedules (e.g. to grade a card from another window). */
+export async function getWordsByIds(ids: string[]): Promise<WordDetail[]> {
+  if (ids.length === 0) return [];
+  const db = await getDatabase();
+  const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
+  const filter = `SELECT id FROM words WHERE id IN (${placeholders})`;
+  const words = await db.select<Word[]>(`SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${placeholders});`, ids);
+  return hydrateWords(db, words, filter, ids);
+}
+
+export interface DueCounts {
+  /** Cards already studied whose review is due (either direction) */
+  reviews: number;
+  /** Never-reviewed words waiting (not limited by the daily budget) */
+  newWaiting: number;
+  /** Recall cards unlocked but never answered (not limited by the daily budget) */
+  newRecallWaiting: number;
+}
+
+/**
+ * Due work split into reviews and new cards. Use this (with the daily new-card budget) for anything shown
+ * to the learner: counting every new word as "due" made the number never reach 0.
+ */
+export async function countDueCards(now: Date = new Date()): Promise<DueCounts> {
+  const db = await getDatabase();
+  const nowIso = now.toISOString();
+  const rows = await db.select<Array<{ reviews: number; new_waiting: number; new_recall_waiting: number }>>(
+    `SELECT
+       (SELECT COUNT(*) FROM (
+          SELECT s.word_id FROM srs_reviews s JOIN words w ON w.id = s.word_id
+          WHERE s.next_review_date <= $1 AND COALESCE(s.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
+          UNION ALL
+          SELECT p.word_id FROM srs_production p JOIN words w ON w.id = p.word_id
+          WHERE p.next_review_date <= $1 AND COALESCE(p.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
+       )) AS reviews,
+       (SELECT COUNT(*) FROM words w LEFT JOIN srs_reviews s ON s.word_id = w.id
+          WHERE COALESCE(s.reps, 0) = 0 AND COALESCE(w.suspended, 0) = 0
+            AND (s.next_review_date IS NULL OR s.next_review_date <= $1)) AS new_waiting,
+       (SELECT COUNT(*) FROM srs_production p JOIN words w ON w.id = p.word_id
+          WHERE COALESCE(p.reps, 0) = 0 AND COALESCE(w.suspended, 0) = 0 AND p.next_review_date <= $1) AS new_recall_waiting`,
+    [nowIso]
+  );
+  return {
+    reviews: Number(rows[0]?.reviews ?? 0),
+    newWaiting: Number(rows[0]?.new_waiting ?? 0),
+    newRecallWaiting: Number(rows[0]?.new_recall_waiting ?? 0),
+  };
+}
+
+/**
+ * Count words with at least one due card, without loading them (includes new words).
+ * Prefer countDueCards + the new-card budget for numbers shown to the learner.
  */
 export async function countDueWords(now: Date = new Date()): Promise<number> {
   const db = await getDatabase();
@@ -754,7 +901,7 @@ export async function countDueWords(now: Date = new Date()): Promise<number> {
        SELECT word_id FROM srs_reviews WHERE next_review_date <= $1
        UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
        UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)
-     );`,
+     ) d JOIN words w ON w.id = d.word_id WHERE COALESCE(w.suspended, 0) = 0;`,
     [now.toISOString()]
   );
   return rows[0]?.cnt ?? 0;

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { TermWithMeaning } from "@/types/database";
 import type { GrammarExercise } from "@/types/grammar";
-import { normalizeCefr, isWithinLevel, type CefrLevel } from "./cefr";
+import { normalizeCefr, isWithinLevel, isOneLevelAbove, type CefrLevel } from "./cefr";
 import { PREDEFINED_TOPICS } from "./db";
 
 /** Map the model's topic onto the fixed topic list (avoids near-duplicate topics in the library) */
@@ -241,6 +241,9 @@ export interface VocabularyRecommendation {
   grammar_structure?: string;
 }
 
+/** Recommended words allowed one CEFR level above the learner, per batch */
+const MAX_STRETCH_WORDS = 1;
+
 /**
  * Automatically generate high-value vocabulary recommendations tailored to user's CEFR level
  */
@@ -263,6 +266,7 @@ export async function generateVocabularyRecommendationsAI(
       "Đề xuất từ vựng AI"
     );
 
+    let stretchUsed = 0;
     const items: Array<Record<string, unknown>> = Array.isArray(rawResult)
       ? (rawResult as Array<Record<string, unknown>>)
       : rawResult && typeof rawResult === "object" && Array.isArray((rawResult as Record<string, unknown>).words)
@@ -285,8 +289,17 @@ export async function generateVocabularyRecommendationsAI(
         sample_sentence_vn: item.sample_sentence_vn ? String(item.sample_sentence_vn) : undefined,
         grammar_structure: item.grammar_structure ? String(item.grammar_structure) : undefined,
       }))
-      // Words above the learner's level are dropped: an A1 learner only gets A1 (or easier) words
-      .filter((w) => isSafeVocabularyTerm(w.word) && w.meaning_vn.trim().length > 0 && isWithinLevel(w.cefr, level));
+      .filter((w) => isSafeVocabularyTerm(w.word) && w.meaning_vn.trim().length > 0)
+      // At or below the learner's level, plus at most one word just above it ("i+1": slightly harder
+      // input keeps the learner progressing). Anything further above is dropped.
+      .filter((w) => {
+        if (isWithinLevel(w.cefr, level)) return true;
+        if (stretchUsed < MAX_STRETCH_WORDS && isOneLevelAbove(w.cefr, level)) {
+          stretchUsed++;
+          return true;
+        }
+        return false;
+      });
   } catch (err) {
     console.error("AI vocabulary recommendation failed:", err);
     throw err;
@@ -294,3 +307,115 @@ export async function generateVocabularyRecommendationsAI(
 }
 
 
+
+// ─── Free writing: the learner writes their own sentence, the AI grades it ───
+
+export interface SentenceGrade {
+  correct: boolean;
+  score: number; // 0..100
+  usesTargetWord: boolean;
+  corrections: Array<{ wrong: string; right: string; whyVn: string }>;
+  betterVersion: string;
+  explanationVn: string;
+}
+
+/** Parse the AI's JSON grade defensively (missing fields get safe defaults). */
+export function parseSentenceGrade(raw: string): SentenceGrade {
+  const obj = JSON.parse(raw) as Record<string, unknown>;
+  const score = Math.max(0, Math.min(100, Math.round(Number(obj.score) || 0)));
+  const corrections = (Array.isArray(obj.corrections) ? obj.corrections : [])
+    .map((c) => {
+      const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+      return { wrong: String(o.wrong ?? ""), right: String(o.right ?? ""), whyVn: String(o.why_vn ?? o.whyVn ?? "") };
+    })
+    .filter((c) => c.wrong || c.right);
+  return {
+    correct: obj.correct === true,
+    score,
+    usesTargetWord: obj.uses_target_word !== false,
+    corrections,
+    betterVersion: String(obj.better_version ?? ""),
+    explanationVn: String(obj.explanation_vn ?? ""),
+  };
+}
+
+export async function gradeSentenceWithAI(word: string, meaningVn: string, sentence: string, level?: string): Promise<SentenceGrade> {
+  const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+  const raw = await withTimeout(
+    invoke<string>("grade_sentence_ai", { word, meaningVn, sentence, level, customPath }),
+    "Chấm câu bằng AI"
+  );
+  return parseSentenceGrade(raw);
+}
+
+// ─── Writing correction: a short text (daily standup), every error with its category ───
+
+export type MistakeCategory =
+  | "article"
+  | "tense"
+  | "word_form"
+  | "preposition"
+  | "agreement"
+  | "word_choice"
+  | "spelling"
+  | "word_order"
+  | "other";
+
+const MISTAKE_CATEGORIES: MistakeCategory[] = [
+  "article",
+  "tense",
+  "word_form",
+  "preposition",
+  "agreement",
+  "word_choice",
+  "spelling",
+  "word_order",
+  "other",
+];
+
+export interface WritingCorrection {
+  wrong: string;
+  right: string;
+  /** The corrected full sentence */
+  sentence: string;
+  category: MistakeCategory;
+  whyVn: string;
+}
+
+export interface WritingFeedback {
+  score: number;
+  corrections: WritingCorrection[];
+  betterVersion: string;
+  explanationVn: string;
+}
+
+/** Parse the AI's JSON defensively: unknown categories become "other", empty or no-op corrections are dropped. */
+export function parseWritingFeedback(raw: string): WritingFeedback {
+  const obj = JSON.parse(raw) as Record<string, unknown>;
+  const corrections = (Array.isArray(obj.corrections) ? obj.corrections : [])
+    .map((c) => {
+      const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
+      const category = String(o.category ?? "").trim().toLowerCase() as MistakeCategory;
+      return {
+        wrong: String(o.wrong ?? "").trim(),
+        right: String(o.right ?? "").trim(),
+        sentence: String(o.sentence ?? "").trim(),
+        category: MISTAKE_CATEGORIES.includes(category) ? category : "other",
+        whyVn: String(o.why_vn ?? o.whyVn ?? "").trim(),
+      };
+    })
+    .filter((c) => c.wrong && c.right && c.wrong.toLowerCase() !== c.right.toLowerCase())
+    .slice(0, 8);
+  return {
+    score: Math.max(0, Math.min(100, Math.round(Number(obj.score) || 0))),
+    corrections,
+    betterVersion: String(obj.better_version ?? ""),
+    explanationVn: String(obj.explanation_vn ?? ""),
+  };
+}
+
+export async function correctWritingWithAI(text: string, level?: string): Promise<WritingFeedback> {
+  const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+  const raw = await withTimeout(invoke<string>("correct_writing_ai", { text, level, customPath }), "Sửa bài viết bằng AI");
+  return parseWritingFeedback(raw);
+}

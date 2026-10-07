@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { logLearningEvent } from "@/services/learningEvents";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { Clock, Play, Zap, Flame, Check, X, Sparkles } from "lucide-react";
@@ -53,6 +54,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     lastTickRef.current = Date.now();
     setPayload(next);
     setSecondsLeft(next.autoOpenSeconds);
+    logLearningEvent("nudge_shown", { meta: { dueCount: next.dueCount, quiz: !!next.microQuiz, moment: next.moment ?? null } });
     setFreshBar(true);
     setAnimationKey((k) => k + 1);
 
@@ -82,6 +84,9 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       hoverAtRef.current = 0;
       setSecondsLeft(null);
 
+      logLearningEvent(
+        action === "timeout" ? "nudge_ignored" : action === "snooze" ? "nudge_snoozed" : action === "quiz-done" ? "nudge_quiz" : "nudge_opened"
+      );
       if (action === "timeout") {
         snoozeIgnoredNudge();
         await hideReviewNudge();
@@ -442,7 +447,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                   <Sparkles className="w-3 h-3" />
                   <span>
                     {quizResult.isCorrect
-                      ? `Chính xác! +${quizResult.xpEarned ?? 10} XP 🔥`
+                      ? quizResult.praise ?? `Chính xác! +${quizResult.xpEarned ?? 0} XP`
                       : `Chưa đúng! Đáp án: ${payload.microQuiz?.direction === "production" ? payload.microQuiz.word : quizResult.correctMeaning}`}
                   </span>
                 </div>

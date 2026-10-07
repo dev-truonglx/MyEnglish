@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-generate-grammar-exercises-ai"
+description = "Enables the generate_grammar_exercises_ai command without any pre-configured scope."
+commands.allow = ["generate_grammar_exercises_ai"]
+
+[[permission]]
+identifier = "deny-generate-grammar-exercises-ai"
+description = "Denies the generate_grammar_exercises_ai command without any pre-configured scope."
+commands.deny = ["generate_grammar_exercises_ai"]

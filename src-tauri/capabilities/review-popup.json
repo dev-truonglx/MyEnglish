@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "review-popup",
+  "description": "Focus review popup: AI sentence grading and grammar exercises used during a review",
+  "windows": [
+    "review-popup"
+  ],
+  "permissions": [
+    "allow-grade-sentence-ai",
+    "allow-generate-grammar-exercises-ai"
+  ]
+}

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-grade-sentence-ai"
+description = "Enables the grade_sentence_ai command without any pre-configured scope."
+commands.allow = ["grade_sentence_ai"]
+
+[[permission]]
+identifier = "deny-grade-sentence-ai"
+description = "Denies the grade_sentence_ai command without any pre-configured scope."
+commands.deny = ["grade_sentence_ai"]

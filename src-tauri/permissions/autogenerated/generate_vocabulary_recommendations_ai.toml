@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-generate-vocabulary-recommendations-ai"
+description = "Enables the generate_vocabulary_recommendations_ai command without any pre-configured scope."
+commands.allow = ["generate_vocabulary_recommendations_ai"]
+
+[[permission]]
+identifier = "deny-generate-vocabulary-recommendations-ai"
+description = "Denies the generate_vocabulary_recommendations_ai command without any pre-configured scope."
+commands.deny = ["generate_vocabulary_recommendations_ai"]

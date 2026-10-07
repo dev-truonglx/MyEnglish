@@ -7,6 +7,8 @@ import { prepareContextMatch, type ContextMatchPair } from "@/services/smartRevi
 interface ContextMatchExerciseProps {
   word: WordDetail;
   allWords: WordDetail[];
+  /** Words still to come in this session: never shown here, it would reveal their answers */
+  excludeIds?: ReadonlySet<string>;
   onComplete: (isCorrect: boolean, attempts: number, rating: Rating) => void;
   onSpeak: (text: string) => void;
   onFallback: () => void;
@@ -34,13 +36,16 @@ const PAIR_COLORS = [
 export default function ContextMatchExercise({
   word,
   allWords,
+  excludeIds,
   onComplete,
   onSpeak,
   onFallback,
 }: ContextMatchExerciseProps) {
   const pairs: ContextMatchPair[] = useMemo(() => {
-    return prepareContextMatch(word, allWords);
-  }, [word, allWords]);
+    return prepareContextMatch(word, allWords, excludeIds);
+    // The pairs must not reshuffle while the learner is playing
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [word.id]);
 
   const [shuffledSentences, setShuffledSentences] = useState<ContextMatchPair[]>([]);
   const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
@@ -49,6 +54,7 @@ export default function ContextMatchExercise({
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [wrongAttempts, setWrongAttempts] = useState(0);
+  const targetMistakesRef = useRef(0);
 
   const onFallbackRef = useRef(onFallback);
   useEffect(() => {
@@ -123,24 +129,32 @@ export default function ContextMatchExercise({
     // All correct if every matches[p.wordId] === p.wordId
     const allCorrect = pairs.every((p) => matches[p.wordId] === p.wordId);
 
+    // Only the reviewed word is graded: a mistake counts against it when its own pairing is wrong
+    // (its word on another sentence, or another word on its sentence)
+    const targetWrong =
+      matches[word.id] !== word.id || pairs.some((p) => p.wordId !== word.id && matches[p.wordId] === word.id);
+
     if (allCorrect) {
       setIsCorrect(true);
       setIsAnswered(true);
       onSpeak(word.word);
 
-      let rating: Rating = Rating.Easy;
-      if (wrongAttempts === 0) rating = Rating.Easy;
-      else if (wrongAttempts === 1) rating = Rating.Good;
-      else rating = Rating.Hard;
-
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      const mistakes = targetMistakesRef.current;
       completeTimerRef.current = setTimeout(() => {
         completeTimerRef.current = null;
-        onComplete(true, wrongAttempts, rating);
+        onComplete(mistakes === 0, mistakes, Rating.Good);
       }, 1000);
     } else {
+      if (targetWrong) targetMistakesRef.current += 1;
       setIsCorrect(false);
       setWrongAttempts((prev) => prev + 1);
+      // Keep the correct pairs, clear the wrong ones so the learner sees exactly what to fix
+      setMatches((prev) => {
+        const next: Record<string, string> = {};
+        for (const [w, sId] of Object.entries(prev)) if (w === sId) next[w] = sId;
+        return next;
+      });
     }
   };
 

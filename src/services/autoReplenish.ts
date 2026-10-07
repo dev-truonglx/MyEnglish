@@ -92,6 +92,24 @@ export interface EligibilityResult {
  * 2. User has NOT added any new words for >= minDaysWithoutNewWords (or new words pool is depleted)
  * 3. Has NOT already auto-replenished today
  */
+/** Default when the learner has no clear topic yet */
+const DEFAULT_REPLENISH_TOPIC = "Software Engineering & Professional Work";
+
+/**
+ * Topic for AI-added words: the one the learner adds most words to themselves (their real interests),
+ * ignoring the catch-all "General Tech". Falls back to software engineering.
+ */
+export function preferredTopic(words: WordDetail[]): string {
+  const counts = new Map<string, number>();
+  for (const w of words) {
+    const t = (w.topic || "").trim();
+    if (!t || t === "General Tech") continue;
+    counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+  const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return best && best[1] >= 3 ? best[0] : DEFAULT_REPLENISH_TOPIC;
+}
+
 export async function checkAutoReplenishEligibility(words: WordDetail[]): Promise<EligibilityResult> {
   const settings = getAutoReplenishSettings();
   const profile = assessUserProficiency(words);
@@ -256,7 +274,7 @@ export async function triggerAutoReplenish(
     const recommendations: VocabularyRecommendation[] = await generateVocabularyRecommendationsAI(
       targetLevel,
       existingWordsList,
-      "Software Engineering & Professional Work",
+      preferredTopic(words),
       countToGenerate
     );
 

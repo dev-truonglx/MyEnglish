@@ -1,5 +1,7 @@
-import { enrichWordWithGemini, type GeminiEnrichmentResult } from "./ai";
+import { enrichWordWithGemini, isSafeVocabularyTerm, type GeminiEnrichmentResult } from "./ai";
+import { maskWordInSentence } from "./smartReview";
 import {
+  addUserContextExample,
   insertEnrichedWord,
   insertWordIfAbsent,
   replacePlaceholderMeaning,
@@ -95,10 +97,22 @@ class WordProcessingPipeline {
   /**
    * Enqueue a new word for AI enrichment and SQLite storage.
    * Immediately puts the word into the queue and starts processing without blocking.
+   * Terms the AI step would reject ("what?", "a, b", over 64 characters...) are refused up front, so
+   * they never sit in the library as a placeholder that can't be analysed.
+   * `context` is the sentence the learner met the word in; it is kept as the word's first example.
    */
-  public async enqueue(word: string, options: { source?: "user" | "auto" } = {}): Promise<void> {
-    const cleanWord = word.trim().toLowerCase();
-    if (!cleanWord) return;
+  public async enqueue(
+    word: string,
+    options: { source?: "user" | "auto"; context?: string | null } = {}
+  ): Promise<{ accepted: boolean; reason?: string }> {
+    const cleanWord = word.trim().toLowerCase().replace(/\s+/g, " ");
+    if (!cleanWord) return { accepted: false, reason: "Từ trống" };
+    if (!isSafeVocabularyTerm(cleanWord)) {
+      return {
+        accepted: false,
+        reason: "Chỉ nhận từ hoặc cụm từ (chữ, số, khoảng trắng và - ' . / + # &), tối đa 64 ký tự",
+      };
+    }
     if (options.source !== "auto") resetRequeueAttempts(cleanWord);
 
     // If currently being analyzed or pending, ignore duplicate clicks
@@ -107,7 +121,7 @@ class WordProcessingPipeline {
     );
     if (ongoing) {
       console.log(`[Pipeline] Từ "${cleanWord}" đang được xử lý trong hàng đợi.`);
-      return;
+      return { accepted: true };
     }
 
     // Remove any previous completed/failed entry so it is re-analyzed fresh
@@ -140,12 +154,18 @@ class WordProcessingPipeline {
         examples: [],
       });
       item.wordId = id;
+      // The learner's own sentence (only if it really contains the word)
+      const context = options.context?.trim();
+      if (context && maskWordInSentence(context, cleanWord)) {
+        await addUserContextExample(id, context).catch((e) => console.warn("[Pipeline] Context sentence notice:", e));
+      }
     } catch (e) {
       console.warn("[Pipeline] Pre-saving baseline notice:", e);
     }
 
     // Start queue processing immediately
     this.processNext();
+    return { accepted: true };
   }
 
   /**
@@ -206,62 +226,10 @@ class WordProcessingPipeline {
       });
       logTerminal("Pipeline", `Đã lưu từ gốc "${pendingItem.word}" vào SQLite thành công (id: ${wordId})`);
 
-      // 3. Automatically save all synonyms into the vocabulary list
-      for (const syn of enrichment.synonyms) {
-        if (!syn.word || syn.word.trim().toLowerCase() === pendingItem.word) continue;
-        const synExamples = (syn.examples || []).map((ex) => ({
-          sentence_en: ex.sentence_en,
-          sentence_vn: ex.meaning_vn,
-          grammar_analysis: [
-            ex.structure ? `Cấu trúc: ${ex.structure}` : "",
-            ex.why_used ? `Giải thích: ${ex.why_used}` : "",
-          ].filter(Boolean).join("\n"),
-        }));
-
-        try {
-          // Insert-only: never overwrite a word the user already has
-          await insertWordIfAbsent({
-            word: syn.word.trim().toLowerCase(),
-            phonetic: syn.phonetic || null,
-            topic: wordTopic,
-            meaning_vn: syn.meaning_vn || `Từ đồng nghĩa của "${pendingItem.word}"`,
-            image_url: null,
-            synonyms: [{ word: pendingItem.word, meaning_vn: enrichment.meaning_vn }],
-            antonyms: [],
-            examples: synExamples,
-          });
-        } catch (e) {
-          console.warn(`[Pipeline] Auto-saving synonym "${syn.word}" notice:`, e);
-        }
-      }
-
-      // 4. Automatically save all antonyms into the vocabulary list
-      for (const ant of enrichment.antonyms) {
-        if (!ant.word || ant.word.trim().toLowerCase() === pendingItem.word) continue;
-        const antExamples = (ant.examples || []).map((ex) => ({
-          sentence_en: ex.sentence_en,
-          sentence_vn: ex.meaning_vn,
-          grammar_analysis: [
-            ex.structure ? `Cấu trúc: ${ex.structure}` : "",
-            ex.why_used ? `Giải thích: ${ex.why_used}` : "",
-          ].filter(Boolean).join("\n"),
-        }));
-
-        try {
-          await insertWordIfAbsent({
-            word: ant.word.trim().toLowerCase(),
-            phonetic: ant.phonetic || null,
-            topic: wordTopic,
-            meaning_vn: ant.meaning_vn || `Từ trái nghĩa của "${pendingItem.word}"`,
-            image_url: null,
-            synonyms: [],
-            antonyms: [{ word: pendingItem.word, meaning_vn: enrichment.meaning_vn }],
-            examples: antExamples,
-          });
-        } catch (e) {
-          console.warn(`[Pipeline] Auto-saving antonym "${ant.word}" notice:`, e);
-        }
-      }
+      // Synonyms and antonyms stay as related terms of this word (shown in its details, and used to keep
+      // them out of its multiple-choice distractors). They are not added as cards automatically: each
+      // would bypass analysis and the daily new-word limit. The learner can add any of them from the
+      // word's details.
 
       pendingItem.wordId = wordId;
       pendingItem.status = "completed";
@@ -346,3 +314,5 @@ export async function requeuePendingWords(): Promise<number> {
     return 0;
   }
 }
+
+export { looksLikeSentence, stashPendingContext, takePendingContext } from "./contextHandover";

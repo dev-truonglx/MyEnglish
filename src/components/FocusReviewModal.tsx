@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
-import { emit, listen } from "@tauri-apps/api/event";
+import { listen } from "@tauri-apps/api/event";
 import {
   Volume2,
   Clock,
@@ -15,7 +15,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import { getAllWords, isPlaceholderMeaning } from "@/services/db";
-import { getDueWords, recordReview } from "@/services/srs";
+import { getDueWords } from "@/services/srs";
 import { recordDailyActivity } from "@/services/streak";
 import {
   getReminderSettings,
@@ -28,13 +28,28 @@ import {
   getGrammarExercisesForReview,
   recordGrammarExerciseAttempt,
   recordPracticeResult,
+  MIN_LESSON_ANSWERS,
 } from "@/services/grammarService";
 import type { WordDetail, ReviewCard } from "@/types/database";
-import { getCardSrs, practiceCards } from "@/services/cards";
+import { practiceCards } from "@/services/cards";
+import {
+  getRecentIntros,
+  postponeNewCard,
+  recordCardAnswer,
+  recordIntro,
+  schedulingDecision,
+} from "@/services/reviewRecorder";
 import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating } from "@/services/popupSession";
+import { parseTerms } from "@/types/database";
 import { summarizeSession, type SessionResult, type SessionSummary } from "@/services/progress";
 import { getStoredMnemonic } from "@/services/aiMnemonic";
 import { highlightWord } from "@/components/review/highlightWord";
+import { getConciseMeaning } from "@/services/meaningText";
+import { celebrationFor, type Celebration } from "@/services/celebrations";
+import { logLearningEvent } from "@/services/learningEvents";
+import { handleSpeak } from "@/components/review/speech";
+import PretestCard, { PretestFeedback } from "@/components/review/PretestCard";
+import { buildPretest, recordPretest, shouldPretest, type PretestResult } from "@/services/pretest";
 
 /** The end-of-session summary closes the popup by itself after this long (ms) */
 const SUMMARY_AUTO_CLOSE_MS = 15000;
@@ -45,13 +60,13 @@ const MAX_POPUP_RETRIES = 2;
 import {
   contractionVariants,
   isGrammarAnswerCorrect,
-  awardXP,
   buildReviewSession,
-  calculateXPReward,
   getNewCardsIntroducedToday,
-  isLeech,
+  loadTypicalResponseTimes,
   matchTypedAnswer,
-  saveReviewLog,
+  maskAllWordForms,
+  needsRelearnIntro,
+  pickExample,
   smartSortReviewQueue,
   type ExerciseType,
 } from "@/services/smartReview";
@@ -71,118 +86,6 @@ interface ChoiceOption {
 export type FocusReviewItem =
   | { kind: "word"; word: ReviewCard }
   | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson };
-
-/**
- * Trích xuất định nghĩa tiếng Việt ngắn gọn, súc tích và loại bỏ hoàn toàn việc lộ từ tiếng Anh
- */
-export function getConciseMeaning(meaning: string, targetWord?: string): string {
-  if (!meaning) return "";
-  let text = meaning.trim();
-
-  // 1. Kiểm tra cấu trúc: "Thuật ngữ (word): giải thích..." -> Lấy ngay phần "Thuật ngữ" đầu tiên
-  const colonIdx = text.indexOf(":");
-  if (colonIdx > 0 && colonIdx < 40) {
-    let head = text.substring(0, colonIdx).trim();
-    if (targetWord) {
-      head = head.replace(new RegExp(`\\s*\\([^)]*${escapeRegExp(targetWord)}[^)]*\\)`, "gi"), "");
-      head = head.replace(new RegExp(`['"‘“\\[\\(]?${escapeRegExp(targetWord)}['"’”\\]\\)]?`, "gi"), "");
-    }
-    head = head.trim();
-    if (head.length >= 3 && /[a-zà-ỹ]/i.test(head)) {
-      return capitalize(head);
-    }
-  }
-
-  // 2. Nếu có cụm tóm tắt trong ngoặc ngay sau từ tiếng Anh, ví dụ: 'dashboard' (bảng điều khiển trực quan)
-  if (targetWord) {
-    const bracketRegex = new RegExp(`${escapeRegExp(targetWord)}['"’”]?\\s*\\(([^)]{3,40})\\)`, "i");
-    const bracketMatch = text.match(bracketRegex);
-    if (bracketMatch && bracketMatch[1]) {
-      const cand = bracketMatch[1].trim();
-      if (/[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(cand)) {
-        return capitalize(cand);
-      }
-    }
-  }
-
-  // 3. Xoá bỏ triệt để từ tiếng Anh mục tiêu và các biến thể trong nháy đơn/ngoặc
-  if (targetWord) {
-    text = text.replace(new RegExp(`['"‘“]${escapeRegExp(targetWord)}['"’”]?`, "gi"), "");
-    text = text.replace(new RegExp(`\\b${escapeRegExp(targetWord)}(?:s|es|ed|ing|d)?\\b`, "gi"), "");
-  }
-
-  // 4. Lọc bỏ các cụm từ mở đầu rườm rà
-  text = text.replace(/^(Trong [^,.:;]+[,:;]?\s*)/gi, "");
-  text = text.replace(/^(Trong [^,.:;]+[,:;]?\s*)/gi, ""); // Chạy lại nếu có 2 mệnh đề lồng nhau
-  text = text.replace(/^(từ này|nó)?\s*(mang nghĩa là|có nghĩa là|dùng để chỉ|dùng để|là một|là)\s*/gi, "");
-
-  // 5. Xử lý mở đầu bằng ngoặc, ví dụ: "(bảng điều khiển trực quan) là..."
-  const bracketLead = text.match(/^\(([^)]+)\)\s*(là|mang nghĩa là)?\s*/i);
-  if (bracketLead) {
-    text = bracketLead[1].trim() + (text.substring(bracketLead[0].length).trim() ? ": " + text.substring(bracketLead[0].length).trim() : "");
-  }
-
-  // 6. Xoá các cụm ví dụ trong ngoặc như "(ví dụ: ...)", "(ngược lại với...)", "(e.g...)"
-  text = text.replace(/\s*\((?:ví dụ|vd|e\.g\.|đối lập|ngược lại)[^)]*\)/gi, "");
-
-  // 7. Lấy câu hoặc mệnh đề đầu tiên
-  const sentences = text.split(/[.\n]/);
-  let firstSentence = sentences[0]?.trim() || text;
-
-  // Nếu câu đầu tiên vẫn quá dài (> 80 ký tự), tìm mệnh đề cô đọng
-  if (firstSentence.length > 80) {
-    const parenSummary = firstSentence.match(/\(([^)]{3,45})\)$/);
-    if (parenSummary && /[àáạảãâầấậẩẫăằắặẳẵèéẹẻẽêềếệểễìíịỉĩòóọỏõôồốộổỗơờớợởỡùúụủũưừứựửữỳýỵỷỹđ]/i.test(parenSummary[1])) {
-      firstSentence = parenSummary[1];
-    } else {
-      const clauses = firstSentence.split(";");
-      if (clauses[0] && clauses[0].trim().length >= 15) {
-        firstSentence = clauses[0].trim();
-      } else {
-        const firstComma = firstSentence.indexOf(",");
-        if (firstComma > 25) {
-          firstSentence = firstSentence.substring(0, firstComma).trim();
-        }
-      }
-    }
-  }
-
-  // 8. Dọn dẹp khoảng trắng và dấu câu thừa
-  firstSentence = firstSentence.replace(/\s+/g, " ");
-  firstSentence = firstSentence.replace(/^[,:;\-–\s.()]+/g, "");
-  firstSentence = firstSentence.replace(/[,:;\-–\s.]+$/g, "");
-
-  return capitalize(firstSentence);
-}
-
-/**
- * Ẩn từ vựng trong câu ví dụ thành chỗ trống `______`
- */
-export function maskWordInSentence(sentence: string, word: string): string {
-  if (!sentence || !word) return sentence;
-  const escaped = escapeRegExp(word);
-  const regex = new RegExp(`\\b${escaped}(?:s|es|ed|ing|d)?\\b`, "gi");
-  if (regex.test(sentence)) {
-    return sentence.replace(regex, "______");
-  }
-  if (word.length >= 4) {
-    const stem = escapeRegExp(word.slice(0, Math.min(word.length - 1, 5)));
-    const stemRegex = new RegExp(`\\b${stem}[a-z]*\\b`, "gi");
-    if (stemRegex.test(sentence)) {
-      return sentence.replace(stemRegex, "______");
-    }
-  }
-  return sentence.replace(new RegExp(escaped, "gi"), "______");
-}
-
-function escapeRegExp(str: string): string {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function capitalize(str: string): string {
-  if (!str) return "";
-  return str.charAt(0).toUpperCase() + str.slice(1);
-}
 
 function getPosLabel(pos?: string | null): string | null {
   if (!pos) return null;
@@ -305,6 +208,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   // First answer of each item in this session, for the end-of-session summary
   const sessionResultsRef = useRef<Map<string, SessionResult>>(new Map());
   const [summary, setSummary] = useState<SessionSummary | null>(null);
+  // For the habit log: is a session open, and did it reach its summary
+  const sessionOpenRef = useRef(false);
+  const summaryShownRef = useRef(false);
+  useEffect(() => {
+    if (summary) {
+      summaryShownRef.current = true;
+      sessionOpenRef.current = false;
+    }
+  }, [summary]);
   // Words of the deck, to explain which word a wrong option was
   const allWordsRef = useRef<WordDetail[]>([]);
 
@@ -312,67 +224,126 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
    * Note the first answer to an item. Only first answers count toward the daily goal, so retrying
    * a missed item does not inflate it. Returns whether this was the first answer.
    */
-  const noteFirstAnswer = (key: string, label: string, correct: boolean, nextReview: string | null): boolean => {
+  const noteFirstAnswer = (
+    key: string,
+    label: string,
+    correct: boolean,
+    nextReview: string | null,
+    milestone: SessionResult["milestone"] = null
+  ): boolean => {
     if (sessionResultsRef.current.has(key)) return false;
-    sessionResultsRef.current.set(key, { key, label, correct, nextReview });
+    sessionResultsRef.current.set(key, { key, label, correct, nextReview, milestone });
     recordDailyActivity(1);
     return true;
   };
 
-  // Only the first answer to a card that was due when the popup opened updates FSRS; retries and
-  // extra words are practice (logged + XP, schedule untouched).
-  const gradeWord = async (word: ReviewCard, correct: boolean, exerciseType: ExerciseType, nearMiss = false) => {
-    const responseTimeMs = Date.now() - itemStartRef.current;
-    const rating = popupAnswerRating(correct, exerciseType, responseTimeMs, nearMiss);
-    // The card's own direction is graded (the question type already follows it)
-    const direction = word.direction;
-    const cardKey = `${word.id}:${direction}`;
-    const cardSrs = getCardSrs(word, direction) ?? getCardSrs(word, "recognition");
-    const isScheduledReview =
-      !scheduledThisSessionRef.current.has(cardKey) && !!cardSrs && new Date(cardSrs.next_review_date) <= new Date();
-    let recordedDirection = direction;
-    let nextReview: string | null = null;
-    if (isScheduledReview) {
-      scheduledThisSessionRef.current.add(cardKey);
-      const result = await recordReview(word.id, rating, direction);
-      recordedDirection = result.direction;
-      nextReview = result.nextReviewDate;
-      // Let the dashboard (another window) refresh its due counts
-      emit("words-changed").catch(() => {});
+  // First answers per grammar lesson in this session: the lesson is graded once it has
+  // MIN_LESSON_ANSWERS of them (one question alone is too little to reschedule a grammar point)
+  const lessonAnswersRef = useRef<Map<string, { correct: number; total: number }>>(new Map());
+  const gradeGrammarAnswer = async (lessonId: string, correct: boolean, isFirstAnswer: boolean) => {
+    if (!isFirstAnswer) return;
+    const entry = lessonAnswersRef.current.get(lessonId) ?? { correct: 0, total: 0 };
+    entry.total += 1;
+    if (correct) entry.correct += 1;
+    lessonAnswersRef.current.set(lessonId, entry);
+    if (entry.total === MIN_LESSON_ANSWERS) {
+      await recordPracticeResult(lessonId, Math.round((entry.correct / entry.total) * 100));
     }
-    noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview);
-    const wrongAttempts = correct ? 0 : 1;
-    const xp = calculateXPReward(rating, exerciseType, wrongAttempts, responseTimeMs, isLeech(word.srs), wrongAttempts === 0);
-    if (xp.totalXP > 0) awardXP(xp.totalXP);
-    saveReviewLog({
-      wordId: word.id,
-      exerciseType,
-      responseTimeMs,
-      isCorrect: correct,
-      wrongAttempts,
-      rating,
-      xpEarned: xp.totalXP,
-      timestamp: new Date().toISOString(),
-      isScheduled: isScheduledReview,
-      direction: recordedDirection,
-    }).catch((err) => console.warn("Popup review log save failed:", err));
   };
+
+  // When each card's introduction was shown (this session, or a recent popup / flashcard session)
+  const introducedAtRef = useRef<Map<string, number>>(new Map());
+  // The learner typed a synonym of the target first: the exact word needed a cue (graded Hard)
+  const synonymTriedRef = useRef(false);
+
+  // Same rules as flashcard sessions (see schedulingDecision): only the first answer to a due card moves
+  // its schedule; retries, extra (not due) words and quizzes seconds after an introduction are practice.
+  const gradeWord = async (
+    word: ReviewCard,
+    correct: boolean,
+    exerciseType: ExerciseType,
+    nearMiss = false
+  ): Promise<Celebration | null> => {
+    const responseTimeMs = Date.now() - itemStartRef.current;
+    const rating = popupAnswerRating(correct, exerciseType, responseTimeMs, nearMiss, synonymTriedRef.current);
+    const cardKey = `${word.id}:${word.direction}`;
+    const decision = schedulingDecision({
+      card: word,
+      exerciseType,
+      alreadyGraded: scheduledThisSessionRef.current.has(cardKey),
+      introducedAt: introducedAtRef.current.get(cardKey) ?? null,
+    });
+    if (decision.scheduled) scheduledThisSessionRef.current.add(cardKey);
+    const recorded = await recordCardAnswer({
+      card: word,
+      exerciseType,
+      rating,
+      wrongAttempts: correct ? 0 : 1,
+      responseTimeMs,
+      scheduled: decision.scheduled,
+      countsForDailyGoal: false, // noteFirstAnswer counts the first answer of each item
+    });
+    let nextReview = recorded.result?.nextReviewDate ?? null;
+    if (decision.reason === "intro_too_recent") {
+      // Quizzed right after its introduction: the first graded review comes in a later session
+      nextReview = await postponeNewCard(word.id, word.direction).catch(() => null);
+    }
+    const praise = celebrationFor({ ...recorded, direction: word.direction, word: word.word });
+    noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, praise?.kind ?? null);
+    return praise;
+  };
+  const praiseText = (p: Celebration | null) => (p ? `${p.title} ${p.detail} ` : "");
   const currentWord = currentItem?.kind === "word" ? currentItem.word : null;
 
   // New words get an introduction card before their first question (once per popup session)
   const [introduced, setIntroduced] = useState<Set<string>>(() => new Set());
   const introKey = currentWord ? `${currentWord.id}:${currentWord.direction}` : "";
-  const showIntro = !!currentWord && needsIntro(currentWord) && !introduced.has(introKey) && !isAnswered;
+  const showIntro =
+    !!currentWord &&
+    (needsIntro(currentWord) || needsRelearnIntro(currentWord)) &&
+    !introduced.has(introKey) &&
+    !introducedAtRef.current.has(introKey) &&
+    !isAnswered;
   // Enter pressed again right after "Tiếp tục" (key held or double press) must not skip the intro
   const introShownAtRef = useRef(0);
+
+  // Brand-new word: guess its meaning from a sentence before the introduction (practice, never graded)
+  const [pretestResults, setPretestResults] = useState<Map<string, PretestResult>>(() => new Map());
+  const pretest = useMemo(
+    () =>
+      showIntro && currentWord && shouldPretest(currentWord) && !pretestResults.has(introKey)
+        ? buildPretest(currentWord, allWordsRef.current)
+        : null,
+    // Rebuilt per card only, so the options don't reshuffle on every render
+    [showIntro, introKey, pretestResults]
+  );
+  const pretestResult = pretestResults.get(introKey) ?? null;
+  const handlePretestDone = useCallback(
+    (result: PretestResult) => {
+      if (!currentWord) return;
+      setPretestResults((prev) => new Map(prev).set(introKey, result));
+      recordPretest(currentWord, result, "popup");
+    },
+    [currentWord, introKey]
+  );
+
+  // The reading time of the intro starts when it appears (after the guess, if any)
   useEffect(() => {
-    if (showIntro) introShownAtRef.current = Date.now();
-  }, [showIntro, introKey]);
+    if (showIntro && !pretest) introShownAtRef.current = Date.now();
+  }, [showIntro, introKey, !!pretest]);
   const finishIntro = useCallback(() => {
+    if (!currentWord) return;
     setIntroduced((prev) => new Set(prev).add(introKey));
+    introducedAtRef.current.set(introKey, Date.now());
+    recordIntro(currentWord).catch(() => {});
+    // Quiz the new word after the other items when there are any: answering seconds after reading it is
+    // short-term memory. (If it is still asked too soon, the answer is practice and the word comes back.)
+    if (currentIndex + 1 < queue.length) {
+      setQueue((prev) => [...prev.slice(0, currentIndex), ...prev.slice(currentIndex + 1), prev[currentIndex]]);
+    }
     // The answer time starts when the question appears, not when the intro did
     itemStartRef.current = Date.now();
-  }, [introKey]);
+  }, [introKey, currentWord, currentIndex, queue.length]);
   const currentGrammar = currentItem?.kind === "grammar" ? currentItem : null;
 
   const handleClose = useCallback(async () => {
@@ -380,6 +351,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
     }
+    // Closed before the end of the session (the summary was not reached)
+    if (!summaryShownRef.current && sessionOpenRef.current) {
+      logLearningEvent("popup_closed_early", { meta: { answered: sessionResultsRef.current.size } });
+    }
+    sessionOpenRef.current = false;
     if (onClose) onClose();
     if (!isPreview) {
       await hideReviewPopup();
@@ -392,6 +368,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       advanceTimerRef.current = null;
     }
     const mins = snoozeReminder(minutes);
+    logLearningEvent("popup_snoozed", { meta: { minutes: mins, answered: sessionResultsRef.current.size } });
+    sessionOpenRef.current = false;
     setFeedbackMsg(`Đã hoãn nhắc nhở trong ${mins} phút.`);
     setTimeout(async () => {
       await handleClose();
@@ -421,7 +399,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setCurrentIndex((prev) => prev + 1);
     } else {
       // Completed all items: show what was learned (closes by itself if left alone)
-      setSummary(summarizeSession(Array.from(sessionResultsRef.current.values())));
+      const results = Array.from(sessionResultsRef.current.values());
+      setSummary(summarizeSession(results));
+      logLearningEvent("popup_completed", {
+        meta: { items: results.length, correct: results.filter((r) => r.correct).length, mastered: results.filter((r) => r.milestone === "mastered").length },
+      });
       advanceTimerRef.current = setTimeout(() => {
         handleClose();
       }, SUMMARY_AUTO_CLOSE_MS);
@@ -451,7 +433,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       let wordTarget = targetCount;
 
       if (includeGrammar) {
-        grammarTarget = Math.max(1, Math.round(targetCount * 0.4));
+        // An even number: grammar comes in pairs from one lesson (2 answers before the lesson is graded)
+        grammarTarget = Math.max(2, 2 * Math.round((targetCount * 0.4) / 2));
         wordTarget = Math.max(1, targetCount - grammarTarget);
       }
 
@@ -531,8 +514,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         }
       }
 
-      // New popup session: forget which cards were graded / retried in the previous one
+      // New popup session: forget which cards were graded / retried in the previous one.
+      // Introductions shown in the last day (any window) are remembered, so a new word is not
+      // introduced again before its first graded quiz.
+      introducedAtRef.current = await getRecentIntros().catch(() => new Map<string, number>());
+      loadTypicalResponseTimes().catch(() => {});
       scheduledThisSessionRef.current = new Set();
+      lessonAnswersRef.current = new Map();
       retryCountRef.current = new Map();
       setIntroduced(new Set());
       advancedFromRef.current = -1;
@@ -541,6 +529,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setSummary(null);
       setQueue(finalQueue);
       setCurrentIndex(0);
+      summaryShownRef.current = false;
+      sessionOpenRef.current = finalQueue.length > 0;
+      if (finalQueue.length > 0) logLearningEvent("popup_shown", { meta: { items: finalQueue.length } });
       setIsAnswered(false);
       setSelectedChoiceId(null);
       setIsCorrect(false);
@@ -604,6 +595,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     setIsCorrect(false);
     setTypedInput("");
     setFeedbackMsg(null);
+    synonymTriedRef.current = false;
     // Never show (or let keys 1-4 pick) the previous item's options
     setChoices([]);
     let cancelled = false;
@@ -613,14 +605,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       // The card decides the question: recall cards are typed, recognition cards are picked among options
       setActiveMode(wordObj.direction === "production" ? "typing" : "multiple_choice");
 
-      // Chuẩn bị 4 lựa chọn từ tiếng Anh
-      getAllWords().then((all) => {
+      // 4 English options; the deck was already loaded with the queue
+      const pool = allWordsRef.current.length > 0 ? Promise.resolve(allWordsRef.current) : getAllWords();
+      pool.then((all) => {
         if (cancelled) return;
-        const allChoices = buildPopupChoices(
-          wordObj,
-          all.filter((w) => !isPlaceholderMeaning(w.meaning_vn))
-        );
-        setChoices(allChoices);
+        setChoices(buildPopupChoices(wordObj, all.filter((w) => !isPlaceholderMeaning(w.meaning_vn))));
       });
     } else {
       // Bài tập ngữ pháp
@@ -656,25 +645,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   // Phát âm khi người dùng chủ động bấm loa (KHÔNG tự động phát khi mở popup)
   const handleManualSpeak = () => {
     if (!currentItem) return;
-    try {
-      window.speechSynthesis.cancel();
-      let textToSpeak = "";
-      if (currentItem.kind === "word") {
-        textToSpeak = currentItem.word.word;
-      } else {
-        textToSpeak = isAnswered
-          ? getGrammarFullCompletedSentence(currentItem.exercise)
-          : currentItem.exercise.promptEn.replace(/\[([^\]]+)\]/g, "$1").replace(/_____/g, "");
-      }
-      if (!textToSpeak.trim()) return;
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      utterance.lang = "en-US";
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-    } catch (e) {
-      console.warn("Speech synthesis error:", e);
-    }
+    const textToSpeak =
+      currentItem.kind === "word"
+        ? currentItem.word.word
+        : isAnswered
+        ? getGrammarFullCompletedSentence(currentItem.exercise)
+        : currentItem.exercise.promptEn.replace(/\[([^\]]+)\]/g, "$1").replace(/_____/g, "");
+    handleSpeak(textToSpeak);
   };
+
 
   // Xử lý nộp đáp án dạng trắc nghiệm (phím 1-4)
   const handleSelectChoice = async (choice: ChoiceOption) => {
@@ -689,8 +668,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       if (currentItem.kind === "word") {
         const wordObj = currentItem.word;
         if (correct) {
-          await gradeWord(wordObj, true, "multiple_choice");
-          setFeedbackMsg(`Chính xác! ${NEXT_HINT}`);
+          const praise = await gradeWord(wordObj, true, "multiple_choice");
+          setFeedbackMsg(praise ? `${praiseText(praise)}${NEXT_HINT}` : `Chính xác! ${NEXT_HINT}`);
         } else {
           await gradeWord(wordObj, false, "multiple_choice");
           setFeedbackMsg(`Chưa chính xác! Từ đúng là: "${wordObj.word}"`);
@@ -702,14 +681,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         const ex = currentItem.exercise;
         const lesson = currentItem.lesson;
 
-        noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
+        const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
+        recordGrammarExerciseAttempt(ex.id, correct);
+        await gradeGrammarAnswer(lesson.id, correct, first);
         if (correct) {
-          recordGrammarExerciseAttempt(ex.id, true);
-          await recordPracticeResult(lesson.id, 100);
           setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
-          recordGrammarExerciseAttempt(ex.id, false);
-          await recordPracticeResult(lesson.id, 40);
           setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: ${formatAnswerForms(ex)}`);
           // Đẩy bài tập sai vào cuối hàng đợi
           requeueItem(currentItem);
@@ -727,19 +704,27 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      const match = matchTypedAnswer(typedInput, wordObj.word, wordObj.examples?.[0]?.sentence_en);
+      const match = matchTypedAnswer(typedInput, wordObj.word, pickExample(wordObj)?.sentence_en);
       const correct = match !== "wrong";
+      const typed = typedInput.trim().toLowerCase();
+      if (!correct && parseTerms(wordObj.synonyms).some((t) => t.word.trim().toLowerCase() === typed)) {
+        // A synonym: the meaning was recalled, not the exact word. No penalty, but the grade becomes Hard.
+        synonymTriedRef.current = true;
+        setFeedbackMsg(`"${typedInput.trim()}" là từ đồng nghĩa — đúng nghĩa nhưng cần một từ khác. Thử lại!`);
+        setTypedInput("");
+        return;
+      }
 
       setIsAnswered(true);
       setIsCorrect(correct);
 
       try {
         if (correct) {
-          await gradeWord(wordObj, true, "spelling", match === "near");
+          const praise = await gradeWord(wordObj, true, "spelling", match === "near");
           setFeedbackMsg(
             match === "near"
-              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️ ${NEXT_HINT}`
-              : `Tuyệt vời! Bạn đã gõ chính xác 🚀 ${NEXT_HINT}`
+              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️ ${praiseText(praise)}${NEXT_HINT}`
+              : `${praise ? praiseText(praise) : "Tuyệt vời! Bạn đã gõ chính xác 🚀 "}${NEXT_HINT}`
           );
         } else {
           await gradeWord(wordObj, false, "spelling");
@@ -759,14 +744,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setIsCorrect(correct);
 
       try {
-        noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
+        const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
+        recordGrammarExerciseAttempt(ex.id, correct);
+        await gradeGrammarAnswer(lesson.id, correct, first);
         if (correct) {
-          recordGrammarExerciseAttempt(ex.id, true);
-          await recordPracticeResult(lesson.id, 100);
           setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
-          recordGrammarExerciseAttempt(ex.id, false);
-          await recordPracticeResult(lesson.id, 40);
           setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: ${formatAnswerForms(ex)}`);
           requeueItem(currentItem);
         }
@@ -786,9 +769,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     setIsCorrect(false);
 
     try {
-      noteFirstAnswer(`g:${ex.id}`, lesson.title, false, null);
+      const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, false, null);
       recordGrammarExerciseAttempt(ex.id, false, true);
-      await recordPracticeResult(lesson.id, 40);
+      await gradeGrammarAnswer(lesson.id, false, first);
       setFeedbackMsg(`Bạn đã bỏ qua câu này. Đáp án đúng là: ${formatAnswerForms(ex)}`);
       requeueItem(currentItem);
     } catch (err) {
@@ -811,6 +794,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         handleClose();
         return;
       }
+
+      // Guessing the meaning: the pretest card handles its own keys
+      if (pretest) return;
 
       if (showIntro) {
         if (e.key === "Enter" || e.key === " ") {
@@ -859,6 +845,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     showIntro,
     finishIntro,
     summary,
+    pretest,
   ]);
 
   const overlayStyle = useMemo(() => {
@@ -879,10 +866,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     return getConciseMeaning(currentWord.meaning_vn, currentWord.word);
   }, [currentWord]);
 
-  const primaryExample = currentWord?.examples?.[0];
+  const primaryExample = currentWord ? pickExample(currentWord) : undefined;
   const maskedSentence = useMemo(() => {
     if (!primaryExample?.sentence_en || !currentWord?.word) return null;
-    return maskWordInSentence(primaryExample.sentence_en, currentWord.word);
+    // Every form of the word is blanked (a second occurrence would reveal the answer)
+    return maskAllWordForms(primaryExample.sentence_en, currentWord.word);
   }, [primaryExample, currentWord]);
 
   // After a wrong answer: which word was picked instead, and the stored memory hook if any
@@ -1031,6 +1019,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         <AlertCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
                       )}
                       <span className="font-semibold text-slate-800 dark:text-zinc-200 truncate flex-1">{it.label}</span>
+                      {it.milestone === "mastered" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 font-semibold shrink-0">
+                          🎉 Nhớ dài hạn
+                        </span>
+                      )}
+                      {it.milestone === "rescued" && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-violet-100 dark:bg-violet-900/50 text-violet-700 dark:text-violet-300 font-semibold shrink-0">
+                          🧠 Cứu kịp
+                        </span>
+                      )}
                       {it.again && (
                         <span className="text-[11px] text-slate-500 dark:text-zinc-400 shrink-0">Gặp lại sau {it.again}</span>
                       )}
@@ -1062,9 +1060,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 Đóng lại
               </button>
             </div>
+          ) : currentItem.kind === "word" && showIntro && currentWord && pretest ? (
+            /* Từ mới: đoán nghĩa từ ngữ cảnh trước khi xem */
+            <PretestCard question={pretest} phonetic={currentWord.phonetic} onDone={handlePretestDone} />
           ) : currentItem.kind === "word" && showIntro && currentWord ? (
             /* Từ mới: giới thiệu từ trước khi hỏi */
             <div className="space-y-4">
+              {pretestResult && <PretestFeedback result={pretestResult} />}
               <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-amber-600 dark:text-amber-400">
                 <Sparkles className="w-3.5 h-3.5" />
                 <span>Từ mới · Đọc kỹ rồi trả lời câu hỏi</span>

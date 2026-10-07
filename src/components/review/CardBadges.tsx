@@ -80,8 +80,12 @@ export default function CardBadges({
             ? "Sentence Builder"
             : effectiveExerciseType === "context_match"
             ? "Context Match"
+            : effectiveExerciseType === "meaning_match"
+            ? "Meaning Match"
+            : effectiveExerciseType === "free_writing"
+            ? "Free Writing (AI)"
             : effectiveExerciseType === "listening"
-            ? "Listening Dictation"
+            ? "Listening"
             : "Reverse Cloze"}
           {mode === "mixed" && " • FSRS"}
         </span>

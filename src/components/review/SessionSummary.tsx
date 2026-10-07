@@ -30,7 +30,7 @@ export default function SessionSummary({
     )
   );
 
-  let evaluationTitle = "Xuất sắc! Trí nhớ phản xạ rất nhanh 🌟";
+  let evaluationTitle = "Xuất sắc! Nhớ được gần hết ngay lần đầu 🌟";
   let evaluationDesc = "Bạn đã nhớ và gõ chính xác hầu hết từ vựng ngay từ lần đầu tiên.";
   let evaluationBadge = "bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300";
 
@@ -58,6 +58,22 @@ export default function SessionSummary({
           Bạn đã ôn tập thành công <span className="text-emerald-600 dark:text-emerald-400 font-bold">{reviewCount}</span> từ vựng.
         </p>
       </div>
+
+      {/* What this session did for long-term memory */}
+      {(sessionStats.masteredWords.length > 0 || sessionStats.rescuedCount > 0) && (
+        <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 text-left space-y-1.5">
+          {sessionStats.masteredWords.length > 0 && (
+            <div className="text-sm font-bold text-emerald-800 dark:text-emerald-200">
+              🎉 {sessionStats.masteredWords.length} từ vào trí nhớ dài hạn: {sessionStats.masteredWords.join(", ")}
+            </div>
+          )}
+          {sessionStats.rescuedCount > 0 && (
+            <div className="text-xs text-emerald-700 dark:text-emerald-300">
+              🧠 Cứu kịp {sessionStats.rescuedCount} từ đang phai dần — đây là những lượt ôn giá trị nhất.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Learning Evaluation Card */}
       <div className={`w-full p-4 rounded-2xl border text-left space-y-2 ${evaluationBadge}`}>

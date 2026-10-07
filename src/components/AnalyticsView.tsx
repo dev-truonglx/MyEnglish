@@ -31,6 +31,10 @@ import Heatmap from "./Heatmap";
 import { PAGE_CONTAINER } from "./dashboard/shared";
 import ProficiencyAssessmentCard from "./ProficiencyAssessmentCard";
 import WeeklyProgressCard from "./WeeklyProgressCard";
+import { setWordSuspended } from "@/services/reviewRecorder";
+import { pipeline } from "@/services/pipeline";
+import LearningInsightsCard from "./LearningInsightsCard";
+import HabitInsightsCard from "./HabitInsightsCard";
 
 interface AnalyticsViewProps {
   words: WordDetail[];
@@ -56,7 +60,12 @@ export default function AnalyticsView({
   }, []);
 
   const stats: WordStatsSummary = useMemo(() => getWordStatsSummary(words), [words]);
-  const leechWords = useMemo(() => getLeechWords(words, leechSettings), [words, leechSettings]);
+  const leechWords = useMemo(
+    () => getLeechWords(words, leechSettings).filter((w) => !w.suspended),
+    [words, leechSettings]
+  );
+  const suspendedWords = useMemo(() => words.filter((w) => !!w.suspended), [words]);
+  const [leechMessage, setLeechMessage] = useState<string | null>(null);
   const streakStats = useMemo(() => calculateStreakAndGoal(words), [words]);
 
   // Compute Topic Mastery
@@ -90,6 +99,7 @@ export default function AnalyticsView({
   const achievements = useMemo(() => {
     return getAchievements({
       totalWords: words.length,
+      masteredWords: words.filter((w) => (w.srs.state ?? 0) === 2 && (w.srs.stability ?? 0) >= 21).length,
       currentStreak: streakStats.currentStreak,
       leechesSlain: 0,
       topicMasterCount: topicMastery.filter((t) => t.mastered >= 10).length,
@@ -233,6 +243,10 @@ export default function AnalyticsView({
       </div>
 
       <WeeklyProgressCard words={words} />
+
+      <HabitInsightsCard words={words} />
+
+      <LearningInsightsCard />
 
       {/* Heatmap Widget */}
       <div className="space-y-3">
@@ -448,6 +462,57 @@ export default function AnalyticsView({
           </div>
         </div>
 
+        {/* What happens when a word becomes a leech */}
+        <div className="flex flex-wrap items-center gap-2 text-[11px]">
+          <span className="text-slate-500 dark:text-zinc-400">Khi một từ thành từ khó:</span>
+          {(
+            [
+              ["highlight", "Chỉ đánh dấu"],
+              ["relearn", "Học lại như từ mới (xem lại nghĩa, ví dụ trước khi hỏi)"],
+              ["suspend", "Tạm ngưng ôn (xử lý tay sau)"],
+            ] as const
+          ).map(([action, label]) => (
+            <button
+              key={action}
+              onClick={() => {
+                saveLeechSettings({ action });
+                setLeechSettings(getLeechSettings());
+              }}
+              className={`px-2 py-0.5 rounded-md border transition-colors ${
+                leechSettings.action === action
+                  ? "bg-rose-500 text-white border-rose-500"
+                  : "border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        {leechMessage && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{leechMessage}</p>}
+
+        {suspendedWords.length > 0 && (
+          <div className="p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-xs space-y-2">
+            <div className="font-semibold text-slate-700 dark:text-zinc-300">Đang tạm ngưng ({suspendedWords.length})</div>
+            <div className="flex flex-wrap gap-2">
+              {suspendedWords.map((w) => (
+                <span key={w.id} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800">
+                  <span className="font-mono">{w.word}</span>
+                  <button
+                    onClick={async () => {
+                      await setWordSuspended(w.id, false);
+                      setLeechMessage(`Đã đưa "${w.word}" trở lại lịch ôn`);
+                      onRefreshWords?.();
+                    }}
+                    className="text-cyan-600 dark:text-cyan-400 hover:underline"
+                  >
+                    Ôn lại
+                  </button>
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {leechWords.length === 0 ? (
           <div className="text-center py-6 text-xs text-slate-400 dark:text-zinc-500">
             🎉 Bạn không có từ khó nào bị tắc nghẽn. Trí nhớ của bạn đang hoạt động rất tốt!
@@ -480,7 +545,7 @@ export default function AnalyticsView({
                     </div>
 
                     <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
-                      Quên {w.srs.lapses} lần
+                      Quên {Math.max(w.srs.lapses ?? 0, w.srsProduction?.lapses ?? 0)} lần
                     </span>
                   </div>
 
@@ -497,7 +562,29 @@ export default function AnalyticsView({
                       className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 hover:underline"
                     >
                       <Lightbulb className="w-3.5 h-3.5" />
-                      <span>{isShowingMnemonic ? "Mẹo ghi nhớ" : "Xem mẹo AI"}</span>
+                      <span>{isShowingMnemonic ? "Mẹo ghi nhớ" : "Xem mẹo ghi nhớ"}</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        pipeline.enqueue(w.word).then((res) =>
+                          setLeechMessage(res.accepted ? `AI đang tạo lại nghĩa & ví dụ mới cho "${w.word}"...` : `Không thể phân tích lại: ${res.reason}`)
+                        );
+                      }}
+                      title="Ví dụ mới cho bối cảnh mới: nhớ lại từ nhiều ngữ cảnh khác nhau giúp hết quên"
+                      className="text-cyan-600 dark:text-cyan-400 hover:underline"
+                    >
+                      Tạo ví dụ mới (AI)
+                    </button>
+                    <button
+                      onClick={async () => {
+                        await setWordSuspended(w.id, true);
+                        setLeechMessage(`Đã tạm ngưng "${w.word}"`);
+                        onRefreshWords?.();
+                      }}
+                      className="text-slate-500 dark:text-zinc-400 hover:underline"
+                    >
+                      Tạm ngưng
                     </button>
 
                     {onStartReviewWord && (

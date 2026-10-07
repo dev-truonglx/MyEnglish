@@ -2,7 +2,9 @@
  * No-op test doubles for the Tauri JS APIs used by services (core, event, notification,
  * process, updater, window). Tests that need specific behaviour can vi.mock these.
  */
-export const invoke = async (_cmd: string, _args?: unknown): Promise<unknown> => undefined;
+// A test or the browser harness may answer commands by setting globalThis.__tauriInvoke
+export const invoke = async (cmd: string, args?: unknown): Promise<unknown> =>
+  (globalThis as { __tauriInvoke?: (cmd: string, args?: unknown) => unknown }).__tauriInvoke?.(cmd, args);
 export const listen = async (_event: string, _handler: unknown): Promise<() => void> => () => {};
 export const emit = async (_event: string, _payload?: unknown): Promise<void> => {};
 

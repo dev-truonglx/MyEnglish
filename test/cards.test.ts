@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { Rating, State } from "ts-fsrs";
-import { directionForExercise, getDueCards, isWordDue, toCard, practiceCards } from "@/services/cards";
+import { directionForExercise, exerciseDirection, getDueCards, isValidEvidence, isWordDue, toCard, practiceCards } from "@/services/cards";
 import { buildReviewSession, selectExerciseType, type ExerciseType } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { freshServices, makeWord, reviewSrs, DAY_MS } from "./helpers";
@@ -9,13 +9,21 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-const RECOGNITION: ExerciseType[] = ["flip", "multiple_choice", "context_match", "sentence_builder", "reverse_cloze"];
-const PRODUCTION: ExerciseType[] = ["spelling", "cloze", "listening"];
+const RECOGNITION: ExerciseType[] = ["flip", "multiple_choice", "context_match", "meaning_match", "reverse_cloze", "listening"];
+const PRODUCTION: ExerciseType[] = ["spelling", "cloze"];
 
 describe("card helpers", () => {
   it("maps exercises to the memory they train", () => {
     for (const t of RECOGNITION) expect(directionForExercise(t)).toBe("recognition");
     for (const t of PRODUCTION) expect(directionForExercise(t)).toBe("production");
+  });
+
+  it("treats sentence building as practice only and rejects mismatched evidence", () => {
+    expect(exerciseDirection("sentence_builder")).toBeNull();
+    expect(isValidEvidence("sentence_builder", "recognition")).toBe(false);
+    expect(isValidEvidence("spelling", "recognition")).toBe(false);
+    expect(isValidEvidence("multiple_choice", "production")).toBe(false);
+    expect(isValidEvidence("cloze", "production")).toBe(true);
   });
 
   it("keeps the recognition schedule on production cards", () => {

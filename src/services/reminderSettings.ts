@@ -23,6 +23,8 @@ export interface ReminderSettings {
   grammarLevels: GrammarLevel[]; // selected grammar levels (multi-select)
   respectFocus: boolean; // postpone the popup while full screen, sharing the screen, in Focus mode or idle
   preferPrimaryMonitor: boolean; // show the reminder on the primary monitor instead of the one under the cursor
+  contextMoments: boolean; // also remind at natural transitions: back at the computer, screen share / full screen over
+  avoidQuietHours: boolean; // skip clock-based reminders in hours where they are almost always ignored
 }
 
 const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
@@ -41,6 +43,8 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   grammarLevels: ["A1", "A2", "B1"],
   respectFocus: true,
   preferPrimaryMonitor: false,
+  contextMoments: true,
+  avoidQuietHours: true,
 };
 
 /** Seconds the corner reminder waits before opening the review by itself */
@@ -49,6 +53,7 @@ export const NUDGE_AUTO_OPEN_SECONDS = 20;
 const SECONDS_PER_QUESTION = 20;
 
 import type { DuoMotivationState, MicroQuizQuestion } from "./duoMotivation";
+import type { ReminderMoment } from "./reminderMoments";
 import {
   getConsecutiveSkipCount,
   incrementConsecutiveSkipCount,
@@ -64,6 +69,8 @@ export interface ReviewNudgePayload {
   consecutiveSkips?: number;
   motivation?: DuoMotivationState;
   microQuiz?: MicroQuizQuestion | null;
+  /** Shown at a natural transition (see reminderMoments.ts) rather than by the clock */
+  moment?: ReminderMoment | null;
 }
 
 export function buildNudgePayload(
@@ -142,7 +149,7 @@ export function snoozeReminder(customMinutes?: number): number {
   const minutes = customMinutes ?? settings.snoozeMinutes ?? 10;
   const snoozedUntil = Date.now() + minutes * 60 * 1000;
   saveReminderSettings({ snoozedUntil });
-  incrementConsecutiveSkipCount();
+  // A deliberate snooze is the learner's choice, not a "skip": it never escalates the reminder tone
   return minutes;
 }
 
@@ -183,6 +190,8 @@ export function snoozeIgnoredNudge(): number {
   try {
     localStorage.setItem(IGNORED_NUDGES_KEY, String(ignored + 1));
   } catch {}
+  // Timed out without any answer (unlike a deliberate snooze): offer the 1-question quiz next time
+  incrementConsecutiveSkipCount();
   return snoozeReminder(minutes);
 }
 

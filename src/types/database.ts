@@ -25,6 +25,7 @@ export interface Word {
   code_snippet?: string | null;
   topic?: string | null;
   cefr_level?: string | null; // CEFR level of the term (A1..C2), null for words added before tagging
+  suspended?: number | null; // 1 = left out of reviews (leech action "suspend" or by hand)
   created_at: string;
 }
 
@@ -34,6 +35,8 @@ export interface WordExample {
   sentence_en: string;
   sentence_vn?: string;
   grammar_analysis: string;
+  /** "user_context" = the sentence the learner met the word in; null/"ai" = generated */
+  source?: string | null;
 }
 
 export type FSRSState = 0 | 1 | 2 | 3; // 0: New, 1: Learning, 2: Review, 3: Relearning
@@ -107,6 +110,7 @@ export interface CreateWordInput {
     sentence_en: string;
     sentence_vn?: string;
     grammar_analysis: string;
+    source?: string | null;
   }>;
 }
 

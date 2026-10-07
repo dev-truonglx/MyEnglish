@@ -6,6 +6,13 @@
 >
 > **Cập nhật 2026-10-05:** ✅ #11, ✅ #1, ✅ #6 xong trên branch `fix/learning-algorithm` (PR #1); ✅ #4, ✅ #12, ✅ #13 xong trên
 > branch `feat/grammar-fsrs-refactor-bundle` (tách ra từ PR #1). Ghi chú triển khai ở từng mục.
+>
+> **Cập nhật 2026-10-07 (tối):** các tính năng lôi kéo / giữ chân / học tốt hơn (quay lại nhẹ nhàng, bộ từ có sẵn +
+> onboarding, đoán nghĩa trước khi học, chế độ đọc, sổ lỗi, nhắc lúc chuyển việc) ở
+> [`engagement-features-2026-10-07.md`](./engagement-features-2026-10-07.md). Mục #2 (ngữ cảnh gốc) được mở rộng qua chế độ đọc.
+>
+> **Cập nhật 2026-10-07:** rà soát mới ở [`review-2026-10-07.md`](./review-2026-10-07.md), có kế hoạch 5 giai đoạn thay cho bảng
+> "Thứ tự đề xuất" bên dưới. Giới hạn retry placeholder (mục tồn đọng thứ 3) đã làm (`MAX_AUTO_REQUEUE_ATTEMPTS = 3`).
 
 ---
 

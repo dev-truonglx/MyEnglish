@@ -29,15 +29,19 @@ export function buildPopupChoices(target: WordDetail, allWords: WordDetail[]): P
   }));
 }
 
-/** Same grading as flashcard sessions: wrong -> Again, typo -> Hard, correct but very slow -> Hard, else Good. */
+/**
+ * Same grading as flashcard sessions: wrong -> Again, typo / synonym tried first -> Hard,
+ * correct but very slow -> Hard, else Good. Never Easy.
+ */
 export function popupAnswerRating(
   correct: boolean,
   exerciseType: ExerciseType,
   responseTimeMs: number,
-  nearMiss = false
+  nearMiss = false,
+  confusedWithSynonym = false
 ): Rating {
   if (!correct) return Rating.Again;
-  return deriveRating({ exerciseType, wrongAttempts: 0, nearMiss, responseTimeMs });
+  return deriveRating({ exerciseType, wrongAttempts: 0, nearMiss, confusedWithSynonym, responseTimeMs });
 }
 
 /** The word the learner picked instead of the right one, to explain the mix-up after a wrong answer */
