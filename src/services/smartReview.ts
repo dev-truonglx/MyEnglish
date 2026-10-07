@@ -349,6 +349,7 @@ export function buildReviewSession(
 const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
   multiple_choice: 20000,
   context_match: 40000,
+  meaning_match: 60000,
   sentence_builder: 60000,
   reverse_cloze: 30000,
   spelling: 30000,
@@ -436,7 +437,7 @@ export function matchTypedAnswer(input: string, target: string, sentence?: strin
 
 // ─── 4. REVIEW LOG ──────────────────────────────────────────────────────────
 
-export type ExerciseType = "flip" | "cloze" | "spelling" | "multiple_choice" | "context_match" | "sentence_builder" | "reverse_cloze" | "listening";
+export type ExerciseType = "flip" | "cloze" | "spelling" | "multiple_choice" | "context_match" | "meaning_match" | "sentence_builder" | "reverse_cloze" | "listening";
 
 export interface ReviewLogEntry {
   id: string;
@@ -691,6 +692,7 @@ export function calculateXPReward(
   responseTimeMs: number,
   isLeechWord: boolean,
   isFirstTry: boolean,
+  consecutiveCorrect: number = 0
 ): XPReward {
   const bonusReasons: string[] = [];
   let baseXP = 0;
@@ -732,10 +734,23 @@ export function calculateXPReward(
     bonusReasons.push("🗡️ Leech Slayer +10");
   }
 
+  // Combo multiplier
+  let totalXP = baseXP + bonusXP;
+  if (consecutiveCorrect >= 10) {
+    totalXP = Math.round(totalXP * 1.5);
+    bonusReasons.push("🔥 Combo x10! (+50%)");
+  } else if (consecutiveCorrect >= 5) {
+    totalXP = Math.round(totalXP * 1.2);
+    bonusReasons.push("🔥 Combo x5! (+20%)");
+  } else if (consecutiveCorrect >= 3) {
+    totalXP = Math.round(totalXP * 1.1);
+    bonusReasons.push("🔥 Combo x3! (+10%)");
+  }
+
   return {
     baseXP,
     bonusXP,
-    totalXP: baseXP + bonusXP,
+    totalXP,
     bonusReasons,
   };
 }
@@ -873,11 +888,11 @@ export function selectExerciseType(card: WordDetail & { direction?: CardDirectio
   // lucky guess would be graded Good and push the next review too far.
   if (state === 0 || reps === 0) return "flip";
   if (state === 1 || state === 3 || isLeech(card.srs)) {
-    return withExamples(["multiple_choice", "sentence_builder", "flip"], ["multiple_choice", "flip"]);
+    return withExamples(["multiple_choice", "sentence_builder", "meaning_match", "flip"], ["multiple_choice", "meaning_match", "flip"]);
   }
   return withExamples(
-    ["multiple_choice", "context_match", "reverse_cloze", "sentence_builder"],
-    ["multiple_choice", "flip"]
+    ["multiple_choice", "meaning_match", "context_match", "reverse_cloze", "sentence_builder"],
+    ["multiple_choice", "meaning_match", "flip"]
   );
 }
 
@@ -1380,3 +1395,34 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
   };
 }
 
+
+export function prepareMeaningMatch(
+  primaryWord: WordDetail,
+  allWords: WordDetail[]
+): { wordId: string; word: string; meaningVN: string }[] {
+  const pairs: { wordId: string; word: string; meaningVN: string }[] = [];
+  const usedWords = new Set<string>();
+  const usedMeanings = new Set<string>();
+
+  const tryAdd = (w: WordDetail): boolean => {
+    const wordKey = w.word.trim().toLowerCase();
+    const meaningKey = cleanMeaningForOption(w.meaning_vn || "").trim().toLowerCase();
+    if (!wordKey || !meaningKey || usedWords.has(wordKey) || usedMeanings.has(meaningKey)) return false;
+    
+    usedWords.add(wordKey);
+    usedMeanings.add(meaningKey);
+    pairs.push({ wordId: w.id, word: w.word, meaningVN: meaningKey });
+    return true;
+  };
+
+  tryAdd(primaryWord);
+
+  const shuffled = [...allWords].sort(() => 0.5 - Math.random());
+  for (const w of shuffled) {
+    if (pairs.length >= 5) break;
+    if (w.id === primaryWord.id) continue;
+    tryAdd(w);
+  }
+
+  return pairs.sort(() => 0.5 - Math.random());
+}

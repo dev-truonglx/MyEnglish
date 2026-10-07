@@ -2,6 +2,7 @@ import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
 import SentenceBuilderExercise from "./exercises/SentenceBuilderExercise";
 import ContextMatchExercise from "./exercises/ContextMatchExercise";
+import MeaningMatchExercise from "./exercises/MeaningMatchExercise";
 import ListeningDictationExercise from "./exercises/ListeningDictationExercise";
 import ReverseClozeExercise from "./exercises/ReverseClozeExercise";
 import { useReviewSession } from "@/hooks/useReviewSession";
@@ -73,6 +74,7 @@ export default function FlashcardReview({
     handleCheckAnswer,
     handleSkip,
     handleShowAnswer,
+    consecutiveCorrect,
   } = useReviewSession({ wordsToReview, distractorPool, practiceMode });
 
   // Session Completed view with Learning Evaluation Metrics
@@ -141,6 +143,14 @@ export default function FlashcardReview({
             : "border-slate-200 dark:border-zinc-800"
         }`}
       >
+        {consecutiveCorrect >= 3 && (
+          <div className="absolute -top-3 -right-3 z-50 animate-bounce">
+            <div className="px-3 py-1 bg-gradient-to-r from-orange-500 to-rose-600 text-white font-black rounded-xl text-sm shadow-lg border-2 border-white/50 dark:border-zinc-800 flex items-center gap-1.5 transform rotate-3">
+              <span className="text-lg">🔥</span>
+              <span>Combo x{consecutiveCorrect}!</span>
+            </div>
+          </div>
+        )}
         {/* Top Badges */}
         <CardBadges
           currentWord={currentWord}
@@ -189,6 +199,22 @@ export default function FlashcardReview({
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
               onComplete={(_isCorrect, attempts, rating) => {
                 handleGrade(gradeExercise("context_match", attempts, rating), "context_match", attempts);
+              }}
+              onSpeak={(t) => handleSpeak(t)}
+              onFallback={() => setFallbackMode("multiple_choice")}
+            />
+          </div>
+        )}
+
+        {/* ----------------- MODE: MEANING MATCH (MINI-GAME) ----------------- */}
+        {effectiveExerciseType === "meaning_match" && (
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-2 overflow-y-auto">
+            <MeaningMatchExercise
+              key={`${currentWord.id}-${currentIndex}`}
+              word={currentWord}
+              allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
+              onComplete={(_isCorrect, attempts, rating) => {
+                handleGrade(gradeExercise("meaning_match", attempts, rating), "meaning_match", attempts);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("multiple_choice")}

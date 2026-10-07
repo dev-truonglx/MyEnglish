@@ -256,7 +256,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     }
 
     // Calculate & award XP
-    const xpReward = calculateXPReward(rating, activeExType, attemptCount, responseTimeMs, wordIsLeech, isFirstTry);
+    const xpReward = calculateXPReward(rating, activeExType, attemptCount, responseTimeMs, wordIsLeech, isFirstTry, consecutiveCorrect);
     if (xpReward.totalXP > 0) {
       awardXP(xpReward.totalXP);
       setLastXPReward(xpReward);
@@ -543,6 +543,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     currentIndex,
     currentWord,
     effectiveExerciseType,
+    consecutiveCorrect,
     isFlipped,
     setIsFlipped,
     reviewCount,

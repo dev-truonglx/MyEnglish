@@ -71,6 +71,17 @@ export default function ReviewTopBar({
         </button>
 
         <button
+          onClick={() => handleModeChange("meaning_match")}
+          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+            mode === "meaning_match"
+              ? "bg-white dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-slate-200 dark:border-pink-500/40 shadow-sm"
+              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+          }`}
+        >
+          <span>🔗 Nối từ</span>
+        </button>
+
+        <button
           onClick={() => handleModeChange("cloze")}
           className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "cloze"
