@@ -12,6 +12,7 @@ import {
   contractionVariants,
   fillPromptBlanks,
   isGrammarAnswerCorrect,
+  prepareSentenceBuilder,
 } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { makeWord, reviewSrs, freshServices } from "./helpers";
@@ -232,5 +233,103 @@ describe("new-card budget", () => {
     await log(practiced, false);
 
     expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 1, production: 0 });
+  });
+});
+
+describe("prepareSentenceBuilder", () => {
+  it("never slices sentences > 10 words and provides all tokens needed for full sentence", () => {
+    const longSentence = "Developers should omit sensitive credentials from production log outputs to prevent security leaks.";
+    const meaningVn = "Các lập trình viên nên lược bỏ thông tin xác thực nhạy cảm khỏi log môi trường production để ngăn chặn rò rỉ bảo mật.";
+    const word = makeWord("omit", {
+      meaning_vn: "lược bỏ",
+      examples: [
+        {
+          id: "ex-1",
+          word_id: "omit",
+          sentence_en: longSentence,
+          sentence_vn: meaningVn,
+          grammar_analysis: "",
+        },
+      ],
+    });
+
+    const data = prepareSentenceBuilder(word);
+    expect(data).not.toBeNull();
+    if (!data) return;
+
+    // Sentence must not be truncated
+    expect(data.fullSentence).toBe(longSentence);
+    expect(data.meaningVN).toBe(meaningVn);
+
+    // Number of tokens must exactly match the number of words in the full sentence (13 words)
+    const rawWords = longSentence.split(/\s+/).filter(Boolean);
+    expect(data.tokens).toHaveLength(rawWords.length);
+
+    // All original words must be present in tokens
+    const tokenTexts = data.tokens.map((t) => t.text).sort();
+    const expectedTexts = [...rawWords].sort();
+    expect(tokenTexts).toEqual(expectedTexts);
+
+    // Tokens must be reconstructed and normalized to match full sentence
+    const reconstructed = rawWords.join(" ");
+    expect(normalizeTypedText(reconstructed)).toBe(normalizeTypedText(data.fullSentence));
+  });
+
+  it("handles 18-word example sentences completely without dropping any words", () => {
+    const sentence18 = "He decided to omit the painful details of the car accident when recounting the story to his parents.";
+    const word = makeWord("omit", {
+      examples: [
+        {
+          id: "ex-2",
+          word_id: "omit",
+          sentence_en: sentence18,
+          sentence_vn: "Anh ấy quyết định không đề cập đến những chi tiết đau lòng...",
+          grammar_analysis: "",
+        },
+      ],
+    });
+
+    const data = prepareSentenceBuilder(word);
+    expect(data).not.toBeNull();
+    expect(data?.tokens).toHaveLength(18);
+    expect(data?.fullSentence).toBe(sentence18);
+  });
+
+  it("prefers concise examples if multiple examples are available", () => {
+    const word = makeWord("release", {
+      examples: [
+        {
+          id: "ex-long",
+          word_id: "release",
+          sentence_en: "The DevOps team configured the CI/CD pipeline to release the hotfix directly to production after automated checks pass.",
+          sentence_vn: "Dài",
+          grammar_analysis: "",
+        },
+        {
+          id: "ex-short",
+          word_id: "release",
+          sentence_en: "We release updates weekly.",
+          sentence_vn: "Chúng tôi phát hành cập nhật hàng tuần.",
+          grammar_analysis: "",
+        },
+      ],
+    });
+
+    const data = prepareSentenceBuilder(word);
+    expect(data).not.toBeNull();
+    // Should prefer the concise 4-word sentence
+    expect(data?.fullSentence).toBe("We release updates weekly.");
+    expect(data?.tokens).toHaveLength(4);
+  });
+
+  it("returns null when sentence is too short (< 3 words) or has no examples", () => {
+    expect(prepareSentenceBuilder(makeWord("test", { examples: [] }))).toBeNull();
+    expect(
+      prepareSentenceBuilder(
+        makeWord("test", {
+          examples: [{ id: "1", word_id: "test", sentence_en: "Hi there", grammar_analysis: "" }],
+        })
+      )
+    ).toBeNull();
   });
 });

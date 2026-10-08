@@ -120,10 +120,17 @@ function formatAnswerForms(ex: GrammarExercise): string {
  * Tạo câu tiếng Anh hoàn chỉnh khi điền đáp án bài tập ngữ pháp
  */
 function getGrammarFullCompletedSentence(ex: GrammarExercise): string {
+  if (ex.correctSentence) return ex.correctSentence;
+
   const ans = Array.isArray(ex.correctAnswer)
     ? ex.correctAnswer[0]
     : ex.correctAnswer || ex.errorWord || "";
   if (!ans) return ex.promptEn;
+
+  // Với dạng tìm lỗi sai: loại bỏ các ký tự ngoặc vuông [word] -> word
+  if (ex.type === "error_spotting") {
+    return ex.promptEn.replace(/\[([^\]]+)\]/g, "$1");
+  }
 
   if (ex.promptEn.includes("_____")) {
     return ex.promptEn.replace(/_____(\s*\([a-z\s]+\))?/gi, ans);
@@ -622,6 +629,22 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           isCorrect: isGrammarAnswerCorrect(opt, ex),
         }));
         setChoices(allChoices);
+      } else if (ex.type === "error_spotting") {
+        // Trích xuất các từ trong ngoặc vuông [word] thành lựa chọn trắc nghiệm
+        const matches = Array.from(ex.promptEn.matchAll(/\[([^\]]+)\]/g)).map((m) => m[1]);
+        const uniqueTokens = Array.from(new Set(matches));
+        if (uniqueTokens.length > 0) {
+          setActiveMode("multiple_choice");
+          const allChoices: ChoiceOption[] = uniqueTokens.map((tok, idx) => ({
+            id: `grammar-err-${idx}-${tok}`,
+            word: tok,
+            isCorrect: isGrammarAnswerCorrect(tok, ex),
+          }));
+          setChoices(allChoices);
+        } else {
+          setActiveMode("typing");
+          setChoices([]);
+        }
       } else {
         // Dạng câu hỏi không có options (chia động từ / viết câu) -> gõ nhập liệu
         setActiveMode("typing");
@@ -1494,7 +1517,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                       <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
                         <span>Nhập đáp án hoặc dạng đúng của từ:</span>
                         <span className="text-[11px] font-mono text-violet-600 dark:text-violet-400 font-bold">
-                          Ví dụ: chia thì phù hợp với chủ ngữ
+                          {currentGrammar.exercise.type === "sentence_transform"
+                            ? "Ví dụ: viết lại câu hoàn chỉnh"
+                            : currentGrammar.exercise.type === "error_spotting"
+                            ? "Ví dụ: nhập từ dùng sai/thừa"
+                            : "Ví dụ: chia thì phù hợp với chủ ngữ"}
                         </span>
                       </div>
 

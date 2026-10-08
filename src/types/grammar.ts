@@ -52,6 +52,7 @@ export interface GrammarExercise {
   hint?: string;
   options?: string[]; // for multiple_choice
   correctAnswer: string | string[]; // possible normalized variants
+  correctSentence?: string; // full canonical correct English sentence (useful for error_spotting / transformations)
   errorWord?: string; // for error_spotting (token to highlight)
   errorExplanation?: string;
   explanation: string;

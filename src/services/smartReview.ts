@@ -1358,49 +1358,80 @@ export interface SentenceBuilderData {
   targetWord: string;
 }
 
+/** Maximum number of words in a sentence suitable for Sentence Builder mode */
+export const MAX_SENTENCE_BUILDER_WORDS = 20;
+
 export function prepareSentenceBuilder(word: WordDetail): SentenceBuilderData | null {
-  const example = pickExample(word) ?? word.examples?.[0];
-  if (!example || !example.sentence_en || example.sentence_en.trim().length === 0) {
-    return null;
-  }
+  const allExamples = word.examples || [];
 
-  const rawSentence = example.sentence_en.trim();
-  // Split into tokens (words while keeping basic punctuation attached or grouped)
-  const rawWords = rawSentence.split(/\s+/).filter(Boolean);
+  // Filter valid candidate examples that contain text and at least 3 words, within manageable length
+  const validCandidates = allExamples.filter((e) => {
+    if (!e || !e.sentence_en || e.sentence_en.trim().length === 0) return false;
+    const wordCount = e.sentence_en.trim().split(/\s+/).filter(Boolean).length;
+    return wordCount >= 3 && wordCount <= MAX_SENTENCE_BUILDER_WORDS;
+  });
 
-  if (rawWords.length < 3) return null;
+  // Pick the best example:
+  // 1. Prefer examples containing the target word
+  // 2. Prefer concise examples (4 to 14 words) for an optimal unscramble experience
+  // 3. Fallback to pickExample(word) if it meets the word count constraint
+  let chosenExample: WordExample | undefined;
 
-  // If sentence is very long (> 12 words), slice around the target word to keep exercise engaging & manageable
-  let wordsToUse = rawWords;
-  if (rawWords.length > 10) {
-    const targetIdx = rawWords.findIndex((w) =>
-      w.toLowerCase().includes(word.word.toLowerCase())
-    );
-    if (targetIdx !== -1) {
-      const start = Math.max(0, targetIdx - 4);
-      const end = Math.min(rawWords.length, start + 9);
-      wordsToUse = rawWords.slice(start, end);
-    } else {
-      wordsToUse = rawWords.slice(0, 9);
+  const withTargetWord = validCandidates.filter((e) =>
+    maskWordInSentence(e.sentence_en, word.word)
+  );
+  const pool = withTargetWord.length > 0 ? withTargetWord : validCandidates;
+
+  if (pool.length > 0) {
+    // Prefer concise sentences (4-14 words) over long ones
+    const concise = pool.filter((e) => {
+      const cnt = e.sentence_en.trim().split(/\s+/).filter(Boolean).length;
+      return cnt >= 4 && cnt <= 14;
+    });
+    const candidateList = concise.length > 0 ? concise : pool;
+    const rotation = Math.abs(Math.floor(word.srs?.reps ?? 0));
+    chosenExample = candidateList[rotation % candidateList.length];
+  } else {
+    const fallbackEx = pickExample(word) ?? allExamples[0];
+    if (fallbackEx?.sentence_en) {
+      const cnt = fallbackEx.sentence_en.trim().split(/\s+/).filter(Boolean).length;
+      if (cnt >= 3 && cnt <= MAX_SENTENCE_BUILDER_WORDS) {
+        chosenExample = fallbackEx;
+      }
     }
   }
 
-  const fullSentence = wordsToUse.join(" ");
+  if (!chosenExample || !chosenExample.sentence_en) {
+    return null;
+  }
 
-  const tokens = wordsToUse.map((text, idx) => ({
+  const rawSentence = chosenExample.sentence_en.trim();
+  const rawWords = rawSentence.split(/\s+/).filter(Boolean);
+  if (rawWords.length < 3 || rawWords.length > MAX_SENTENCE_BUILDER_WORDS) {
+    return null;
+  }
+
+  // Use ALL words of the sentence without truncation, so the user never faces missing words!
+  const fullSentence = rawSentence;
+  const tokens = rawWords.map((text, idx) => ({
     id: `token-${idx}-${text}`,
     text,
   }));
 
-  // Shuffle tokens (ensure it is actually shuffled if length > 1)
-  let shuffledTokens = [...tokens].sort(() => 0.5 - Math.random());
-  if (tokens.length > 1 && shuffledTokens.every((t, idx) => t.id === tokens[idx].id)) {
-    shuffledTokens = [shuffledTokens[1], shuffledTokens[0], ...shuffledTokens.slice(2)];
+  // Fisher-Yates shuffle to ensure tokens are thoroughly scrambled
+  const shuffledTokens = [...tokens];
+  for (let i = shuffledTokens.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffledTokens[i], shuffledTokens[j]] = [shuffledTokens[j], shuffledTokens[i]];
+  }
+  // Ensure it doesn't accidentally stay in the exact original order
+  if (shuffledTokens.length > 1 && shuffledTokens.every((t, idx) => t.id === tokens[idx].id)) {
+    [shuffledTokens[0], shuffledTokens[1]] = [shuffledTokens[1], shuffledTokens[0]];
   }
 
   return {
     fullSentence,
-    meaningVN: example.sentence_vn || word.meaning_vn,
+    meaningVN: chosenExample.sentence_vn || word.meaning_vn,
     tokens: shuffledTokens,
     targetWord: word.word,
   };
