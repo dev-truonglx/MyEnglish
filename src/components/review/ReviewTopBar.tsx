@@ -10,6 +10,7 @@ interface ReviewTopBarProps {
   queue: ReviewCard[];
   currentWord: ReviewCard;
   practiceMode: boolean;
+  consecutiveCorrect?: number;
 }
 
 /** Top Bar with Mode Selector & Progress */
@@ -21,6 +22,7 @@ export default function ReviewTopBar({
   queue,
   currentWord,
   practiceMode,
+  consecutiveCorrect,
 }: ReviewTopBarProps) {
   return (
     <div className="w-full shrink-0 mb-3 flex items-center justify-between flex-wrap gap-3">
@@ -129,8 +131,32 @@ export default function ReviewTopBar({
         </button>
       </div>
 
-      {/* Progress indicator */}
-      <div className="flex items-center gap-3">
+      {/* Progress indicator & Streak Pill */}
+      <div className="flex items-center gap-3 flex-wrap justify-end">
+        {consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
+          <div
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shadow-md transition-all duration-300 animate-in fade-in zoom-in-95 ${
+              consecutiveCorrect >= 10
+                ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 shadow-amber-500/25 border border-yellow-300"
+                : consecutiveCorrect >= 5
+                ? "bg-gradient-to-r from-rose-500 to-orange-500 text-white shadow-rose-500/25 border border-rose-400/50"
+                : "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-orange-500/20 border border-orange-400/40"
+            }`}
+            title={`Chuỗi trả lời đúng liên tiếp: ${consecutiveCorrect} câu`}
+          >
+            <span className="text-sm select-none animate-pulse">
+              {consecutiveCorrect >= 10 ? "👑" : consecutiveCorrect >= 5 ? "⚡" : "🔥"}
+            </span>
+            <span className="tracking-wide">
+              {consecutiveCorrect >= 10
+                ? `Siêu chuỗi x${consecutiveCorrect}!`
+                : consecutiveCorrect >= 5
+                ? `Chuỗi x${consecutiveCorrect}!`
+                : `Combo x${consecutiveCorrect}!`}
+            </span>
+          </div>
+        )}
+
         <div className="text-xs font-mono text-slate-500 dark:text-zinc-400">
           Thẻ <span className="text-slate-900 dark:text-white font-bold">{currentIndex + 1}</span> / {queue.length}
           {currentWord && (

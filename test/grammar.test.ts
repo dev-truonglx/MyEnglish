@@ -174,6 +174,64 @@ describe("recordGrammarExerciseAttempt & skipping", () => {
     // ex2 should be sorted first due to urgency weighting of skipped/incorrect status
     expect(prepared[0].id).toBe(ex2.id);
   });
+
+  it("clears skipped flag and decrements incorrect count upon consecutive correct answers", async () => {
+    const g = await freshGrammar();
+    const testExId = "test_decay_ex_1";
+
+    // First user makes a mistake then skips
+    g.recordGrammarExerciseAttempt(testExId, false, false);
+    g.recordGrammarExerciseAttempt(testExId, false, true);
+    let history = g.getGrammarExerciseHistoryMap();
+    expect(history[testExId].attempts).toBe(2);
+    expect(history[testExId].incorrect).toBe(2);
+    expect(history[testExId].skipped).toBe(1);
+    expect(history[testExId].consecutiveCorrect).toBe(0);
+
+    // Then user answers correctly: skipped is cleared immediately, incorrect is decremented
+    g.recordGrammarExerciseAttempt(testExId, true, false);
+    history = g.getGrammarExerciseHistoryMap();
+    expect(history[testExId].attempts).toBe(3);
+    expect(history[testExId].incorrect).toBe(1); // 2 - 1
+    expect(history[testExId].skipped).toBe(0); // cleared!
+    expect(history[testExId].consecutiveCorrect).toBe(1);
+
+    // Another consecutive correct answer reduces incorrect further
+    g.recordGrammarExerciseAttempt(testExId, true, false);
+    history = g.getGrammarExerciseHistoryMap();
+    expect(history[testExId].attempts).toBe(4);
+    expect(history[testExId].incorrect).toBe(0); // 1 - 2 => 0
+    expect(history[testExId].consecutiveCorrect).toBe(2);
+  });
+
+  it("calculates reasonable cooldown hours based on consecutive correct answers", async () => {
+    const g = await freshGrammar();
+    expect(g.getGrammarExerciseCooldownHours(0)).toBe(0); // 0 hours (no cooldown if unmastered)
+    expect(g.getGrammarExerciseCooldownHours(1)).toBe(12); // 12 hours
+    expect(g.getGrammarExerciseCooldownHours(2)).toBe(48); // 2 days
+    expect(g.getGrammarExerciseCooldownHours(3)).toBe(120); // 5 days
+    expect(g.getGrammarExerciseCooldownHours(4)).toBe(240); // 10 days
+  });
+
+  it("auto-migrates legacy stuck prac-ps-3 history", async () => {
+    const g = await freshGrammar();
+    localStorage.setItem(
+      "myenglish_grammar_exercise_history_v1",
+      JSON.stringify({
+        "prac-ps-3": {
+          exerciseId: "prac-ps-3",
+          attempts: 9,
+          incorrect: 4,
+          skipped: 2,
+          lastAttempt: "2026-10-08T04:44:20.918Z",
+        },
+      })
+    );
+    const history = g.getGrammarExerciseHistoryMap();
+    expect(history["prac-ps-3"].skipped).toBe(0);
+    expect(history["prac-ps-3"].incorrect).toBe(0);
+    expect(history["prac-ps-3"].consecutiveCorrect).toBe(3);
+  });
 });
 
 

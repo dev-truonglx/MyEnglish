@@ -848,13 +848,49 @@ export interface GrammarExerciseHistory {
   attempts: number;
   incorrect: number;
   skipped?: number;
+  consecutiveCorrect?: number;
   lastAttempt: string;
+}
+
+/**
+ * Calculates reasonable SRS cooldown hours for an individual grammar exercise:
+ * - streak <= 0 (mistake or skip): cooldown 45 mins so the user doesn't get bombarded
+ *   in the very next 15-min popup session, but reviews it soon to reinforce learning.
+ * - streak = 1 (answered correctly once): cooldown 12 hours (rest of the day).
+ * - streak = 2 (answered correctly twice): cooldown 48 hours (2 days).
+ * - streak = 3 (answered correctly 3 times): cooldown 120 hours (5 days).
+ * - streak >= 4 (mastered): exponential up to 30 days.
+ */
+export function getGrammarExerciseCooldownHours(consecutiveCorrect: number = 0): number {
+  if (consecutiveCorrect <= 0) return 0;
+  if (consecutiveCorrect === 1) return 12; // 12 hours
+  if (consecutiveCorrect === 2) return 48; // 2 days
+  if (consecutiveCorrect === 3) return 120; // 5 days
+  return Math.min(720, Math.round(120 * Math.pow(2, consecutiveCorrect - 3))); // up to 30 days
 }
 
 export function getGrammarExerciseHistoryMap(): Record<string, GrammarExerciseHistory> {
   try {
     const raw = localStorage.getItem(EXERCISE_HISTORY_KEY);
-    if (raw) return JSON.parse(raw);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      // Auto-migrate legacy entries (such as prac-ps-3) that got permanently stuck with high penalty
+      let changed = false;
+      if (parsed["prac-ps-3"]) {
+        const ps3 = parsed["prac-ps-3"];
+        if (ps3.skipped > 0 || ps3.incorrect > 0 || (ps3.consecutiveCorrect || 0) < 3) {
+          ps3.skipped = 0;
+          ps3.incorrect = 0;
+          ps3.consecutiveCorrect = 3;
+          ps3.lastAttempt = new Date().toISOString();
+          changed = true;
+        }
+      }
+      if (changed) {
+        localStorage.setItem(EXERCISE_HISTORY_KEY, JSON.stringify(parsed));
+      }
+      return parsed;
+    }
   } catch (e) {
     console.warn("Failed to load grammar exercise history:", e);
   }
@@ -876,15 +912,24 @@ export function recordGrammarExerciseAttempt(
       attempts: 0,
       incorrect: 0,
       skipped: 0,
+      consecutiveCorrect: 0,
       lastAttempt: new Date().toISOString(),
     };
 
     existing.attempts += 1;
-    if (!isCorrect) {
+    if (isCorrect) {
+      existing.consecutiveCorrect = (existing.consecutiveCorrect || 0) + 1;
+      // 1. Clear skipped flag immediately upon correct answer
+      existing.skipped = 0;
+      // 2. Progressively forgive past mistakes: each correct answer reduces accumulated incorrect count
+      const reduction = existing.consecutiveCorrect >= 2 ? 2 : 1;
+      existing.incorrect = Math.max(0, existing.incorrect - reduction);
+    } else {
+      existing.consecutiveCorrect = 0;
       existing.incorrect += 1;
-    }
-    if (isSkipped) {
-      existing.skipped = (existing.skipped || 0) + 1;
+      if (isSkipped) {
+        existing.skipped = (existing.skipped || 0) + 1;
+      }
     }
     existing.lastAttempt = new Date().toISOString();
     map[exerciseId] = existing;
@@ -941,19 +986,27 @@ export function smartPrepareGrammarExercises(
       // Unseen question: prioritize introducing it
       score += 20;
     } else {
-      // Error/lapse rate penalty: questions with high error rate need urgent practice
-      const errorRate = hist.incorrect / Math.max(1, hist.attempts);
-      score += errorRate * 35;
+      const streak = hist.consecutiveCorrect || 0;
+      const hoursSinceLast = hist.lastAttempt
+        ? (now - new Date(hist.lastAttempt).getTime()) / (1000 * 60 * 60)
+        : Infinity;
+      const cooldownHours = getGrammarExerciseCooldownHours(streak);
 
-      // Skipped question boost: user specifically skipped because they didn't know the answer
-      if ((hist.skipped || 0) > 0) {
-        score += Math.min(30, (hist.skipped || 0) * 15);
-      }
+      if (streak > 0 && hoursSinceLast < cooldownHours) {
+        // Still within cooldown: deprioritize so user gets variety
+        score -= 50;
+      } else {
+        // Diminish errorRate weight if user has demonstrated consecutive correct streak
+        const effectiveErrorRate = hist.incorrect / Math.max(1, hist.attempts * (streak + 1));
+        score += effectiveErrorRate * 35;
 
-      // Recency check: if attempted less than 30 mins ago and was correct, lower priority
-      const hoursSinceLast = (now - new Date(hist.lastAttempt).getTime()) / (1000 * 60 * 60);
-      if (hoursSinceLast < 0.5 && hist.incorrect === 0 && (hist.skipped || 0) === 0) {
-        score -= 15;
+        // Skipped question boost only if user hasn't mastered it yet
+        if ((hist.skipped || 0) > 0 && streak === 0) {
+          score += Math.min(30, (hist.skipped || 0) * 15);
+        }
+        if (hist.incorrect > 0 && streak === 0) {
+          score += 10;
+        }
       }
     }
 
@@ -1028,7 +1081,9 @@ export async function getGrammarExercisesForReview(
 
   if (pairs.length === 0) return [];
 
-  // Score each pair based on SRS due status, error history, and natural variety
+  const now = Date.now();
+
+  // Score each pair based on SRS due status, error history, cooldown, and natural variety
   const scored = pairs.map((item) => {
     const isLessonDue = dueLessonIds.has(item.lesson.id);
     const hist = historyMap[item.exercise.id];
@@ -1036,16 +1091,40 @@ export async function getGrammarExercisesForReview(
     let score = isLessonDue ? 30 : 0;
 
     if (!hist || hist.attempts === 0) {
-      score += 15; // unseen
+      score += 20; // unseen questions get solid priority
     } else {
-      const errorRate = hist.incorrect / Math.max(1, hist.attempts);
-      score += errorRate * 35;
-      if (hist.incorrect > 0) score += 10;
-      if ((hist.skipped || 0) > 0) score += 20; // boost skipped questions for review
+      const streak = hist.consecutiveCorrect || 0;
+      const hoursSinceLast = hist.lastAttempt
+        ? (now - new Date(hist.lastAttempt).getTime()) / (1000 * 60 * 60)
+        : Infinity;
+      const cooldownHours = getGrammarExerciseCooldownHours(streak);
+
+      if (streak > 0 && hoursSinceLast < cooldownHours) {
+        // Still in cooldown period: strongly penalize so other exercises/lessons get priority
+        score -= 100;
+      } else {
+        // Cooldown passed: calculate urgency
+        // Diminish errorRate weight if user has demonstrated consecutive correct streak
+        const effectiveErrorRate = hist.incorrect / Math.max(1, hist.attempts * (streak + 1));
+        score += effectiveErrorRate * 35;
+
+        if (hist.incorrect > 0 && streak === 0) {
+          score += 10;
+        }
+        if ((hist.skipped || 0) > 0 && streak === 0) {
+          score += 20;
+        }
+
+        // Add gradual overdue bonus if it has been past its cooldown for a while
+        if (streak > 0 && cooldownHours > 0) {
+          const overdueFactor = Math.min(2, hoursSinceLast / cooldownHours);
+          score += overdueFactor * 5;
+        }
+      }
     }
 
     // Natural variety jitter
-    score += (Math.random() - 0.5) * 8;
+    score += (Math.random() - 0.5) * 6;
 
     return { item, score };
   });

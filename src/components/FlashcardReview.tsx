@@ -139,7 +139,26 @@ export default function FlashcardReview({
         queue={queue}
         currentWord={currentWord}
         practiceMode={practiceMode}
+        consecutiveCorrect={consecutiveCorrect}
       />
+
+      {/* Floating Celebration Toast - Clean and never obscures CardBadges */}
+      {celebration && (
+        <div
+          role="status"
+          className={`w-full mb-2.5 px-4 py-2 rounded-2xl shadow-lg border text-left animate-in fade-in slide-in-from-top-2 duration-200 shrink-0 ${
+            celebration.kind === "mastered"
+              ? "bg-emerald-600/95 border-emerald-400 text-white shadow-emerald-500/20"
+              : "bg-violet-600/95 border-violet-400 text-white shadow-violet-500/20"
+          }`}
+        >
+          <div className="text-xs font-bold flex items-center gap-1.5">
+            <span>{celebration.kind === "mastered" ? "🎉" : "🧠"}</span>
+            <span>{celebration.title}</span>
+          </div>
+          <div className="text-[11px] opacity-90 pl-5">{celebration.detail}</div>
+        </div>
+      )}
 
       {/* FLASHCARD BODY CONTAINER - Rock solid vertical height */}
       <div
@@ -154,28 +173,6 @@ export default function FlashcardReview({
             : "border-slate-200 dark:border-zinc-800"
         }`}
       >
-        {celebration && (
-          <div
-            role="status"
-            className={`absolute left-1/2 -translate-x-1/2 top-2 z-50 max-w-[90%] px-4 py-2 rounded-2xl shadow-lg border text-left animate-in fade-in slide-in-from-top-2 duration-200 ${
-              celebration.kind === "mastered"
-                ? "bg-emerald-600 border-emerald-400 text-white"
-                : "bg-violet-600 border-violet-400 text-white"
-            }`}
-          >
-            <div className="text-xs font-bold">{celebration.title}</div>
-            <div className="text-[11px] opacity-90">{celebration.detail}</div>
-          </div>
-        )}
-        {/* Combo is a visual cheer only: it earns no XP (speed and streaks of easy answers are not rewarded) */}
-        {consecutiveCorrect >= 3 && !celebration && (
-          <div className="absolute -top-3 -right-3 z-50 animate-bounce">
-            <div className="px-3 py-1 bg-gradient-to-r from-orange-500 to-rose-600 text-white font-black rounded-xl text-sm shadow-lg border-2 border-white/50 dark:border-zinc-800 flex items-center gap-1.5 transform rotate-3">
-              <span className="text-lg">🔥</span>
-              <span>Combo x{consecutiveCorrect}!</span>
-            </div>
-          </div>
-        )}
         {/* Top Badges */}
         <CardBadges
           currentWord={currentWord}
