@@ -62,6 +62,9 @@ describe("word CEFR tag", () => {
 });
 
 describe("assessUserProficiency", () => {
+  // A level's vocabulary is complete at 80% of the deck's words of that level (A1: 729 of 911, A2: 646 of 808)
+  const A1_TARGET = 729;
+  const A2_TARGET = 646;
   const knownWords = (count: number, cefr: string | null) =>
     Array.from({ length: count }, (_, i) =>
       makeWord(`${cefr ?? "x"}-${i}`, { cefr_level: cefr, srs: reviewSrs(15, 3) })
@@ -88,13 +91,13 @@ describe("assessUserProficiency", () => {
     vi.resetModules();
     const { assessUserProficiency } = await import("@/services/userProficiency");
     // Plenty of A1 words but no grammar yet
-    expect(assessUserProficiency(knownWords(45, "A1")).assessedLevel).toBe("A1");
+    expect(assessUserProficiency(knownWords(A1_TARGET + 5, "A1")).assessedLevel).toBe("A1");
 
     await masterGrammar("A1");
     // Grammar done but only 10 known A1 words (+ tagged words of other levels)
     expect(assessUserProficiency([...knownWords(10, "A1"), ...knownWords(20, "B2")]).assessedLevel).toBe("A1");
     // Both done -> working on A2
-    expect(assessUserProficiency(knownWords(45, "A1")).assessedLevel).toBe("A2");
+    expect(assessUserProficiency(knownWords(A1_TARGET, "A1")).assessedLevel).toBe("A2");
   });
 
   it("does not let XP or streak raise the level", async () => {
@@ -110,10 +113,10 @@ describe("assessUserProficiency", () => {
     vi.resetModules();
     const { assessUserProficiency } = await import("@/services/userProficiency");
     await masterGrammar("A1");
-    expect(assessUserProficiency(knownWords(35, null)).levelVocab.A1).toEqual({ known: 35, target: 40 });
-    const profile = assessUserProficiency([...knownWords(10, "A1"), ...knownWords(35, null)]);
-    expect(profile.levelVocab.A1).toEqual({ known: 40, target: 40 });
-    expect(profile.levelVocab.A2).toEqual({ known: 5, target: 60 });
+    expect(assessUserProficiency(knownWords(35, null)).levelVocab.A1).toEqual({ known: 35, target: A1_TARGET });
+    const profile = assessUserProficiency([...knownWords(10, "A1"), ...knownWords(A1_TARGET - 10 + 5, null)]);
+    expect(profile.levelVocab.A1).toEqual({ known: A1_TARGET, target: A1_TARGET });
+    expect(profile.levelVocab.A2).toEqual({ known: 5, target: A2_TARGET });
     expect(profile.assessedLevel).toBe("A2");
   });
 
@@ -128,7 +131,7 @@ describe("assessUserProficiency", () => {
     const lesson = g.getLessonProgress(GRAMMAR_LESSONS[0].id);
     expect(lesson.diagnosticStatus).toBe("unattempted");
     expect(lesson.mastery).toBe(50);
-    expect(assessUserProficiency(knownWords(45, "A1")).assessedLevel).toBe("A1");
+    expect(assessUserProficiency(knownWords(A1_TARGET, "A1")).assessedLevel).toBe("A1");
     // Practiced lessons still get scheduled reviews
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(Date.now() + 30 * 86400000));

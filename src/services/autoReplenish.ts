@@ -305,7 +305,7 @@ export async function triggerAutoReplenish(
 
     if (settings.autoGenerateGrammar) {
       try {
-        const levelLessons = GRAMMAR_LESSONS.filter((l) => l.level === targetLevel);
+        const levelLessons = GRAMMAR_LESSONS.filter((l) => l.level === targetLevel && !l.foundation);
         const grammarProgress = getAllGrammarProgress();
 
         // Sort lessons: prioritize unattempted or highest lapses

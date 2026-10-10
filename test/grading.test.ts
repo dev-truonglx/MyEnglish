@@ -13,6 +13,7 @@ import {
   setTypicalResponseTimes,
   slowThresholdMs,
   todayWorkFromCounts,
+  splitNewCardBudget,
   calculateXPReward,
   PRACTICE_XP,
 } from "@/services/smartReview";
@@ -119,11 +120,21 @@ describe("distractors never include synonyms", () => {
 describe("exercise choice follows memory strength and direction", () => {
   const ex = { examples: [{ id: "e", word_id: "w", sentence_en: "We cache results.", grammar_analysis: "" }] };
 
-  it("recognition: young cards get multiple choice; recall: young cards get cloze, mature ones spelling", () => {
+  it("recognition: young cards get multiple choice; recall climbs a ladder: letter tiles, cloze, then spelling", () => {
     const young = toCard(makeWord("cache", { ...ex, srs: reviewSrs(1.5, 2) }), "recognition");
     for (let i = 0; i < 10; i++) expect(selectExerciseType(young)).toBe("multiple_choice");
-    const recallYoung = toCard(
+    const recallNew = toCard(
+      makeWord("cache", { ...ex, srs: reviewSrs(10, 2), srsProduction: { word_id: "cache", ease_factor: 2.5, interval: 0, repetitions: 0, state: 0, reps: 0, next_review_date: new Date().toISOString() } }),
+      "production"
+    );
+    expect(selectExerciseType(recallNew)).toBe("letter_tiles");
+    const recallVeryYoung = toCard(
       makeWord("cache", { ...ex, srs: reviewSrs(10, 2), srsProduction: { ...(reviewSrs(1, 1) as never), word_id: "cache" } }),
+      "production"
+    );
+    expect(selectExerciseType(recallVeryYoung)).toBe("letter_tiles");
+    const recallYoung = toCard(
+      makeWord("cache", { ...ex, srs: reviewSrs(10, 2), srsProduction: { ...(reviewSrs(4, 2) as never), word_id: "cache" } }),
       "production"
     );
     for (let i = 0; i < 10; i++) expect(selectExerciseType(recallYoung)).toBe("cloze");
@@ -132,6 +143,14 @@ describe("exercise choice follows memory strength and direction", () => {
       "production"
     );
     for (let i = 0; i < 10; i++) expect(selectExerciseType(recallMature)).toBe("spelling");
+  });
+
+  it("picks formats deterministically, rotating with the review count", () => {
+    const at = (reps: number) =>
+      toCard(makeWord("cache", { ...ex, srs: { ...reviewSrs(10, reps), reps } as never }), "recognition");
+    expect(selectExerciseType(at(4))).toBe(selectExerciseType(at(4)));
+    const seen = new Set([0, 1, 2, 3].map((r) => selectExerciseType(at(r))));
+    expect(seen.size).toBe(4);
   });
 
   it("never picks sentence building (practice only)", () => {
@@ -173,12 +192,22 @@ describe("review priority and new-card allowance", () => {
     expect(newCardAllowance(61, 30)).toBe(0);
   });
 
-  it("counts today's work with the new-card budget", () => {
+  it("counts today's work with one new-card budget for both directions", () => {
+    // 10 a day, 7 already introduced: 3 left, shared between new words and new recall cards
     expect(todayWorkFromCounts({ reviews: 4, newWaiting: 36, newRecallWaiting: 3 }, { recognition: 7, production: 0 }, 10)).toEqual({
       reviews: 4,
-      newToday: 6,
-      total: 10,
+      newToday: 3,
+      total: 7,
     });
+  });
+
+  it("splits the daily new-card budget: new words get at least half, leftovers go to the other side", () => {
+    const none = { recognition: 0, production: 0 };
+    expect(splitNewCardBudget(10, none, { recognition: 20, production: 20 })).toEqual({ recognition: 5, production: 5 });
+    expect(splitNewCardBudget(10, none, { recognition: 20, production: 3 })).toEqual({ recognition: 7, production: 3 });
+    expect(splitNewCardBudget(10, none, { recognition: 2, production: 20 })).toEqual({ recognition: 2, production: 8 });
+    expect(splitNewCardBudget(5, { recognition: 3, production: 2 }, { recognition: 9, production: 9 })).toEqual(none);
+    expect(splitNewCardBudget(1, none, { recognition: 1, production: 1 })).toEqual({ recognition: 1, production: 0 });
   });
 });
 

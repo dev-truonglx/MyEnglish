@@ -94,8 +94,8 @@ export function suggestedBase(token: string): string {
   return t;
 }
 
-function isCommon(token: string): boolean {
-  return baseCandidates(token).some((b) => COMMON_WORDS.has(b));
+function isCommon(token: string, known: ReadonlySet<string>): boolean {
+  return baseCandidates(token).some((b) => known.has(b));
 }
 
 /** Acronyms (API, JSON), camelCase / snake_case identifiers and very short tokens are not vocabulary */
@@ -120,7 +120,15 @@ function sentenceSpans(text: string): Array<{ start: number; end: number; text: 
 
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9'’-]*[A-Za-z0-9]|[A-Za-z]/g;
 
-export function analyzeText(text: string, words: WordDetail[]): ReadingAnalysis {
+/**
+ * `knownCommon`: words treated as already known when they are not in the bank. Default: the ~900 very
+ * common words; a beginner (foundation mode) passes FUNCTION_WORDS so everyday words are suggested too.
+ */
+export function analyzeText(
+  text: string,
+  words: WordDetail[],
+  knownCommon: ReadonlySet<string> = COMMON_WORDS
+): ReadingAnalysis {
   // Single words: every inflected form -> the bank word
   const formIndex = new Map<string, WordDetail>();
   const phrases: WordDetail[] = [];
@@ -164,8 +172,8 @@ export function analyzeText(text: string, words: WordDetail[]): ReadingAnalysis 
     const bank = formIndex.get(lower);
     let cls: TokenClass;
     if (bank) cls = { kind: "bank", word: bank, status: bankStatus(bank) };
-    else if (/['’]/.test(raw) || !looksLikeVocabulary(raw) || isCommon(lower)) cls = { kind: "common" };
-    else if (lower.includes("-") && lower.split("-").every((part) => !part || isCommon(part))) cls = { kind: "common" };
+    else if (/['’]/.test(raw) || !looksLikeVocabulary(raw) || isCommon(lower, knownCommon)) cls = { kind: "common" };
+    else if (lower.includes("-") && lower.split("-").every((part) => !part || isCommon(part, knownCommon))) cls = { kind: "common" };
     else cls = { kind: "candidate", base: suggestedBase(lower) };
     spans.push({ start, end, cls });
   }

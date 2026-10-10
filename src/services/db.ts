@@ -1,10 +1,10 @@
 import Database from "@tauri-apps/plugin-sql";
 import type { Word, WordExample, SRSReview, CreateWordInput, WordDetail } from "@/types/database";
-import { initReviewLogsTable } from "./smartReview";
+import { initReviewLogsTable, registerWordForms } from "./smartReview";
 import { logTerminal } from "./logger";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 9;
+const SCHEMA_VERSION = 10;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -24,6 +24,9 @@ export const WORD_COLUMNS = [
   "cefr_level",
   "suspended",
   "created_at",
+  "catalog_id",
+  "variants",
+  "forms",
 ].join(", ");
 
 /** Columns selected for WordExample records */
@@ -34,6 +37,7 @@ export const EXAMPLE_COLUMNS = [
   "sentence_vn",
   "grammar_analysis",
   "source",
+  "focus",
 ].join(", ");
 
 /** Columns selected for SRSReview records */
@@ -430,6 +434,38 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_due ON mistakes(next_review_date);`);
   }
 
+  if (version < 10) {
+    // Vocabulary comes from the bundled Oxford 5000 deck (vocab_catalog). `words` holds the words met or
+    // waiting to be introduced, each linked to its catalog entry.
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS vocab_catalog (
+        id TEXT PRIMARY KEY,
+        word TEXT NOT NULL,
+        cefr TEXT NOT NULL,
+        list INTEGER,
+        study_order INTEGER NOT NULL,
+        freq INTEGER,
+        it INTEGER DEFAULT 0,
+        pos TEXT,
+        vn TEXT NOT NULL,
+        data TEXT NOT NULL
+      );
+    `);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_vocab_catalog_pick ON vocab_catalog(cefr, it, study_order);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_vocab_catalog_word ON vocab_catalog(word COLLATE NOCASE);`);
+    await tryExec(`CREATE TABLE IF NOT EXISTS vocab_catalog_meta (key TEXT PRIMARY KEY, value TEXT);`);
+    await tryExec(`ALTER TABLE words ADD COLUMN catalog_id TEXT;`);
+    // Spelling variants (colour -> color) and the deck's other forms (went, children, the forms its examples use)
+    await tryExec(`ALTER TABLE words ADD COLUMN variants TEXT;`);
+    await tryExec(`ALTER TABLE words ADD COLUMN forms TEXT;`);
+    // The exact form of the word an example uses ("is" for "be"), to blank it in cloze exercises
+    await tryExec(`ALTER TABLE examples ADD COLUMN focus TEXT;`);
+    // "may"/"May", "march"/"March", "it"/"IT" are different words of the deck: one row per catalog entry
+    await tryExec(`DROP INDEX IF EXISTS idx_words_word_unique;`);
+    await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_catalog ON words(catalog_id) WHERE catalog_id IS NOT NULL;`);
+    await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_free_unique ON words(LOWER(TRIM(word))) WHERE catalog_id IS NULL;`);
+  }
+
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
   // steps are retried on the next launch (later blocks still run, so new columns always exist)
   if (version < SCHEMA_VERSION) {
@@ -736,9 +772,10 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
     db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
-      `SELECT word_id, COUNT(*) as total,
-              SUM(CASE WHEN rating > 1 THEN 1 ELSE 0 END) as correct,
-              SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as wrong
+      // "known" rows (a word marked as already known) are no attempt, but show the word has a history
+      `SELECT word_id, SUM(CASE WHEN exercise_type != 'known' THEN 1 ELSE 0 END) as total,
+              SUM(CASE WHEN exercise_type != 'known' AND rating > 1 THEN 1 ELSE 0 END) as correct,
+              SUM(CASE WHEN exercise_type != 'known' AND rating = 1 THEN 1 ELSE 0 END) as wrong
        FROM review_logs WHERE word_id IN (${wordFilterSql}) AND exercise_type != 'intro' GROUP BY word_id;`,
       params
     ).catch(() => []),
@@ -754,6 +791,10 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
   const productionByWord = new Map(productionRows.map((row) => [row.word_id, row]));
   const logStatsByWord = new Map((logStats || []).map((row) => [row.word_id, row]));
 
+  for (const word of words) {
+    if (word.forms || word.variants) registerWordForms(word.word, parseJsonList(word.forms), parseJsonList(word.variants));
+  }
+
   return words.map((word) => {
     const srs = srsByWord.get(word.id) ?? defaultSrsFor(word);
     const prodSrs = productionByWord.get(word.id) ?? null;
@@ -766,7 +807,7 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
     let correctCount = 0;
     let wrongCount = 0;
 
-    if (logStat && logStat.total > 0) {
+    if (logStat) {
       totalAttempts = Number(logStat.total);
       correctCount = Number(logStat.correct || 0);
       wrongCount = Number(logStat.wrong || 0);
@@ -791,6 +832,90 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
       },
     };
   });
+}
+
+function parseJsonList(raw: string | null | undefined): string[] {
+  if (!raw) return [];
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** A word of the bundled deck as stored in `words` (the catalog side is in vocabCatalog.ts) */
+export interface CatalogWordInput {
+  catalogId: string;
+  word: string;
+  phonetic: string | null;
+  partOfSpeech: string;
+  meaningVn: string;
+  cefr: string;
+  variants: string[];
+  forms: string[];
+  examples: Array<{ en: string; vi: string; focus: string[] }>;
+  /** Also the recognition card's due date: new cards are introduced oldest first */
+  createdAt: string;
+}
+
+const CATALOG_INSERT_BATCH = 50;
+
+/**
+ * Add words of the deck with a few multi-row statements per batch (words, their recognition card, their
+ * examples) instead of several round trips per word. A catalog entry already in `words` is left as is.
+ * Returns catalog id -> word id for every item (new or already there).
+ */
+export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (items.length === 0) return result;
+  const db = await getDatabase();
+  for (let start = 0; start < items.length; start += CATALOG_INSERT_BATCH) {
+    const batch = items.slice(start, start + CATALOG_INSERT_BATCH);
+    const ids = batch.map((i) => i.catalogId);
+    const existing = await db.select<Array<{ id: string; catalog_id: string }>>(
+      `SELECT id, catalog_id FROM words WHERE catalog_id IN (${ids.map((_, i) => `$${i + 1}`).join(", ")})`,
+      ids
+    );
+    existing.forEach((r) => result.set(r.catalog_id, r.id));
+    const fresh = batch.filter((i) => !result.has(i.catalogId));
+    if (fresh.length === 0) continue;
+
+    const wordRows: unknown[] = [];
+    const srsRows: unknown[] = [];
+    const exampleRows: unknown[] = [];
+    for (const item of fresh) {
+      const id = crypto.randomUUID();
+      result.set(item.catalogId, id);
+      wordRows.push(
+        id, item.word, item.phonetic, item.partOfSpeech, item.meaningVn, "[]", "[]", "[]", item.cefr, item.cefr,
+        item.createdAt, item.catalogId, JSON.stringify(item.variants), JSON.stringify(item.forms)
+      );
+      srsRows.push(id, item.createdAt);
+      for (const ex of item.examples) {
+        exampleRows.push(crypto.randomUUID(), id, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus));
+      }
+    }
+    const values = (rows: unknown[], width: number) =>
+      Array.from({ length: rows.length / width }, (_, r) =>
+        `(${Array.from({ length: width }, (_, c) => `$${r * width + c + 1}`).join(", ")})`
+      ).join(", ");
+    await db.execute(
+      `INSERT OR IGNORE INTO words (id, word, phonetic, part_of_speech, meaning_vn, synonyms, antonyms, collocations,
+         topic, cefr_level, created_at, catalog_id, variants, forms)
+       VALUES ${values(wordRows, 14)}`,
+      wordRows
+    );
+    await db.execute(`INSERT OR IGNORE INTO srs_reviews (word_id, next_review_date) VALUES ${values(srsRows, 2)}`, srsRows);
+    for (let e = 0; e < exampleRows.length; e += 7 * 100) {
+      const chunk = exampleRows.slice(e, e + 7 * 100);
+      await db.execute(
+        `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source, focus) VALUES ${values(chunk, 7)}`,
+        chunk
+      );
+    }
+  }
+  return result;
 }
 
 /**
@@ -825,7 +950,12 @@ export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDet
  * Context exercises show it first: the learner's own context is the strongest memory hook.
  * Duplicates are ignored. Returns whether it was saved.
  */
-export async function addUserContextExample(wordId: string, sentence: string, sentenceVn?: string | null): Promise<boolean> {
+export async function addUserContextExample(
+  wordId: string,
+  sentence: string,
+  sentenceVn?: string | null,
+  source: "user_context" | "ai_memory_aid" = "user_context"
+): Promise<boolean> {
   const clean = sentence.replace(/\s+/g, " ").trim();
   if (clean.length < 8 || clean.length > 400) return false;
   const db = await getDatabase();
@@ -835,8 +965,8 @@ export async function addUserContextExample(wordId: string, sentence: string, se
   );
   if (existing.length > 0) return false;
   await db.execute(
-    `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source) VALUES ($1, $2, $3, $4, '', 'user_context')`,
-    [crypto.randomUUID(), wordId, clean, sentenceVn ?? null]
+    `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source) VALUES ($1, $2, $3, $4, '', $5)`,
+    [crypto.randomUUID(), wordId, clean, sentenceVn ?? null, source]
   );
   return true;
 }

@@ -12,6 +12,7 @@ import {
 import { recordDailyActivity } from "./streak";
 import { logTerminal } from "./logger";
 import { assessUserProficiency, getUserOverrideLevel } from "./userProficiency";
+import { findCatalogWord } from "./vocabCatalog";
 
 export { isPlaceholderMeaning };
 
@@ -22,7 +23,11 @@ const FAILED_MEANING = "Chờ phân tích (Lỗi phân tích AI - hãy nhấn Th
 const LEVEL_CACHE_TTL_MS = 10 * 60 * 1000;
 let cachedLevel: { level: string; at: number } | null = null;
 
-async function getActiveCefrLevel(): Promise<string> {
+/**
+ * The learner's level for AI prompts: their own choice, else the level assessed from their words.
+ * Used for content and for grading, so a beginner is never graded at the B1 fallback.
+ */
+export async function getActiveCefrLevel(): Promise<string> {
   const override = getUserOverrideLevel();
   if (override) return override;
   if (cachedLevel && Date.now() - cachedLevel.at < LEVEL_CACHE_TTL_MS) return cachedLevel.level;
@@ -208,11 +213,13 @@ class WordProcessingPipeline {
       logTerminal("Pipeline", `Đã nhận kết quả AI (${userLevel}) cho "${pendingItem.word}". Bắt đầu lưu vào SQLite...`);
       pendingItem.result = enrichment;
 
-      // 2. Save/Update primary enriched word to SQLite
+      // 2. Save/Update primary enriched word to SQLite. A word of the Oxford deck keeps Oxford's level
+      // rather than the AI's guess.
       const wordTopic = enrichment.topic || "General Tech";
+      const officialLevel = (await findCatalogWord(pendingItem.word).catch(() => []))[0]?.cefr ?? null;
       const wordId = await insertEnrichedWord({
         word: pendingItem.word,
-        cefr_level: enrichment.cefr ?? null,
+        cefr_level: officialLevel ?? enrichment.cefr ?? null,
         phonetic: enrichment.phonetic,
         part_of_speech: enrichment.part_of_speech,
         topic: wordTopic,

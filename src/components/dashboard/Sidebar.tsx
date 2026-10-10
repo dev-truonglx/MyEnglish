@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Sparkles,
@@ -19,6 +19,9 @@ import {
   GraduationCap,
   BookOpenText,
   NotebookPen,
+  Sunrise,
+  AudioLines,
+  Layers,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PipelineItem } from "@/services/pipeline";
@@ -28,6 +31,7 @@ import { CURRENT_VERSION, useUpdateStore } from "@/services/updateService";
 import { getXPState, type XPState } from "@/services/smartReview";
 import { getDueGrammarLessons } from "@/services/grammarService";
 import { useWordsStore } from "@/stores/wordsStore";
+import { AI_VOCAB_ENABLED } from "@/services/features";
 import type { DashboardTab, LibraryStats } from "./shared";
 
 interface SidebarProps {
@@ -97,6 +101,41 @@ export default function Sidebar({
     window.addEventListener("myenglish-theme-changed", onThemeChanged);
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
   }, []);
+
+  const countBadge = (n: number, highlight = false) =>
+    n > 0 ? (
+      <span
+        className={`text-[11px] font-mono px-1.5 py-0.5 rounded-full font-semibold ${highlight
+          ? "bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800"
+          : "bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300"
+          }`}
+      >
+        {n}
+      </span>
+    ) : null;
+
+  const navItems: Array<{ tab: DashboardTab; label: string; icon: typeof BookOpen; iconClass?: string; badge?: ReactNode }> = [
+    { tab: "today", label: "Hôm nay", icon: Sunrise, iconClass: "text-amber-500" },
+    { tab: "review", label: "Ôn tập", icon: Flame, iconClass: "text-orange-400", badge: countBadge(dueCount, true) },
+    // Words met so far (the words waiting to be introduced are not the learner's yet)
+    { tab: "library", label: "Sổ từ", icon: BookOpen, badge: countBadge(words.filter((w) => (w.srs?.reps ?? 0) > 0).length) },
+    { tab: "grammar", label: "Ngữ pháp", icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
+    { tab: "pronunciation", label: "Phát âm", icon: AudioLines, iconClass: "text-violet-500" },
+    { tab: "reading", label: "Đọc", icon: BookOpenText },
+    { tab: "writing", label: "Viết & sổ lỗi", icon: NotebookPen },
+    AI_VOCAB_ENABLED
+      ? {
+          tab: "capture",
+          label: "Thêm từ bằng AI",
+          icon: Sparkles,
+          badge: pipelineQueue.some((i) => i.status === "analyzing") ? (
+            <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+          ) : null,
+        }
+      : { tab: "capture", label: "Lộ trình từ vựng", icon: Layers, iconClass: "text-cyan-500" },
+    { tab: "analytics", label: "Tiến độ", icon: BarChart3, iconClass: "text-emerald-400" },
+    { tab: "guide", label: "Cài đặt", icon: Terminal, iconClass: "text-cyan-500" },
+  ];
 
   const handleToggleQuickInput = async () => {
     try {
@@ -198,7 +237,7 @@ export default function Sidebar({
                 </button>
               )}
             </div>
-            <p className="text-[11px] text-slate-500 dark:text-zinc-400">Contextual Tech Vocab</p>
+            <p className="text-[11px] text-slate-500 dark:text-zinc-400">Tiếng Anh cho dân IT</p>
           </div>
         </div>
 
@@ -279,134 +318,28 @@ export default function Sidebar({
             </div>
           )}
 
-        {/* Navigation Links */}
+        {/* Navigation Links: Vietnamese labels, today first */}
         <nav className="space-y-1">
-          <button
-            onClick={() => setActiveTab("library")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "library"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <BookOpen className="w-4 h-4" />
-              <span>Vocabulary Library</span>
-            </div>
-            <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300">
-              {words.length}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("capture")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "capture"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4" />
-              <span>Quick Add (Gemini AI)</span>
-            </div>
-            {pipelineQueue.some((i) => i.status === "analyzing") && (
-              <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("reading")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "reading"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <BookOpenText className="w-4 h-4" />
-              <span>Đọc (Reading)</span>
-            </div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("writing")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "writing"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <NotebookPen className="w-4 h-4" />
-              <span>Viết & Sổ lỗi</span>
-            </div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("review")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "review"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Flame className="w-4 h-4 text-orange-400" />
-              <span>Daily Review (FSRS)</span>
-            </div>
-            {dueCount > 0 && (
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 font-semibold animate-pulse">
-                {dueCount}
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("grammar")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "grammar"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <GraduationCap className="w-4 h-4 text-cyan-500" />
-              <span>Grammar (A1-C1)</span>
-            </div>
-            {grammarDueCount > 0 ? (
-              <span className="text-[11px] font-mono px-1.5 py-0.5 rounded-full bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border border-orange-200 dark:border-orange-800 font-semibold animate-pulse">
-                {grammarDueCount}
-              </span>
-            ) : (
-              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400">
-                CEFR
-              </span>
-            )}
-          </button>
-
-          <button
-            onClick={() => setActiveTab("analytics")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "analytics"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <BarChart3 className="w-4 h-4 text-emerald-400" />
-              <span>Streak & Heatmap</span>
-            </div>
-          </button>
-
-          <button
-            onClick={() => setActiveTab("guide")}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${activeTab === "guide"
-              ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
-              }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Terminal className="w-4 h-4 text-cyan-500" />
-              <span>Settings</span>
-            </div>
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-cyan-100 dark:bg-cyan-950 text-cyan-700 dark:text-cyan-300">
-              Setup
-            </span>
-          </button>
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            const active = activeTab === item.tab;
+            return (
+              <button
+                key={item.tab}
+                onClick={() => setActiveTab(item.tab)}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${active
+                  ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
+                  : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
+                  }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Icon className={`w-4 h-4 ${item.iconClass ?? ""}`} />
+                  <span>{item.label}</span>
+                </div>
+                {item.badge}
+              </button>
+            );
+          })}
         </nav>
 
         {/* Quick Learning Stats Widget */}
@@ -414,7 +347,7 @@ export default function Sidebar({
           <div className="flex items-center justify-between text-xs font-medium text-slate-800 dark:text-zinc-300">
             <span className="flex items-center gap-1.5">
               <Flame className="w-3.5 h-3.5 text-orange-400" />
-              <span>Streak & Tiến độ</span>
+              <span>Chuỗi & hôm nay</span>
             </span>
             <span className="font-mono text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1.5">
               <span>🔥 {streakStats.currentStreak} ngày</span>
@@ -429,14 +362,20 @@ export default function Sidebar({
             </span>
           </div>
 
-          {/* Daily Goal Progress Bar */}
+          {/* Minimum day (1 answer keeps the streak) + daily goal */}
           <div className="space-y-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
+              <span>Tối thiểu 1 câu</span>
+              <span className={streakStats.todayCount > 0 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : ""}>
+                {streakStats.todayCount > 0 ? "✓ Đã giữ chuỗi" : "Chưa học hôm nay"}
+              </span>
+            </div>
             <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-400">
-              <span>Mục tiêu hôm nay</span>
+              <span>Mục tiêu</span>
               <span>
                 {streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
                   ? "Đã ôn hết từ đến hạn ✓"
-                  : `${streakStats.todayCount}/${streakStats.dailyGoal} từ`}
+                  : `${streakStats.todayCount}/${streakStats.dailyGoal} câu`}
               </span>
             </div>
             <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
@@ -480,7 +419,7 @@ export default function Sidebar({
               <div className={`text-base font-bold font-mono ${libraryStats.leechCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-zinc-500"}`}>
                 {libraryStats.leechCount}
               </div>
-              <div className="text-[10px] text-slate-500 dark:text-zinc-400">Leech</div>
+              <div className="text-[10px] text-slate-500 dark:text-zinc-400" title="Từ đã quên nhiều lần">Hay quên</div>
             </div>
           </div>
         </div>

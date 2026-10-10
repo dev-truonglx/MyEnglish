@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import "@/index.css";
 import { getDatabase } from "@/services/db";
-import { saveReminderSettings } from "@/services/reminderSettings";
+import { buildNudgePayload, saveReminderSettings } from "@/services/reminderSettings";
 import FocusReviewModal from "@/components/FocusReviewModal";
 import ReviewNudge from "@/components/ReviewNudge";
 import WeeklyProgressCard from "@/components/WeeklyProgressCard";
@@ -25,6 +25,16 @@ import OnboardingFlow from "@/components/OnboardingFlow";
 import ReadingTab from "@/components/dashboard/ReadingTab";
 import WritingTab from "@/components/dashboard/WritingTab";
 import { saveMistakes } from "@/services/mistakes";
+import TodayTab from "@/components/dashboard/TodayTab";
+import PronunciationTab from "@/components/dashboard/PronunciationTab";
+import VocabTab from "@/components/dashboard/VocabTab";
+import VocabSetupScreen from "@/components/VocabSetupScreen";
+import { setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
+import { loadCatalogDistractors } from "@/services/vocabCatalog";
+import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
+import PlacementTest from "@/components/PlacementTest";
+import { calculateStreakAndGoal } from "@/services/streak";
+import GrammarHub from "@/components/grammar/GrammarHub";
 
 const DAY = 864e5;
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -85,6 +95,43 @@ function Flash() {
       <FlashcardReview wordsToReview={state.session} distractorPool={state.all} onFinish={() => {}} onExit={() => {}} />
     </div>
   ) : null;
+}
+
+// ?deckflash: a session of the Oxford deck's first A1 words (new words: introduction card with "Đã biết")
+function DeckFlash() {
+  const [state, setState] = useState<{ session: any[]; pool: any[] } | null>(null);
+  React.useEffect(() => {
+    (async () => {
+      const db = await getDatabase();
+      await db.execute(`DELETE FROM words WHERE catalog_id IS NULL`);
+      setStudyLevels(["A1"]);
+      await topUpNewWords();
+      const due = await getDueWordsFromDb();
+      const session = buildReviewSession(due, await getNewCardsIntroducedToday());
+      const pool = [...(await getAllWords()), ...(await loadCatalogDistractors(["A1"]))];
+      (window as any).__session = session.map((c: any) => `${c.word}:${c.direction}`);
+      setState({ session, pool });
+    })();
+  }, []);
+  return state ? (
+    <div className="h-screen">
+      <FlashcardReview wordsToReview={state.session} distractorPool={state.pool} onFinish={() => {}} onExit={() => {}} />
+    </div>
+  ) : <div>loading deck…</div>;
+}
+
+// ?levels: the vocabulary path (levels, progress, skimming, search) with A1–A2 chosen
+function Levels() {
+  const [ready, setReady] = useState(false);
+  React.useEffect(() => {
+    (async () => {
+      setStudyLevels(["A1", "A2"]);
+      await topUpNewWords();
+      useWordsStore.setState({ words: await getAllWords() });
+      setReady(true);
+    })();
+  }, []);
+  return ready ? <VocabTab /> : <div>loading deck…</div>;
 }
 
 function Insights() {
@@ -175,12 +222,45 @@ function Onboarding() {
     <OnboardingFlow
       onFinish={async (startNow) => {
         const words = await getAllWords();
-        const summary = { startNow, words: words.length, first: words.filter((w) => w.topic !== "DevOps" && w.topic !== "Food").sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(0, 6).map((w) => `${w.word}:${w.cefr_level}`) };
+        const summary = { startNow, words: words.length, first: words.filter((w) => w.catalog_id).sort((a, b) => a.created_at.localeCompare(b.created_at)).slice(0, 9).map((w) => `${w.word}:${w.cefr_level}`) };
         (window as any).__onboarding = summary;
         setDone(JSON.stringify(summary, null, 2));
       }}
     />
   );
+}
+
+// ?today: the opening screen with the seeded words
+function Today() {
+  const [words, setWords] = useState<Awaited<ReturnType<typeof getAllWords>> | null>(null);
+  React.useEffect(() => {
+    getAllWords().then(setWords);
+  }, []);
+  if (!words) return null;
+  const work = summarizeTodayWork(words, { recognition: 0, production: 0 });
+  return (
+    <TodayTab
+      words={words}
+      todayWork={work}
+      comeback={null}
+      streakStats={calculateStreakAndGoal(words)}
+      onStart={() => ((window as any).__started = true)}
+      setActiveTab={(t) => ((window as any).__tab = t)}
+    />
+  );
+}
+
+// ?tiles: the letter-tiles exercise on "deploy"; the result is exposed on window.__tiles
+function Tiles() {
+  const [word, setWord] = useState<Awaited<ReturnType<typeof getAllWords>>[number] | null>(null);
+  React.useEffect(() => {
+    getAllWords().then((ws) => setWord(ws.find((w) => w.word === "deploy") ?? null));
+  }, []);
+  return word ? (
+    <div className="p-6">
+      <LetterTilesExercise word={word} onSpeak={() => {}} onComplete={(ok, attempts, rating) => ((window as any).__tiles = { ok, attempts, rating })} />
+    </div>
+  ) : null;
 }
 
 // ?reading: the reading tab with a sample text already pasted
@@ -233,7 +313,9 @@ function Writing() {
 function App() {
   const [ready, setReady] = useState(false);
   React.useEffect(() => {
-    saveReminderSettings({ includeGrammar: false, wordsPerSession: 3, snoozeMinutes: 10, intervalMinutes: 30 });
+    // ?grammar: the popup mixes in grammar questions (a fresh learner meets the first A1 lesson as an intro)
+    const withGrammar = new URLSearchParams(location.search).has("grammar");
+    saveReminderSettings({ includeGrammar: withGrammar, wordsPerSession: withGrammar ? 5 : 3, snoozeMinutes: 10, intervalMinutes: 30 });
     saveMnemonic("w-deploy", "Deploy = đẩy (ploy) code ra (de) server", "Triển khai");
     seed()
       .then(async () => {
@@ -255,6 +337,40 @@ function App() {
   if (q.has("onboarding")) return <Onboarding />;
   if (q.has("reading")) return <Reading />;
   if (q.has("writing")) return <Writing />;
+  if (q.has("today")) return <Today />;
+  if (q.has("levels")) return <Levels />;
+  if (q.has("deckflash")) return <DeckFlash />;
+  if (q.has("setup")) return <VocabSetupScreen mode="migrate" onDone={() => ((window as any).__setupDone = true)} />;
+  if (q.has("pron")) return <PronunciationTab />;
+  if (q.has("lesson")) return <GrammarHub initialLessonId={q.get("lesson") || "found-to-be"} />;
+  if (q.has("tiles")) return <Tiles />;
+  if (q.has("placement"))
+    return <PlacementTest onClose={() => {}} onDone={(level) => ((window as any).__placement = level)} />;
+  if (q.has("nudge") && q.has("quiz")) {
+    // ?nudge&quiz: the corner card opens on its one-question quiz (payload served as the native app would)
+    (window as any).__TAURI_INTERNALS__ = {};
+    (globalThis as any).__tauriInvoke = (cmd: string) => {
+      if (cmd === "take_review_nudge_payload") {
+        return {
+          ...buildNudgePayload(5),
+          motivation: { tone: "level_1_encouraging", title: "Một câu nhanh?", message: "1 câu rồi quay lại việc.", mascotMood: "happy", isMicroQuizPreferred: true },
+          microQuiz: {
+            wordId: "w-deploy",
+            word: "deploy",
+            direction: "recognition",
+            targetMeaning: "Triển khai",
+            options: [
+              { id: "a", text: "Hoàn tác", isCorrect: false },
+              { id: "b", text: "Triển khai", isCorrect: true },
+              { id: "c", text: "Phát hành", isCorrect: false },
+            ],
+          },
+        };
+      }
+      if (cmd === "is_cursor_over_nudge") return false;
+      return null;
+    };
+  }
   return q.has("nudge") ? <ReviewNudge onDone={() => ((window as any).__nudgeDone = true)} /> : <FocusReviewModal isPreview />;
 }
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

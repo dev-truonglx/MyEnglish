@@ -1,8 +1,12 @@
-import { Award, TrendingUp, Zap } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Award, CalendarCheck, RotateCcw, Sparkles, Zap } from "lucide-react";
 import type { FSRSResult } from "@/services/srs";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import type { XPState } from "@/services/smartReview";
 import type { SessionStats } from "@/hooks/useReviewSession";
+import { loadWorkloadForecast } from "@/services/progress";
+import { minutesFor } from "@/services/comeback";
+import { isSimpleMode } from "@/services/learnerProfile";
 
 interface SessionSummaryProps {
   wordsToReview: Array<WordDetail | ReviewCard>;
@@ -13,7 +17,11 @@ interface SessionSummaryProps {
   onFinish: () => void;
 }
 
-/** Session Completed view with Learning Evaluation Metrics */
+/**
+ * End of a session. Starts with what went well (remembered, new words met, words now in long-term
+ * memory), presents the words to revisit as normal ("they come back soon"), and closes the day with
+ * tomorrow's workload. No red error counts.
+ */
 export default function SessionSummary({
   wordsToReview,
   sessionStats,
@@ -22,27 +30,30 @@ export default function SessionSummary({
   lastResult,
   onFinish,
 }: SessionSummaryProps) {
-  const totalWords = wordsToReview.length || 1; // unique words (re-queued cards are not double counted)
-  const masteryPercent = Math.min(
-    100,
-    Math.round(
-      ((sessionStats.firstTryCorrect * 1 + sessionStats.retryCorrect * 0.65) / totalWords) * 100
-    )
-  );
+  const simple = isSimpleMode();
+  const [tomorrow, setTomorrow] = useState<number | null>(null);
+  useEffect(() => {
+    loadWorkloadForecast(2)
+      .then((f) => setTomorrow(f.days[1]?.reviews ?? 0))
+      .catch(() => setTomorrow(null));
+  }, []);
 
-  let evaluationTitle = "Xuất sắc! Nhớ được gần hết ngay lần đầu 🌟";
-  let evaluationDesc = "Bạn đã nhớ và gõ chính xác hầu hết từ vựng ngay từ lần đầu tiên.";
-  let evaluationBadge = "bg-emerald-50 dark:bg-emerald-950/60 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300";
+  const remembered = sessionStats.firstTryCorrect + sessionStats.retryCorrect;
+  const newWords = wordsToReview.filter((w) => (w.srs?.reps ?? 0) === 0).length;
+  const comingBack = sessionStats.revealedCount + sessionStats.skippedCount;
+  const totalWords = wordsToReview.length || 1;
+  const rememberedShare = remembered / totalWords;
 
-  if (masteryPercent < 50) {
-    evaluationTitle = "Cần củng cố thêm từ vựng 📚";
-    evaluationDesc = "Nhiều từ cần xem lại hoặc thử lại. Hệ thống FSRS sẽ tối ưu lịch lặp lại sớm để giúp bạn ghi nhớ sâu.";
-    evaluationBadge = "bg-amber-50 dark:bg-amber-950/60 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300";
-  } else if (masteryPercent < 80) {
-    evaluationTitle = "Khá tốt! Phản xạ từ vựng ổn định 🎯";
-    evaluationDesc = "Bạn đã hoàn thành tốt các câu hỏi sau một vài lần thử hoặc xem gợi ý.";
-    evaluationBadge = "bg-blue-50 dark:bg-blue-950/60 border-blue-200 dark:border-blue-800 text-blue-800 dark:text-blue-300";
-  }
+  const headline =
+    rememberedShare >= 0.8
+      ? "Rất tốt! Bạn nhớ được gần hết 🌟"
+      : rememberedShare >= 0.5
+        ? "Tốt lắm, bạn đang tiến bộ đều 🎯"
+        : "Phiên này hơi khó, và như vậy là bình thường 💪";
+  const headlineNote =
+    rememberedShare >= 0.5
+      ? "Mỗi lần nhớ lại được là trí nhớ chắc thêm một chút."
+      : "Những từ chưa nhớ sẽ quay lại sớm. Gặp lại vài lần là não tự ghi nhớ, đó chính là cách học này hoạt động.";
 
   return (
     <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-xl mx-auto text-center space-y-5 animate-in zoom-in-95 duration-200">
@@ -51,98 +62,71 @@ export default function SessionSummary({
       </div>
 
       <div className="space-y-1">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-          Phiên ôn tập hoàn tất! 🎉
-        </h2>
-        <p className="text-xs text-slate-600 dark:text-zinc-400">
-          Bạn đã ôn tập thành công <span className="text-emerald-600 dark:text-emerald-400 font-bold">{reviewCount}</span> từ vựng.
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Xong phiên học! 🎉</h2>
+        <p className="text-sm text-slate-600 dark:text-zinc-400">
+          Bạn vừa học <span className="text-emerald-600 dark:text-emerald-400 font-bold">{reviewCount}</span> câu.
         </p>
       </div>
 
-      {/* What this session did for long-term memory */}
-      {(sessionStats.masteredWords.length > 0 || sessionStats.rescuedCount > 0) && (
-        <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 text-left space-y-1.5">
-          {sessionStats.masteredWords.length > 0 && (
-            <div className="text-sm font-bold text-emerald-800 dark:text-emerald-200">
-              🎉 {sessionStats.masteredWords.length} từ vào trí nhớ dài hạn: {sessionStats.masteredWords.join(", ")}
-            </div>
-          )}
-          {sessionStats.rescuedCount > 0 && (
-            <div className="text-xs text-emerald-700 dark:text-emerald-300">
-              🧠 Cứu kịp {sessionStats.rescuedCount} từ đang phai dần — đây là những lượt ôn giá trị nhất.
-            </div>
-          )}
+      {/* What went well, first */}
+      <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 text-left space-y-2">
+        <div className="text-base font-bold text-emerald-800 dark:text-emerald-200">{headline}</div>
+        <p className="text-sm text-slate-700 dark:text-zinc-300">{headlineNote}</p>
+        <div className="grid grid-cols-3 gap-2 pt-1">
+          <div className="p-2.5 rounded-xl bg-white/80 dark:bg-zinc-900/60">
+            <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{remembered}</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">từ nhớ được</div>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white/80 dark:bg-zinc-900/60">
+            <div className="text-xl font-bold text-cyan-600 dark:text-cyan-400">{newWords}</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">từ mới đã gặp</div>
+          </div>
+          <div className="p-2.5 rounded-xl bg-white/80 dark:bg-zinc-900/60">
+            <div className="text-xl font-bold text-slate-700 dark:text-zinc-200">{comingBack}</div>
+            <div className="text-xs text-slate-500 dark:text-zinc-400">từ sẽ quay lại sớm</div>
+          </div>
         </div>
-      )}
-
-      {/* Learning Evaluation Card */}
-      <div className={`w-full p-4 rounded-2xl border text-left space-y-2 ${evaluationBadge}`}>
-        <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 font-mono">
-            <TrendingUp className="w-4 h-4" />
-            Đánh giá mức độ ghi nhớ
-          </span>
-          <span className="text-base font-extrabold font-mono">
-            {masteryPercent}%
-          </span>
-        </div>
-        <div className="text-sm font-bold text-slate-900 dark:text-white">
-          {evaluationTitle}
-        </div>
-        <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed">
-          {evaluationDesc}
-        </p>
+        {sessionStats.masteredWords.length > 0 && (
+          <div className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+            🎉 {sessionStats.masteredWords.length} từ vào trí nhớ dài hạn: {sessionStats.masteredWords.join(", ")}
+          </div>
+        )}
+        {sessionStats.rescuedCount > 0 && (
+          <div className="text-xs text-emerald-700 dark:text-emerald-300">
+            🧠 Nhớ lại kịp {sessionStats.rescuedCount} từ đang phai dần: đây là những lượt ôn giá trị nhất.
+          </div>
+        )}
+        {sessionStats.leechesSlain > 0 && (
+          <div className="text-xs text-emerald-700 dark:text-emerald-300">
+            💪 Nhớ được {sessionStats.leechesSlain} từ trước đây hay quên.
+          </div>
+        )}
       </div>
 
-      {/* Detailed Breakdown Scorecard */}
-      <div className="w-full grid grid-cols-2 sm:grid-cols-4 gap-2 text-left">
-        <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
-          <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Đúng lần đầu</div>
-          <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-            {sessionStats.firstTryCorrect} <span className="text-[10px] text-slate-400 font-normal">từ</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
-          <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Đúng sau thử lại</div>
-          <div className="text-base font-bold text-blue-600 dark:text-blue-400 font-mono">
-            {sessionStats.retryCorrect} <span className="text-[10px] text-slate-400 font-normal">từ</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
-          <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Xem đáp án</div>
-          <div className="text-base font-bold text-amber-600 dark:text-amber-400 font-mono">
-            {sessionStats.revealedCount} <span className="text-[10px] text-slate-400 font-normal">từ</span>
-          </div>
-        </div>
-        <div className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800">
-          <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Bỏ qua / Sai</div>
-          <div className="text-base font-bold text-slate-700 dark:text-zinc-300 font-mono">
-            {sessionStats.skippedCount} <span className="text-[10px] text-slate-400 font-normal">từ</span>
-          </div>
+      {/* Close the day */}
+      <div className="w-full p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left flex items-start gap-3">
+        <CalendarCheck className="w-5 h-5 text-cyan-600 dark:text-cyan-400 shrink-0 mt-0.5" />
+        <div className="text-sm text-slate-700 dark:text-zinc-300">
+          {tomorrow === null
+            ? "Hẹn gặp lại lần ôn tới."
+            : tomorrow > 0
+              ? `Hẹn mai: ${tomorrow} thẻ, khoảng ${minutesFor(tomorrow)} phút. App sẽ nhắc đúng lúc.`
+              : "Mai chưa có thẻ nào đến hạn. Học thêm từ mới nếu bạn muốn."}
         </div>
       </div>
 
-      {sessionStats.totalWrongAttempts > 0 && (
-        <div className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
-          Tổng số lần nhập sai trong phiên: <span className="text-rose-500 font-bold">{sessionStats.totalWrongAttempts}</span> lần
-        </div>
-      )}
-
-      {/* XP Earned Summary */}
-      <div className="w-full p-4 rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/40 dark:to-yellow-950/40 text-left space-y-2">
+      {/* XP */}
+      <div className="w-full p-3.5 rounded-2xl border border-amber-200 dark:border-amber-800/60 bg-gradient-to-r from-amber-50 to-yellow-50 dark:from-amber-950/40 dark:to-yellow-950/40 text-left space-y-2">
         <div className="flex items-center justify-between">
-          <span className="text-xs font-bold uppercase tracking-wider flex items-center gap-1.5 font-mono text-amber-800 dark:text-amber-300">
-            <Zap className="w-4 h-4" />
-            XP Earned
+          <span className="text-xs font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
+            <Zap className="w-4 h-4" /> Điểm kinh nghiệm
           </span>
-          <span className="text-lg font-extrabold font-mono text-amber-600 dark:text-amber-400">
-            +{sessionStats.totalXPEarned} XP
-          </span>
+          <span className="text-lg font-extrabold font-mono text-amber-600 dark:text-amber-400">+{sessionStats.totalXPEarned} XP</span>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5 text-xs font-mono text-amber-700 dark:text-amber-300">
+          <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">
             <span>{xpState.rankEmoji}</span>
-            <span className="font-semibold">Level {xpState.level}</span>
+            <span className="font-semibold">Cấp {xpState.level}</span>
             <span className="text-amber-500">({xpState.rank})</span>
           </div>
           <div className="flex-1 h-2 rounded-full bg-amber-200/50 dark:bg-amber-900/40 overflow-hidden">
@@ -151,45 +135,31 @@ export default function SessionSummary({
               style={{ width: `${xpState.progressPercent}%` }}
             />
           </div>
-          <span className="text-[10px] font-mono text-amber-600 dark:text-amber-400">
-            {xpState.currentLevelXP}/{xpState.nextLevelXP}
-          </span>
         </div>
-        {sessionStats.leechesSlain > 0 && (
-          <div className="text-xs font-medium text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
-            🗡️ Leech Slayer! Đã chinh phục <span className="font-bold">{sessionStats.leechesSlain}</span> từ khó
-          </div>
-        )}
       </div>
 
-      {lastResult && (
-        <div className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <div>
-            <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Độ bền (S)</div>
-            <div className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">{lastResult.stability}d</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Độ khó (D)</div>
-            <div className="text-sm font-bold text-amber-600 dark:text-amber-400 font-mono">{lastResult.difficulty}/10</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Chu kỳ tới</div>
-            <div className="text-sm font-bold text-slate-900 dark:text-white font-mono">{lastResult.interval}d</div>
-          </div>
-          <div>
-            <div className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">Số lần ôn</div>
-            <div className="text-sm font-bold text-emerald-600 dark:text-emerald-400 font-mono">{lastResult.repetitions}</div>
-          </div>
+      {!simple && lastResult && (
+        <div className="w-full p-3 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-600 dark:text-zinc-400 flex flex-wrap justify-between gap-2 font-mono">
+          <span>Thẻ cuối: S={lastResult.stability}d</span>
+          <span>D={lastResult.difficulty}/10</span>
+          <span>Chu kỳ {lastResult.interval}d</span>
+          <span>{lastResult.repetitions} lần ôn</span>
         </div>
       )}
 
-      <div className="flex gap-3 pt-2">
+      <div className="flex gap-3 pt-1">
         <button
           onClick={onFinish}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 !text-white text-xs font-semibold shadow-lg shadow-cyan-500/25 transition-all"
+          autoFocus
+          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 !text-white text-sm font-semibold shadow-lg shadow-cyan-500/25 transition-all inline-flex items-center gap-2"
         >
-          Quay lại Thư viện từ
+          <Sparkles className="w-4 h-4" /> Hoàn tất
         </button>
+        {comingBack > 0 && (
+          <span className="self-center text-xs text-slate-500 dark:text-zinc-400 inline-flex items-center gap-1">
+            <RotateCcw className="w-3.5 h-3.5" /> Từ chưa nhớ đã được hẹn lại
+          </span>
+        )}
       </div>
     </div>
   );

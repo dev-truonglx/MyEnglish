@@ -154,9 +154,17 @@ export default function DiagnosticChallenge({
     }
   }, [currentIndex, isEvaluated, isCompletedAll, currentExercise]);
 
+  // The diagnostic is scored on the lesson's own curated questions only: saved AI / mined questions
+  // added to the list are extra practice (unchecked content must not decide the level of a lesson)
+  const scoredList = useMemo(() => {
+    if (!isDiagnosticMode) return exerciseList;
+    const curated = new Set(lesson.diagnosticExercises.map((e) => e.id));
+    return exerciseList.filter((e) => curated.has(e.id));
+  }, [exerciseList, isDiagnosticMode, lesson.diagnosticExercises]);
+
   const correctCount = useMemo(
-    () => exerciseList.reduce((n, ex) => n + (outcomes[ex.id] ? 1 : 0), 0),
-    [exerciseList, outcomes]
+    () => scoredList.reduce((n, ex) => n + (outcomes[ex.id] ? 1 : 0), 0),
+    [scoredList, outcomes]
   );
 
   // Append new exercises after the current question without reshuffling what the user already saw
@@ -276,7 +284,7 @@ export default function DiagnosticChallenge({
 
     finishedRef.current = true;
     setIsCompletedAll(true);
-    const total = exerciseList.length;
+    const total = scoredList.length;
     const scorePercent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
     const passedFirstTry = total > 0 && correctCount === total;
 
@@ -291,7 +299,7 @@ export default function DiagnosticChallenge({
     } finally {
       advancingRef.current = false;
     }
-  }, [isEvaluated, currentIndex, exerciseList.length, correctCount, isDiagnosticMode, lesson.id]);
+  }, [isEvaluated, currentIndex, exerciseList.length, scoredList.length, correctCount, isDiagnosticMode, lesson.id]);
 
   const handleRestart = useCallback(() => {
     loadExerciseList();
@@ -309,7 +317,7 @@ export default function DiagnosticChallenge({
       if (isCompletedAll) {
         if (e.key === "Enter") {
           e.preventDefault();
-          const scorePercent = exerciseList.length > 0 ? Math.round((correctCount / exerciseList.length) * 100) : 0;
+          const scorePercent = scoredList.length > 0 ? Math.round((correctCount / scoredList.length) * 100) : 0;
           if (onNextLesson && scorePercent >= GRAMMAR_PASS_SCORE) {
             onNextLesson();
           } else {
@@ -353,7 +361,7 @@ export default function DiagnosticChallenge({
     isEvaluated,
     isCompletedAll,
     currentExercise,
-    exerciseList.length,
+    scoredList.length,
     correctCount,
     onNextLesson,
     handleNextQuestion,
@@ -443,7 +451,7 @@ export default function DiagnosticChallenge({
 
   // Completion Screen
   if (isCompletedAll) {
-    const total = exerciseList.length;
+    const total = scoredList.length;
     const scorePercent = total > 0 ? Math.round((correctCount / total) * 100) : 0;
     const passed = scorePercent >= GRAMMAR_PASS_SCORE;
     const skippedCount = exerciseList.filter((e) => skippedIds.has(e.id)).length;
@@ -769,7 +777,7 @@ export default function DiagnosticChallenge({
                   data-lpignore="true"
                   placeholder={
                     currentExercise.type === "conjugation"
-                      ? "Nhập dạng đúng của động từ..."
+                      ? "Nhập từ cần điền (xem gợi ý trong ngoặc)..."
                       : "Viết lại câu hoàn chỉnh..."
                   }
                   autoFocus

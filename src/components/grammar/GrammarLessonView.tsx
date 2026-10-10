@@ -189,21 +189,21 @@ export default function GrammarLessonView({
             <div className="flex flex-col gap-2.5">
               {[
                 {
-                  type: "(+) Khẳng định",
+                  type: lesson.formulaLabels?.positive ?? "(+) Khẳng định",
                   formula: lesson.formula.positive,
                   badgeCls:
                     "bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800/50",
                   hoverBorder: "hover:border-emerald-500/40",
                 },
                 {
-                  type: "(-) Phủ định",
+                  type: lesson.formulaLabels?.negative ?? "(-) Phủ định",
                   formula: lesson.formula.negative,
                   badgeCls:
                     "bg-rose-100 dark:bg-rose-950/80 text-rose-700 dark:text-rose-400 border-rose-300 dark:border-rose-800/50",
                   hoverBorder: "hover:border-rose-500/40",
                 },
                 {
-                  type: "(?) Nghi vấn",
+                  type: lesson.formulaLabels?.question ?? "(?) Nghi vấn",
                   formula: lesson.formula.question,
                   badgeCls:
                     "bg-cyan-100 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-400 border-cyan-300 dark:border-cyan-800/50",
@@ -313,6 +313,31 @@ export default function GrammarLessonView({
               ))}
             </div>
           </div>
+
+          {/* Vietnamese vs English: where most beginner mistakes come from */}
+          {lesson.vnContrast && (
+            <div className="rounded-3xl border border-amber-200 dark:border-amber-800/60 bg-amber-50/50 dark:bg-amber-950/20 p-5 md:p-6 shadow-sm space-y-3">
+              <h3 className="text-sm font-bold text-amber-800 dark:text-amber-300">🇻🇳 → 🇬🇧 {lesson.vnContrast.title}</h3>
+              <div className="space-y-2">
+                {lesson.vnContrast.points.map((p, i) => (
+                  <div key={i} className="p-3 rounded-2xl bg-white dark:bg-zinc-900 border border-amber-100 dark:border-zinc-800 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2 text-sm">
+                      <span className="text-slate-600 dark:text-zinc-400">{p.vn}</span>
+                      <span className="text-amber-500">→</span>
+                      <button
+                        onClick={() => handleSpeak(p.en)}
+                        className="font-semibold text-slate-900 dark:text-white hover:text-cyan-600 inline-flex items-center gap-1"
+                        title="Nghe"
+                      >
+                        {p.en} <Volume2 className="w-3.5 h-3.5 opacity-60" />
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-zinc-400">{p.note}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* 4. Visual Contrast Matrix (Bảng so sánh đối chiếu) */}
           {lesson.contrast && (

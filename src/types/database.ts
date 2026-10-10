@@ -27,6 +27,12 @@ export interface Word {
   cefr_level?: string | null; // CEFR level of the term (A1..C2), null for words added before tagging
   suspended?: number | null; // 1 = left out of reviews (leech action "suspend" or by hand)
   created_at: string;
+  /** Entry of the bundled vocabulary deck (vocab_catalog.id); null for words added another way */
+  catalog_id?: string | null;
+  /** JSON string[]: other spellings (colour -> color), accepted as the same word */
+  variants?: string | null;
+  /** JSON string[]: forms the rules can't produce (went, children) and the forms the examples use */
+  forms?: string | null;
 }
 
 export interface WordExample {
@@ -35,8 +41,10 @@ export interface WordExample {
   sentence_en: string;
   sentence_vn?: string;
   grammar_analysis: string;
-  /** "user_context" = the sentence the learner met the word in; null/"ai" = generated */
+  /** "user_context" = the sentence the learner met the word in; "catalog" = from the bundled deck; null/"ai" = generated */
   source?: string | null;
+  /** JSON string[]: the form(s) of the word this sentence uses ("is" for "be"), from the deck */
+  focus?: string | null;
 }
 
 export type FSRSState = 0 | 1 | 2 | 3; // 0: New, 1: Learning, 2: Review, 3: Relearning

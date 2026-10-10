@@ -74,10 +74,9 @@ export default function MeaningMatchExercise({
         setDone(true);
         onSpeak(word.word);
         // The exercise reports Good; the session derives the real grade from the mistakes on the target
-        completeTimerRef.current = setTimeout(() => {
-          completeTimerRef.current = null;
-          onComplete(targetMistakes === 0, targetMistakes, Rating.Good);
-        }, 900);
+        // Reported at once: the session keeps this card on screen until the learner continues
+        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+        onComplete(targetMistakes === 0, targetMistakes, Rating.Good);
       }
       return;
     }

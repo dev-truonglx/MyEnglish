@@ -17,7 +17,7 @@ import {
   type MistakeSummary,
 } from "@/services/mistakes";
 import { recordDailyActivity } from "@/services/streak";
-import { getUserOverrideLevel } from "@/services/userProficiency";
+import { getActiveCefrLevel } from "@/services/pipeline";
 import { bankStatus } from "@/services/reading";
 import { PAGE_CONTAINER } from "./shared";
 import MistakeReview from "./MistakeReview";
@@ -81,7 +81,7 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
     setError(null);
     setFeedback(null);
     try {
-      const fb = await correctWritingWithAI(text.trim(), getUserOverrideLevel() ?? undefined);
+      const fb = await correctWritingWithAI(text.trim(), await getActiveCefrLevel());
       recordStandupUse();
       setUsed(standupUsedToday());
       recordDailyActivity(1);
@@ -94,7 +94,7 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
       reload();
     } catch (err) {
       setError(
-        `Không sửa được bằng AI: ${err instanceof Error ? err.message : String(err)}. Cần cài Claude hoặc Gemini CLI (xem tab Hướng dẫn).`
+        `Không sửa được bằng AI: ${err instanceof Error ? err.message : String(err)}. Cần cài Gemini CLI (xem tab Settings).`
       );
     } finally {
       setBusy(false);

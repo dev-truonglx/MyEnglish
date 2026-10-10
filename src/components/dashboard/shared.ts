@@ -1,6 +1,16 @@
 import type { WordDetail } from "@/types/database";
 
-export type DashboardTab = "library" | "capture" | "reading" | "writing" | "review" | "analytics" | "guide" | "grammar";
+export type DashboardTab =
+  | "today"
+  | "library"
+  | "capture"
+  | "reading"
+  | "writing"
+  | "review"
+  | "analytics"
+  | "guide"
+  | "grammar"
+  | "pronunciation";
 export type FilterMode = "all" | "due" | "mastered" | "leech";
 export type ViewMode = "gallery" | "table";
 

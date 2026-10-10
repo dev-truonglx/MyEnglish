@@ -4,9 +4,11 @@ import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import {
   generateMultipleChoiceQuestion,
+  multipleChoiceDirection,
   type MultipleChoiceQuestion,
   type MultipleChoiceOption,
 } from "@/services/smartReview";
+import { getConciseMeaning } from "@/services/meaningText";
 
 interface MultipleChoiceExerciseProps {
   word: WordDetail;
@@ -25,6 +27,7 @@ export default function MultipleChoiceExercise({
   const [isAnswered, setIsAnswered] = useState(false);
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [shakeIdx, setShakeIdx] = useState<number | null>(null);
+  const [wrongNote, setWrongNote] = useState<string | null>(null);
 
   // Pending completion timer, cleared on unmount so a stale card is never graded
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -34,12 +37,11 @@ export default function MultipleChoiceExercise({
     };
   }, []);
 
-  // Generate question (prompt alternates between English -> Vietnamese or Vietnamese -> English)
-  const questionData: MultipleChoiceQuestion = useMemo(() => {
-    // 70% EN -> VN, 30% VN -> EN
-    const type = Math.random() < 0.7 ? "en_to_vn" : "vn_to_en";
-    return generateMultipleChoiceQuestion(word, allWords, type);
-  }, [word, allWords]);
+  // Young cards are asked English -> Vietnamese; older ones sometimes Vietnamese -> English
+  const questionData: MultipleChoiceQuestion = useMemo(
+    () => generateMultipleChoiceQuestion(word, allWords, multipleChoiceDirection(word)),
+    [word, allWords]
+  );
 
   // Reset state on word change
   useEffect(() => {
@@ -47,6 +49,7 @@ export default function MultipleChoiceExercise({
     setIsAnswered(false);
     setWrongAttempts(0);
     setShakeIdx(null);
+    setWrongNote(null);
   }, [word]);
 
   const handleSelectOption = useCallback(
@@ -69,18 +72,25 @@ export default function MultipleChoiceExercise({
           rating = Rating.Hard;
         }
 
+        // Reported at once: the session keeps this card on screen until the learner continues
         if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-        completeTimerRef.current = setTimeout(() => {
-          completeTimerRef.current = null;
-          onComplete(true, wrongAttempts, rating);
-        }, 900);
+        onComplete(true, wrongAttempts, rating);
       } else {
         setWrongAttempts((prev) => prev + 1);
         setShakeIdx(index);
         setTimeout(() => setShakeIdx(null), 400);
+        // Say what the picked option really is: a wrong choice still teaches something
+        const other = allWords.find((w) => w.id === option.id);
+        setWrongNote(
+          other
+            ? questionData.promptType === "en_to_vn"
+              ? `"${option.text}" là nghĩa của "${other.word}". Thử lại nhé!`
+              : `"${other.word}" nghĩa là "${getConciseMeaning(other.meaning_vn)}". Thử lại nhé!`
+            : "Chưa đúng, thử phương án khác nhé!"
+        );
       }
     },
-    [isAnswered, onSpeak, word.word, wrongAttempts, onComplete]
+    [isAnswered, onSpeak, word.word, wrongAttempts, onComplete, allWords, questionData.promptType]
   );
 
   // Keyboard shortcuts 1, 2, 3, 4
@@ -124,7 +134,8 @@ export default function MultipleChoiceExercise({
           )}
         </div>
 
-        {questionData.phonetic && (
+        {/* Never under a Vietnamese prompt: the IPA of the answer would give it away */}
+        {questionData.phonetic && questionData.promptType === "en_to_vn" && (
           <p className="text-sm font-mono text-slate-400 dark:text-zinc-500">
             {questionData.phonetic}
           </p>
@@ -198,14 +209,14 @@ export default function MultipleChoiceExercise({
       </div>
 
       {/* Helpful Hint - fixed height h-7 so it NEVER jumps */}
-      <div className="flex items-center justify-between text-xs text-slate-400 dark:text-zinc-500 px-2 h-7 min-h-[28px]">
+      <div className="flex items-center justify-between gap-3 text-xs text-slate-400 dark:text-zinc-500 px-2 min-h-[28px]">
         <span className="flex items-center gap-1">
           <HelpCircle className="w-3.5 h-3.5" />
           Phím tắt: bấm <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">1</kbd> - <kbd className="px-1 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">4</kbd>
         </span>
-        {wrongAttempts > 0 && !isAnswered ? (
-          <span className="text-amber-500 dark:text-amber-400 font-semibold animate-in fade-in duration-150">
-            Chưa đúng ({wrongAttempts} lần thử) — Hãy chọn lại!
+        {wrongNote && !isAnswered ? (
+          <span className="text-amber-600 dark:text-amber-400 font-semibold animate-in fade-in duration-150 text-right">
+            {wrongNote}
           </span>
         ) : (
           <span className="text-[11px] text-slate-400 dark:text-zinc-500">

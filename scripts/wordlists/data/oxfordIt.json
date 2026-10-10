@@ -1,0 +1,2767 @@
+{
+ "source": "https://www.oxfordlearnersdictionaries.com/wordlists/oxford3000-5000",
+ "topics": "https://www.oxfordlearnersdictionaries.com/topic/",
+ "ipa": "CMU Pronouncing Dictionary (https://github.com/cmusphinx/cmudict), converted to IPA",
+ "retrieved": "2026-10-10",
+ "words": [
+  {
+   "word": "computer",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/kəmˈpjuːtər/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "laptop",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈlæptɑːp/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "screen",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/skriːn/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "keyboard",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈkiːbɔːrd/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "mouse",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/maʊs/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "printer",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈprɪntər/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "tablet",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈtæblət/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "smartphone",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈsmɑːrtfoʊn/",
+   "deck": "it-core-1",
+   "topics": [
+    "communication_devices_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "device",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/dɪˈvaɪs/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "machine",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/məˈʃiːn/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "memory",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈmeməri/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 16
+  },
+  {
+   "word": "battery",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈbætəri/",
+   "deck": "it-core-1",
+   "topics": [
+    "communication_devices_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "cable",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/ˈkeɪbl/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "monitor",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/ˈmɑːnətər/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t",
+    "jobs_and_professions_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "camera",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈkæmərə/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "Wi-Fi",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈwaɪfaɪ/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_hardware_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "button",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈbʌtn/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "key",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/kiː/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 9
+  },
+  {
+   "word": "window",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈwɪndoʊ/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 19
+  },
+  {
+   "word": "menu",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈmenjuː/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "option",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈɑːpʃn/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 30
+  },
+  {
+   "word": "setting",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈsetɪŋ/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "file",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/faɪl/",
+   "deck": "it-core-1",
+   "topics": [
+    "office_life_t",
+    "using_a_computer_t"
+   ],
+   "docs": 38
+  },
+  {
+   "word": "document",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈdɑːkjəment/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 22
+  },
+  {
+   "word": "page",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/peɪdʒ/",
+   "deck": "it-core-1",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "image",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈɪmədʒ/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "video",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈvɪdioʊ/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "software",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈsɔːftwer/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_software_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "app",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/æp/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_software_t"
+   ],
+   "docs": 7
+  },
+  {
+   "word": "application",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˌæpləˈkeɪʃn/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_software_t",
+    "job_interviews_t"
+   ],
+   "docs": 13
+  },
+  {
+   "word": "program",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈproʊɡræm/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_software_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "system",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈsɪstəm/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 19
+  },
+  {
+   "word": "platform",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈplætfɔːrm/",
+   "deck": "it-core-1",
+   "topics": [
+    "computer_software_t"
+   ],
+   "docs": 17
+  },
+  {
+   "word": "user",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈjuːzər/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 21
+  },
+  {
+   "word": "open",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ˈoʊpən/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 13
+  },
+  {
+   "word": "close",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kloʊs/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "save",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/seɪv/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "copy",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈkɑːpi/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 12
+  },
+  {
+   "word": "cut",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kʌt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "print",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/prɪnt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "type",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/taɪp/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 50
+  },
+  {
+   "word": "click",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/klɪk/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "press",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/pres/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "select",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/səˈlekt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "search",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/sɜːrtʃ/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 5
+  },
+  {
+   "word": "download",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈdaʊnloʊd/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "install",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/ɪnˈstɔːl/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 12
+  },
+  {
+   "word": "load",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/loʊd/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 9
+  },
+  {
+   "word": "run",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/rʌn/",
+   "deck": "it-core-1",
+   "topics": [
+    "running_a_business_t",
+    "using_a_computer_t"
+   ],
+   "docs": 19
+  },
+  {
+   "word": "quit",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/kwɪt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "connect",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/kəˈnekt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t",
+    "using_the_internet_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "access",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/ˈækses/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 15
+  },
+  {
+   "word": "enter",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈentər/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "scan",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/skæn/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "export",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/ɪkˈspɔːrt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 7
+  },
+  {
+   "word": "import",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/ɪmˈpɔːrt/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "drag",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/dræɡ/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "edit",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/ˈedət/",
+   "deck": "it-core-1",
+   "topics": [
+    "using_a_computer_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "start",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/stɑːrt/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 17
+  },
+  {
+   "word": "stop",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/stɑːp/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "hide",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/haɪd/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "add",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/æd/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 48
+  },
+  {
+   "word": "remove",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/riˈmuːv/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 28
+  },
+  {
+   "word": "move",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/muːv/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 12
+  },
+  {
+   "word": "change",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/tʃeɪndʒ/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 41
+  },
+  {
+   "word": "create",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kriˈeɪt/",
+   "deck": "it-core-1",
+   "topics": [],
+   "docs": 25
+  },
+  {
+   "word": "code",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/koʊd/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 45
+  },
+  {
+   "word": "language",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈlæŋɡwədʒ/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "function",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈfʌŋkʃn/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 36
+  },
+  {
+   "word": "command",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/kəˈmænd/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 9
+  },
+  {
+   "word": "instruction",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ɪnˈstrʌkʃn/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "script",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/skrɪpt/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 9
+  },
+  {
+   "word": "data",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈdeɪtə/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t",
+    "data_t"
+   ],
+   "docs": 23
+  },
+  {
+   "word": "technology",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/tekˈnɑːlədʒi/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "environment",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ɪnˈvaɪrənmənt/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 14
+  },
+  {
+   "word": "process",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈprɑːses/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "operation",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˌɑːpəˈreɪʃn/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t",
+    "running_a_business_t"
+   ],
+   "docs": 13
+  },
+  {
+   "word": "architecture",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈɑːrkətektʃər/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "version",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈvɜːrʒn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 63
+  },
+  {
+   "word": "feature",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈfiːtʃər/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 47
+  },
+  {
+   "word": "value",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈvæljuː/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 32
+  },
+  {
+   "word": "method",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈmeθəd/",
+   "deck": "it-core-2",
+   "topics": [
+    "experiments_t"
+   ],
+   "docs": 32
+  },
+  {
+   "word": "item",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈaɪtəm/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "list",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/lɪst/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 18
+  },
+  {
+   "word": "table",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈteɪbl/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 8
+  },
+  {
+   "word": "record",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈrekərd/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "column",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈkɑːləm/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "row",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/roʊ/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "library",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈlaɪbreri/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 37
+  },
+  {
+   "word": "package",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈpækədʒ/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 12
+  },
+  {
+   "word": "source",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/sɔːrs/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 19
+  },
+  {
+   "word": "path",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/pæθ/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 16
+  },
+  {
+   "word": "event",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ɪˈvent/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "structure",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈstrʌktʃər/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 13
+  },
+  {
+   "word": "pattern",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈpætərn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "model",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈmɑːdl/",
+   "deck": "it-core-2",
+   "topics": [
+    "jobs_and_professions_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "chart",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/tʃɑːrt/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "diagram",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈdaɪəɡræm/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "branch",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/bræntʃ/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "request",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/rɪˈkwest/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 14
+  },
+  {
+   "word": "response",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/rɪˈspɑːns/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 4
+  },
+  {
+   "word": "development",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/dɪˈveləpmənt/",
+   "deck": "it-core-2",
+   "topics": [
+    "study_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "digital",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈdɪdʒətl/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "technical",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈteknɪkl/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "electronic",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˌɪlekˈtrɑːnɪk/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "virtual",
+   "pos": "adjective",
+   "cefr": "B2",
+   "ipa": "/ˈvɜːrtʃuəl/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_software_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "generate",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/ˈdʒenəreɪt/",
+   "deck": "it-core-2",
+   "topics": [
+    "computer_programming_t"
+   ],
+   "docs": 22
+  },
+  {
+   "word": "update",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/əpˈdeɪt/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 27
+  },
+  {
+   "word": "release",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/riˈliːs/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 32
+  },
+  {
+   "word": "build",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/bɪld/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 46
+  },
+  {
+   "word": "develop",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/dɪˈveləp/",
+   "deck": "it-core-2",
+   "topics": [
+    "study_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "design",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/dɪˈzaɪn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "support",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/səˈpɔːrt/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 60
+  },
+  {
+   "word": "return",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/rɪˈtɜːrn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 26
+  },
+  {
+   "word": "define",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/dɪˈfaɪn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 28
+  },
+  {
+   "word": "depend",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/dɪˈpend/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 14
+  },
+  {
+   "word": "require",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/rɪˈkwaɪər/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 39
+  },
+  {
+   "word": "include",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ɪnˈkluːd/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 36
+  },
+  {
+   "word": "contain",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/kənˈteɪn/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 23
+  },
+  {
+   "word": "allow",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/əˈlaʊ/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 35
+  },
+  {
+   "word": "enable",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/ɪˈneɪbl/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 34
+  },
+  {
+   "word": "provide",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/prəˈvaɪd/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 41
+  },
+  {
+   "word": "replace",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/riˈpleɪs/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 16
+  },
+  {
+   "word": "convert",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/kənˈvɜːrt/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 13
+  },
+  {
+   "word": "store",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/stɔːr/",
+   "deck": "it-core-2",
+   "topics": [],
+   "docs": 10
+  },
+  {
+   "word": "internet",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈɪntərnet/",
+   "deck": "it-core-3",
+   "topics": [
+    "using_the_internet_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "network",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈnetwɜːrk/",
+   "deck": "it-core-3",
+   "topics": [
+    "computer_hardware_t",
+    "running_a_business_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "website",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈwebsaɪt/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "site",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/saɪt/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "web",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/web/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 4
+  },
+  {
+   "word": "link",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/lɪŋk/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 18
+  },
+  {
+   "word": "email",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈiːmeɪl/",
+   "deck": "it-core-3",
+   "topics": [
+    "email_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "message",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈmesədʒ/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 14
+  },
+  {
+   "word": "text",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/tekst/",
+   "deck": "it-core-3",
+   "topics": [
+    "text_messages_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "address",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈædres/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "blog",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/blɔːɡ/",
+   "deck": "it-core-3",
+   "topics": [
+    "social_networking_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "profile",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈproʊfaɪl/",
+   "deck": "it-core-3",
+   "topics": [
+    "social_networking_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "account",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/əˈkaʊnt/",
+   "deck": "it-core-3",
+   "topics": [
+    "using_the_internet_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "comment",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈkɑːment/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "connection",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/kəˈnekʃn/",
+   "deck": "it-core-3",
+   "topics": [
+    "using_the_internet_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "communication",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/kəˌmjuːnəˈkeɪʃn/",
+   "deck": "it-core-3",
+   "topics": [
+    "communication_devices_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "information",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˌɪnfərˈmeɪʃn/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 21
+  },
+  {
+   "word": "online",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/ˈɔːnlaɪn/",
+   "deck": "it-core-3",
+   "topics": [
+    "using_the_internet_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "mobile",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈmoʊbl/",
+   "deck": "it-core-3",
+   "topics": [
+    "communication_devices_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "chat",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/tʃæt/",
+   "deck": "it-core-3",
+   "topics": [
+    "social_networking_t"
+   ],
+   "docs": 7
+  },
+  {
+   "word": "call",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kɔːl/",
+   "deck": "it-core-3",
+   "topics": [
+    "business_meetings_t",
+    "making_calls_t"
+   ],
+   "docs": 25
+  },
+  {
+   "word": "contact",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/ˈkɑːntækt/",
+   "deck": "it-core-3",
+   "topics": [
+    "making_calls_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "attach",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/əˈtætʃ/",
+   "deck": "it-core-3",
+   "topics": [
+    "email_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "reply",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/rɪˈplaɪ/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "send",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/send/",
+   "deck": "it-core-3",
+   "topics": [
+    "text_messages_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "receive",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/rəˈsiːv/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 8
+  },
+  {
+   "word": "post",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/poʊst/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "publish",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈpʌblɪʃ/",
+   "deck": "it-core-3",
+   "topics": [
+    "websites_t"
+   ],
+   "docs": 11
+  },
+  {
+   "word": "share",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ʃer/",
+   "deck": "it-core-3",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "visit",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ˈvɪzɪt/",
+   "deck": "it-core-3",
+   "topics": [
+    "using_the_internet_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "team",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/tiːm/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 4
+  },
+  {
+   "word": "project",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈprɑːdʒekt/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 35
+  },
+  {
+   "word": "task",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/tæsk/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 6
+  },
+  {
+   "word": "plan",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/plæn/",
+   "deck": "it-core-4",
+   "topics": [
+    "running_a_business_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "meeting",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈmiːtɪŋ/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_meetings_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "manager",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈmænədʒər/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t",
+    "job_titles_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "boss",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/bɑːs/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t",
+    "job_titles_t",
+    "office_life_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "colleague",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈkɑːliɡ/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "customer",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈkʌstəmər/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "client",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈklaɪənt/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t",
+    "computer_hardware_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "company",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈkʌmpəni/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "office",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈɔːfɪs/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "department",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/dɪˈpɑːrtmənt/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t",
+    "running_a_business_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "job",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/dʒɑːb/",
+   "deck": "it-core-4",
+   "topics": [
+    "describing_work_t",
+    "office_life_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "employee",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ɪmˈplɔɪi/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "engineer",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˌendʒəˈnɪr/",
+   "deck": "it-core-4",
+   "topics": [
+    "jobs_and_professions_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "designer",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/dɪˈzaɪnər/",
+   "deck": "it-core-4",
+   "topics": [
+    "jobs_and_professions_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "leader",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈliːdər/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "staff",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/stæf/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_people_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "schedule",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈskedʒʊl/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "target",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈtɑːrɡət/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 18
+  },
+  {
+   "word": "goal",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ɡoʊl/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "agenda",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/əˈdʒendə/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_meetings_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "appointment",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/əˈpɔɪntmənt/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_meetings_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "product",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈprɑːdəkt/",
+   "deck": "it-core-4",
+   "topics": [
+    "marketing_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "service",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈsɜːrvəs/",
+   "deck": "it-core-4",
+   "topics": [
+    "running_a_business_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "business",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈbɪznəs/",
+   "deck": "it-core-4",
+   "topics": [
+    "describing_work_t",
+    "running_a_business_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "skill",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/skɪl/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "experience",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ɪkˈspɪriəns/",
+   "deck": "it-core-4",
+   "topics": [
+    "job_interviews_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "training",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈtreɪnɪŋ/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "interview",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈɪntərvjuː/",
+   "deck": "it-core-4",
+   "topics": [
+    "job_interviews_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "career",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/kəˈrɪr/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "salary",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈsæləri/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 0
+  },
+  {
+   "word": "progress",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈprɑːɡres/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "management",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈmænədʒmənt/",
+   "deck": "it-core-4",
+   "topics": [
+    "running_a_business_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "question",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈkwestʃən/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 5
+  },
+  {
+   "word": "answer",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈænsər/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "idea",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/aɪˈdiːə/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 4
+  },
+  {
+   "word": "note",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/noʊt/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 32
+  },
+  {
+   "word": "priority",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/praɪˈɔːrəti/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "work",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/wɜːrk/",
+   "deck": "it-core-4",
+   "topics": [
+    "office_life_t"
+   ],
+   "docs": 42
+  },
+  {
+   "word": "attend",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/əˈtend/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_meetings_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "meet",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/miːt/",
+   "deck": "it-core-4",
+   "topics": [
+    "business_meetings_t"
+   ],
+   "docs": 3
+  },
+  {
+   "word": "discuss",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/dɪˈskʌs/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "agree",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/əˈɡriː/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "decide",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/dɪˈsaɪd/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "explain",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ɪkˈspleɪn/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "understand",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ˌʌndərˈstænd/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "manage",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈmænədʒ/",
+   "deck": "it-core-4",
+   "topics": [
+    "describing_work_t",
+    "running_a_business_t"
+   ],
+   "docs": 5
+  },
+  {
+   "word": "achieve",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/əˈtʃiːv/",
+   "deck": "it-core-4",
+   "topics": [
+    "describing_work_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "organize",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ˈɔːrɡənaɪz/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "complete",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kəmˈpliːt/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 8
+  },
+  {
+   "word": "finish",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ˈfɪnɪʃ/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "review",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/riˈvjuː/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 5
+  },
+  {
+   "word": "remote",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/rɪˈmoʊt/",
+   "deck": "it-core-4",
+   "topics": [
+    "describing_work_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "responsible",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/riˈspɑːnsəbl/",
+   "deck": "it-core-4",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "error",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈerər/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 28
+  },
+  {
+   "word": "problem",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/ˈprɑːbləm/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "issue",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈɪʃuː/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 27
+  },
+  {
+   "word": "mistake",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/mɪˈsteɪk/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "warning",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈwɔːrnɪŋ/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 13
+  },
+  {
+   "word": "solution",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/səˈluːʃn/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "test",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/test/",
+   "deck": "it-core-5",
+   "topics": [
+    "experiments_t"
+   ],
+   "docs": 29
+  },
+  {
+   "word": "result",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/rɪˈzʌlt/",
+   "deck": "it-core-5",
+   "topics": [
+    "experiments_t",
+    "running_a_business_t"
+   ],
+   "docs": 19
+  },
+  {
+   "word": "report",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/riˈpɔːrt/",
+   "deck": "it-core-5",
+   "topics": [
+    "business_people_t"
+   ],
+   "docs": 11
+  },
+  {
+   "word": "failure",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/ˈfeɪljər/",
+   "deck": "it-core-5",
+   "topics": [
+    "running_a_business_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "success",
+   "pos": "noun",
+   "cefr": "A1",
+   "ipa": "/səkˈses/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "virus",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈvaɪrəs/",
+   "deck": "it-core-5",
+   "topics": [
+    "computer_problems_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "quality",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈkwɑːləti/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "performance",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/pərˈfɔːrməns/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 18
+  },
+  {
+   "word": "speed",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/spiːd/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 6
+  },
+  {
+   "word": "size",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/saɪz/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 16
+  },
+  {
+   "word": "limit",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈlɪmət/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 13
+  },
+  {
+   "word": "level",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/ˈlevl/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "sample",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/ˈsæmpl/",
+   "deck": "it-core-5",
+   "topics": [
+    "data_t"
+   ],
+   "docs": 4
+  },
+  {
+   "word": "analysis",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/əˈnæləsəs/",
+   "deck": "it-core-5",
+   "topics": [
+    "study_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "research",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/riˈsɜːrtʃ/",
+   "deck": "it-core-5",
+   "topics": [
+    "study_t"
+   ],
+   "docs": 0
+  },
+  {
+   "word": "status",
+   "pos": "noun",
+   "cefr": "B2",
+   "ipa": "/ˈstætəs/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 24
+  },
+  {
+   "word": "condition",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/kənˈdɪʃn/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 22
+  },
+  {
+   "word": "case",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/keɪs/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 24
+  },
+  {
+   "word": "step",
+   "pos": "noun",
+   "cefr": "A2",
+   "ipa": "/step/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "security",
+   "pos": "noun",
+   "cefr": "B1",
+   "ipa": "/sɪˈkjʊrəti/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "fix",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/fɪks/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 28
+  },
+  {
+   "word": "solve",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/sɑːlv/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "check",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/tʃek/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 22
+  },
+  {
+   "word": "pass",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/pæs/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 20
+  },
+  {
+   "word": "fail",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/feɪl/",
+   "deck": "it-core-5",
+   "topics": [
+    "running_a_business_t"
+   ],
+   "docs": 13
+  },
+  {
+   "word": "crash",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/kræʃ/",
+   "deck": "it-core-5",
+   "topics": [
+    "computer_problems_t"
+   ],
+   "docs": 2
+  },
+  {
+   "word": "freeze",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/friːz/",
+   "deck": "it-core-5",
+   "topics": [
+    "computer_problems_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "detect",
+   "pos": "verb",
+   "cefr": "B2",
+   "ipa": "/dɪˈtekt/",
+   "deck": "it-core-5",
+   "topics": [
+    "results_t"
+   ],
+   "docs": 8
+  },
+  {
+   "word": "confirm",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/kənˈfɜːrm/",
+   "deck": "it-core-5",
+   "topics": [
+    "results_t"
+   ],
+   "docs": 1
+  },
+  {
+   "word": "increase",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/ɪnˈkriːs/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "reduce",
+   "pos": "verb",
+   "cefr": "A2",
+   "ipa": "/rəˈduːs/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "improve",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/ɪmˈpruːv/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 18
+  },
+  {
+   "word": "measure",
+   "pos": "verb",
+   "cefr": "B1",
+   "ipa": "/ˈmeʒər/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "compare",
+   "pos": "verb",
+   "cefr": "A1",
+   "ipa": "/kəmˈper/",
+   "deck": "it-core-5",
+   "topics": [],
+   "docs": 6
+  },
+  {
+   "word": "correct",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/kəˈrekt/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 10
+  },
+  {
+   "word": "wrong",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/rɔːŋ/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 3
+  },
+  {
+   "word": "available",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/əˈveɪləbl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 27
+  },
+  {
+   "word": "current",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈkɜːrənt/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 15
+  },
+  {
+   "word": "latest",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈleɪtəst/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "previous",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈpriːviəs/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 8
+  },
+  {
+   "word": "main",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/meɪn/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 10
+  },
+  {
+   "word": "simple",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈsɪmpl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 10
+  },
+  {
+   "word": "complex",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈkɑːmpleks/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 5
+  },
+  {
+   "word": "fast",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/fæst/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 9
+  },
+  {
+   "word": "slow",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/sloʊ/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "empty",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈempti/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 11
+  },
+  {
+   "word": "full",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/fʊl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 15
+  },
+  {
+   "word": "ready",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/ˈredi/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 2
+  },
+  {
+   "word": "local",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/ˈloʊkl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 6
+  },
+  {
+   "word": "global",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈɡloʊbl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "public",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈpʌblɪk/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 13
+  },
+  {
+   "word": "private",
+   "pos": "adjective",
+   "cefr": "B1",
+   "ipa": "/ˈpraɪvət/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 7
+  },
+  {
+   "word": "secure",
+   "pos": "adjective",
+   "cefr": "B2",
+   "ipa": "/sɪˈkjʊr/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 4
+  },
+  {
+   "word": "stable",
+   "pos": "adjective",
+   "cefr": "B2",
+   "ipa": "/ˈsteɪbl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 17
+  },
+  {
+   "word": "single",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/ˈsɪŋɡl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 17
+  },
+  {
+   "word": "multiple",
+   "pos": "adjective",
+   "cefr": "B2",
+   "ipa": "/ˈmʌltəpl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 16
+  },
+  {
+   "word": "successful",
+   "pos": "adjective",
+   "cefr": "A2",
+   "ipa": "/səkˈsesfl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 1
+  },
+  {
+   "word": "possible",
+   "pos": "adjective",
+   "cefr": "A1",
+   "ipa": "/ˈpɑːsəbl/",
+   "deck": "it-core-6",
+   "topics": [],
+   "docs": 18
+  }
+ ]
+}

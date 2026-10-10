@@ -17,11 +17,11 @@ export default function FlipCard({ currentWord, synonyms, isFlipped, setIsFlippe
       {!isFlipped ? (
         <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center space-y-4 py-8">
           <span className="text-[11px] font-mono uppercase tracking-widest text-cyan-600 dark:text-cyan-400 font-semibold">
-            Developer Vocabulary
+            Từ vựng
           </span>
 
           <div className="flex items-center gap-3 flex-wrap justify-center">
-            <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight capitalize font-mono">
+            <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
               {currentWord.word}
             </h2>
             <button

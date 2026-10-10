@@ -134,10 +134,15 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       });
       setQuizResult(res);
 
-      // Auto dismiss after brief celebratory delay
-      setTimeout(() => {
-        finish("quiz-done");
-      }, 1800);
+      if (res.isCorrect) {
+        // Auto dismiss after brief celebratory delay
+        setTimeout(() => {
+          finish("quiz-done");
+        }, 1800);
+      } else {
+        // A wrong answer stays on screen until the learner has read the right one and closes the card
+        setSecondsLeft(null);
+      }
     } catch (err) {
       console.warn("Error evaluating micro quiz answer:", err);
       setTimeout(() => {
@@ -149,7 +154,9 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   // Keyboard shortcut support (1, 2, 3 for quiz; Enter to start review; Esc to snooze)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (mode === "quiz" && payload.microQuiz && selectedOptionId === null) {
+      if (mode === "quiz" && quizResult && !quizResult.isCorrect) {
+        if (e.key === "Enter" || e.key === "Escape") finish("quiz-done");
+      } else if (mode === "quiz" && payload.microQuiz && selectedOptionId === null) {
         if (e.key === "1" && payload.microQuiz.options[0]) {
           handleAnswerQuiz(payload.microQuiz.options[0].id);
         } else if (e.key === "2" && payload.microQuiz.options[1]) {
@@ -168,7 +175,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [mode, payload.microQuiz, selectedOptionId, finish]);
+  }, [mode, payload.microQuiz, selectedOptionId, quizResult, finish]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -243,22 +250,11 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     switch (mood) {
       case "alarm":
         return (
-          <span className="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white flex items-center justify-center shadow-md animate-pulse">
+          <span className="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm">
             <Flame className="w-4 h-4 fill-white" />
           </span>
         );
-      case "pleading":
-        return (
-          <span className="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-tr from-amber-400 to-orange-500 text-white flex items-center justify-center shadow-sm text-base">
-            🥺
-          </span>
-        );
-      case "dramatic":
-        return (
-          <span className="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-500 to-indigo-600 text-white flex items-center justify-center shadow-sm text-base">
-            🥀
-          </span>
-        );
+      // Pleading / wilting faces made a skipped reminder feel like a failure: every other mood is the owl
       default:
         return (
           <span className="shrink-0 w-8 h-8 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-500 text-white flex items-center justify-center shadow-sm text-base">
@@ -293,11 +289,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                   <span className="text-[13px] font-bold text-slate-900 dark:text-white truncate">
                     {title}
                   </span>
-                  {payload.consecutiveSkips && payload.consecutiveSkips > 1 ? (
-                    <span className="shrink-0 px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/60 text-rose-600 dark:text-rose-300 text-[10px] font-semibold">
-                      Skip x{payload.consecutiveSkips}
-                    </span>
-                  ) : null}
+
                 </div>
                 <div className="text-[11.5px] text-slate-600 dark:text-zinc-300 line-clamp-2 mt-0.5 leading-snug">
                   {message}
@@ -318,11 +310,11 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               {payload.microQuiz ? (
                 <button
                   onClick={switchToQuiz}
-                  aria-label="Quiz nhanh 10 giây"
+                  aria-label="Trả lời 1 câu nhanh"
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 text-[11px] font-semibold transition-all active:scale-95"
                 >
                   <Zap className="w-3 h-3 text-indigo-500 fill-indigo-500" />
-                  Quiz 10s
+                  1 câu nhanh
                 </button>
               ) : null}
 
@@ -343,10 +335,10 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               <div className="flex items-center gap-1.5 min-w-0">
                 <span className="px-1.5 py-0.5 rounded bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 text-[10px] font-bold uppercase tracking-wider flex items-center gap-1">
                   <Zap className="w-3 h-3 fill-indigo-500 text-indigo-500" />
-                  Quick Quiz (10s)
+                  1 câu nhanh
                 </span>
                 <span className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-                  {payload.microQuiz?.direction === "production" ? "Nhớ từ tiếng Anh" : "Bấm 1 câu cứu từ vựng"}
+                  {payload.microQuiz?.direction === "production" ? "Nhớ từ tiếng Anh" : "Chọn nghĩa đúng"}
                 </span>
               </div>
               {secondsLeft !== null && (
@@ -440,7 +432,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                 className={`mt-0.5 px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center justify-between animate-fade-in ${
                   quizResult.isCorrect
                     ? "bg-emerald-100/90 dark:bg-emerald-950/80 text-emerald-800 dark:text-emerald-300"
-                    : "bg-rose-100/90 dark:bg-rose-950/80 text-rose-800 dark:text-rose-300"
+                    : "bg-amber-100/90 dark:bg-amber-950/70 text-amber-900 dark:text-amber-200"
                 }`}
               >
                 <div className="flex items-center gap-1">
@@ -448,12 +440,17 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                   <span>
                     {quizResult.isCorrect
                       ? quizResult.praise ?? `Chính xác! +${quizResult.xpEarned ?? 0} XP`
-                      : `Chưa đúng! Đáp án: ${payload.microQuiz?.direction === "production" ? payload.microQuiz.word : quizResult.correctMeaning}`}
+                      : `Đáp án: ${payload.microQuiz?.direction === "production" ? payload.microQuiz.word : quizResult.correctMeaning}. Từ này sẽ quay lại sớm để bạn ôn.`}
                   </span>
                 </div>
-                <span className="text-[10px] uppercase font-mono tracking-wider opacity-80">
-                  FSRS: {quizResult.ratingLabel}
-                </span>
+                {!quizResult.isCorrect && (
+                  <button
+                    onClick={() => finish("quiz-done")}
+                    className="shrink-0 ml-2 px-2 py-0.5 rounded bg-white/70 dark:bg-zinc-800/80 text-[10px] font-semibold hover:bg-white dark:hover:bg-zinc-700"
+                  >
+                    Đóng ↵
+                  </button>
+                )}
               </div>
             )}
           </div>

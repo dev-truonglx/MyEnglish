@@ -1,6 +1,7 @@
 import type { GrammarLesson } from "@/types/grammar";
+import { FOUNDATION_LESSONS } from "./foundationGrammar";
 
-export const GRAMMAR_LESSONS: GrammarLesson[] = [
+const CORE_LESSONS: GrammarLesson[] = [
   // ─────────────────────────────────────────────────────────────────────────────
   // LEVEL A1: NỀN TẢNG CỐT LÕI (FOUNDATIONAL)
   // ─────────────────────────────────────────────────────────────────────────────
@@ -107,13 +108,13 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         promptEn: "Which sentence is grammatically correct for a daily habit?",
         promptVn: "Câu nào dưới đây đúng ngữ pháp diễn tả thói quen hàng ngày?",
         options: [
-          "He is always drinking coffee before daily standup meetings.",
+          "He always drink coffee before daily standup meetings.",
           "He always drinks coffee before daily standup meetings.",
           "He drinks always coffee before daily standup meetings.",
           "He drink always coffee before daily standup meetings.",
         ],
         correctAnswer: "He always drinks coffee before daily standup meetings.",
-        explanation: "Trạng từ tần suất 'always' đứng trước động từ thường 'drinks', động từ chia theo ngôi 'He'.",
+        explanation: "Trạng từ tần suất 'always' đứng trước động từ thường; chủ ngữ 'He' nên động từ thêm -s: 'drinks'.",
       },
     ],
     practiceExercises: [
@@ -134,12 +135,12 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         explanation: "Sự thật hiển nhiên/quy luật tự nhiên luôn dùng hiện tại đơn với động từ chia số ít 'boils'.",
       },
       {
-        id: "prac-ps-3",
+        id: "prac-ps-neg-1",
         type: "sentence_transform",
-        promptEn: "Rewrite using 'seldom': 'He almost never pushes code directly to the main branch.'",
-        promptVn: "Viết lại câu dùng từ 'seldom':",
-        correctAnswer: "He seldom pushes code directly to the main branch.",
-        explanation: "'Seldom' thay thế cho 'almost never', đứng trước động từ thường 'pushes'.",
+        promptEn: "Rewrite in the negative: 'He pushes code to the main branch.'",
+        promptVn: "Viết lại câu ở dạng phủ định:",
+        correctAnswer: "He doesn't push code to the main branch.",
+        explanation: "Phủ định với 'He': doesn't + động từ nguyên mẫu (push), không thêm -es nữa.",
       },
     ],
   },
@@ -206,7 +207,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         wrong: "He is debuging the program.",
         correct: "He is debugging the program.",
-        explanation: "Quy tắc chính tả: từ 1 âm tiết kết thúc bằng 1 nguyên âm + 1 phụ âm thì gấp đôi phụ âm cuối trước khi thêm -ing.",
+        explanation: "Quy tắc chính tả: động từ tận cùng bằng 1 nguyên âm + 1 phụ âm, trọng âm ở âm tiết cuối (run, stop, de-BUG) thì gấp đôi phụ âm cuối trước khi thêm -ing.",
       },
     ],
     diagnosticExercises: [
@@ -311,8 +312,8 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
     contrast: {
       titleA: "Regular Verbs (Động từ có quy tắc)",
       titleB: "Irregular Verbs (Động từ bất quy tắc)",
-      descriptionA: "Chỉ cần thêm -ed vào đuôi (work $\\rightarrow$ worked, test $\\rightarrow$ tested).",
-      descriptionB: "Biến đổi không theo quy tắc cố định (write $\\rightarrow$ wrote, build $\\rightarrow$ built, go $\\rightarrow$ went).",
+      descriptionA: "Chỉ cần thêm -ed vào đuôi (work → worked, test → tested).",
+      descriptionB: "Biến đổi không theo quy tắc cố định (write → wrote, build → built, go → went).",
       exampleA: "I pushed the commit.",
       exampleB: "I found the bug.",
       keyRule: "Khi phủ định hoặc đặt câu hỏi đã có trợ động từ 'did', động từ chính PHẢI trở về dạng nguyên thể không chia (V-bare).",
@@ -333,8 +334,8 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         id: "diag-pst-1",
         type: "conjugation",
-        promptEn: "Last night, the senior developer _____ (find) the memory leak in the worker thread.",
-        promptVn: "Đêm qua, lập trình viên senior đã tìm thấy chỗ rò rỉ bộ nhớ trong luồng xử lý worker.",
+        promptEn: "Last night, our team lead _____ (find) a bug in the login page.",
+        promptVn: "Tối qua, trưởng nhóm của chúng tôi đã tìm thấy một lỗi ở trang đăng nhập.",
         correctAnswer: "found",
         hint: "Động từ bất quy tắc của 'find'.",
         explanation: "'Find' là động từ bất quy tắc, quá khứ là 'found'.",
@@ -434,7 +435,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       descriptionB: "Kế hoạch đã chuẩn bị sẵn, dự đoán có chứng cứ thực tế nhìn thấy được.",
       exampleA: "Don't worry, I'll help you fix the merge conflict.",
       exampleB: "I have already booked the flight. I am going to attend React Conf.",
-      keyRule: "Có chứng cứ hiện tại (Look at those dark clouds! / Look at this graph!) $\\rightarrow$ luôn ưu tiên 'be going to'.",
+      keyRule: "Có chứng cứ hiện tại (Look at those dark clouds! / Look at this graph!) → luôn ưu tiên 'be going to'.",
     },
     commonMistakes: [
       {
@@ -463,17 +464,18 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         type: "multiple_choice",
         promptEn: "We bought the tickets last week. We _____ visit the tech exhibition tomorrow.",
         promptVn: "Chúng tôi đã mua vé tuần trước. Ngày mai chúng tôi sẽ đi tham quan triển lãm công nghệ.",
-        options: ["are going to", "will", "would", "shall"],
+        options: ["are going to", "are going", "going to", "go to"],
         correctAnswer: "are going to",
-        explanation: "Kế hoạch đã có sự chuẩn bị và hành động từ trước (đã mua vé), dùng 'are going to'.",
+        explanation: "Kế hoạch đã chuẩn bị từ trước (đã mua vé): 'be going to' + động từ. Đủ 3 phần: are + going + to.",
       },
     ],
     practiceExercises: [
       {
         id: "prac-fut-1",
         type: "conjugation",
-        promptEn: "I promise I _____ (not disclose) any confidential credentials.",
-        correctAnswer: ["won't disclose", "will not disclose"],
+        promptEn: "I promise I _____ (not tell) anyone the password.",
+        promptVn: "Tôi hứa sẽ không nói mật khẩu cho ai.",
+        correctAnswer: ["won't tell", "will not tell"],
         explanation: "Lời hứa (promise) luôn dùng 'will / won't'.",
       },
     ],
@@ -530,7 +532,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       titleA: "A vs An (Dựa theo PHÁT ÂM, không phải mặt chữ)",
       titleB: "Exceptions cần lưu ý",
       descriptionA: "Dựa vào âm thanh đầu tiên phát ra khi đọc.",
-      descriptionB: "Chữ viết là nguyên âm nhưng phát âm là bán nguyên âm /j/ $\\rightarrow$ dùng 'a'.",
+      descriptionB: "Chữ viết là nguyên âm nhưng phát âm là bán nguyên âm /j/ → dùng 'a'.",
       exampleA: "an hour (âm 'h' câm), an error",
       exampleB: "a user (phát âm là /juːzər/), a unique design, a URL",
       keyRule: "Chú ý các từ: 'an hour', 'a university', 'a European country', 'a useful tool'.",
@@ -551,32 +553,34 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         id: "diag-art-1",
         type: "multiple_choice",
-        promptEn: "She has been working as _____ UI designer for over _____ year.",
-        options: ["a / a", "an / a", "a / an", "the / the"],
-        correctAnswer: "a / a",
-        explanation: "'UI' bắt đầu bằng âm /juː/ (dùng 'a'), 'year' bắt đầu bằng âm /j/ (dùng 'a').",
+        promptEn: "She is _____ UI designer. She works for _____ IT company.",
+        promptVn: "Cô ấy là một nhà thiết kế giao diện. Cô ấy làm cho một công ty IT.",
+        options: ["a / an", "an / an", "a / a", "an / a"],
+        correctAnswer: "a / an",
+        explanation: "Chọn a/an theo ÂM đầu: 'UI' đọc /juː/ (âm phụ âm) → 'a'; 'IT' đọc /aɪ/ (nguyên âm) → 'an'.",
       },
       {
         id: "diag-art-2",
         type: "error_spotting",
-        promptEn: "It takes about [an] [hour] [to] [deploy] [a] [new] [feature] [to] [the] [production].",
-        promptVn: "Chọn mạo từ dùng thừa/sai trong câu:",
-        options: ["an", "a", "the", "production"],
-        correctAnswer: "the",
-        correctSentence: "It takes about an hour to deploy a new feature to production.",
-        errorWord: "the",
-        errorExplanation: "Môi trường 'production' trong tech thường dùng 'in production' hoặc 'to production' không có mạo từ 'the'.",
-        explanation: "Dùng 'to production' thay vì 'to the production'.",
+        promptEn: "I [have] [a] [idea] [for] [the] [new] [app].",
+        promptVn: "Chọn mạo từ sai trong câu: Tôi có một ý tưởng cho ứng dụng mới.",
+        options: ["have", "a", "idea", "the"],
+        correctAnswer: "a",
+        correctSentence: "I have an idea for the new app.",
+        errorWord: "a",
+        errorExplanation: "'idea' bắt đầu bằng nguyên âm /aɪ/ nên phải dùng 'an', không dùng 'a'.",
+        explanation: "Sửa thành 'an idea'.",
       },
     ],
     practiceExercises: [
       {
         id: "prac-art-1",
         type: "multiple_choice",
-        promptEn: "Could you send me _____ link to _____ API documentation you mentioned earlier?",
-        options: ["the / the", "a / the", "the / a", "a / a"],
-        correctAnswer: "the / the",
-        explanation: "Cả link và tài liệu API đều đã được xác định cụ thể qua mệnh đề 'you mentioned earlier'.",
+        promptEn: "I have _____ meeting at 10 a.m. _____ meeting is about the new app.",
+        promptVn: "Tôi có một cuộc họp lúc 10 giờ. Cuộc họp đó bàn về ứng dụng mới.",
+        options: ["a / The", "the / A", "an / The", "a / A"],
+        correctAnswer: "a / The",
+        explanation: "Nhắc lần đầu dùng 'a' (một cuộc họp); lần thứ hai người nghe đã biết là cuộc họp nào nên dùng 'the'.",
       },
     ],
   },
@@ -732,7 +736,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         id: "diag-pp-1",
         type: "conjugation",
         promptEn: "We _____ (already / push) the hotfix to the staging environment.",
-        correctAnswer: ["have already pushed", "has already pushed"],
+        correctAnswer: "have already pushed",
         explanation: "Chủ ngữ 'We' dùng 'have already pushed'.",
       },
       {
@@ -835,7 +839,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         correctAnswer: "to",
         correctSentence: "We should write more unit tests this sprint.",
         errorWord: "to",
-        errorExplanation: "Sau 'should' là V-bare, không dùng giới từ 'to'.",
+        errorExplanation: "Sau 'should' là động từ nguyên mẫu không 'to' (V-bare), nên bỏ 'to'.",
         explanation: "Bỏ 'to', chỉ dùng 'should write'.",
       },
     ],
@@ -843,8 +847,8 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         id: "prac-mod-1",
         type: "multiple_choice",
-        promptEn: "The meeting is optional. You _____ attend if you have urgent tasks.",
-        options: ["don't have to", "mustn't", "can't", "shouldn't"],
+        promptEn: "The meeting is optional. You _____ attend it.",
+        options: ["don't have to", "mustn't", "can't", "have to"],
         correctAnswer: "don't have to",
         explanation: "Họp tự chọn (optional) nghĩa là không bắt buộc: 'don't have to'.",
       },
@@ -891,7 +895,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       titleA: "Irregular Adjectives (Bất quy tắc)",
       titleB: "Dạng so sánh tương ứng",
       descriptionA: "Các từ phổ biến có dạng so sánh biến đổi đặc biệt.",
-      descriptionB: "good $\\rightarrow$ better $\\rightarrow$ best; bad $\\rightarrow$ worse $\\rightarrow$ worst; far $\\rightarrow$ farther/further.",
+      descriptionB: "good → better → best; bad → worse → worst; far → farther/further.",
       exampleA: "This algorithm produces better results.",
       exampleB: "This is the worst outage we have had this year.",
       keyRule: "Tuyệt đối không dùng 'more better' hoặc 'most fastest' (tránh double comparatives).",
@@ -952,7 +956,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
     usagePoints: [
       {
         title: "Khoảng thời gian đã kết thúc vs Chưa kết thúc",
-        description: "Nếu khoảng thời gian chứa hành động đã trôi qua (yesterday, last year) $\\rightarrow$ Quá khứ đơn. Nếu khoảng thời gian vẫn còn tiếp diễn (today, this year, so far) $\\rightarrow$ Hiện tại hoàn thành.",
+        description: "Nếu khoảng thời gian chứa hành động đã trôi qua (yesterday, last year) → Quá khứ đơn. Nếu khoảng thời gian vẫn còn tiếp diễn (today, this year, so far) → Hiện tại hoàn thành.",
         examples: [
           {
             sentenceEn: "I lived in Singapore for two years. (Now I live in Vietnam)",
@@ -972,7 +976,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       descriptionB: "Hành động xảy ra ở thời điểm không xác định, hoặc kéo dài từ quá khứ đến hiện tại.",
       exampleA: "I lost my flash drive yesterday.",
       exampleB: "I have lost my flash drive! (I cannot find it right now)",
-      keyRule: "Có từ chỉ mốc thời gian quá khứ rõ ràng (ago, yesterday, last...) $\\rightarrow$ 100% dùng Quá khứ đơn.",
+      keyRule: "Có từ chỉ mốc thời gian quá khứ rõ ràng (ago, yesterday, last...) → 100% dùng Quá khứ đơn.",
     },
     commonMistakes: [
       {
@@ -1208,7 +1212,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         examples: [
           {
             sentenceEn: "The developer who wrote this module no longer works here.",
-            sentenceVn: "Lập trình viên người mà đã viết module này không còn làm việc ở đây nữa.",
+            sentenceVn: "Lập trình viên đã viết module này không còn làm việc ở đây nữa.",
           },
           {
             sentenceEn: "We need an algorithm that can process data in real time.",
@@ -1346,6 +1350,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         promptEn: "Write Type 2 conditional: 'I don't have root access, so I cannot restart the service.'",
         correctAnswer: [
           "If I had root access, I could restart the service.",
+          "If I had root access, I would restart the service.",
           "If I had root access, I would be able to restart the service.",
           "I could restart the service if I had root access.",
         ],
@@ -1375,7 +1380,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         examples: [
           {
             sentenceEn: "I strongly recommend refactoring this legacy function.",
-            sentenceVn: "Tôi tha thiết đề xuất việc tái cấu trúc hàm cũ này.",
+            sentenceVn: "Tôi thực sự khuyên nên refactor (tái cấu trúc) hàm cũ này.",
           },
         ],
       },
@@ -1433,7 +1438,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         id: "diag-gvi-2",
         type: "conjugation",
         promptEn: "Don't forget _____ (sanitize) all user input before saving it to the database.",
-        promptVn: "Đừng quên khử độc mọi dữ liệu người dùng trước khi lưu vào database.",
+        promptVn: "Đừng quên làm sạch (lọc, kiểm tra) mọi dữ liệu người dùng nhập vào trước khi lưu vào database.",
         correctAnswer: "to sanitize",
         hint: "Nhớ phải thực hiện một nhiệm vụ trong tương lai.",
         explanation: "'Forget to do something' nghĩa là quên không làm một bổn phận.",
@@ -1512,7 +1517,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         promptEn: "Queries _____ more than two seconds are logged into the slow-query file.",
         options: ["taking", "taken", "which taking", "took"],
         correctAnswer: "taking",
-        explanation: "Chủ động: Queries (which take) $\\rightarrow$ Queries taking.",
+        explanation: "Chủ động: Queries (which take) → Queries taking.",
       },
       {
         id: "diag-rrc-2",
@@ -1611,8 +1616,8 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         id: "prac-inv-1",
         type: "multiple_choice",
-        promptEn: "Hardly _____ the server restarted when new requests flooded in.",
-        options: ["had", "has", "did", "was"],
+        promptEn: "Hardly _____ we restarted the server when new requests flooded in.",
+        options: ["had", "have", "did", "were"],
         correctAnswer: "had",
         explanation: "Cấu trúc: Hardly had + S + V3 when...",
       },
@@ -1668,7 +1673,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
       {
         wrong: "It was because of a syntax error which the build failed.",
         correct: "It was because of a syntax error that the build failed.",
-        explanation: "Trong câu chẻ 'It is/was ... that', từ nối chuẩn xác nhất luôn là 'that', không dùng 'which'.",
+        explanation: "Khi nhấn mạnh trạng ngữ (because of..., in 2020...) chỉ dùng 'that'. Khi nhấn mạnh một vật, 'that' tự nhiên nhất ('which' ít gặp).",
       },
     ],
     diagnosticExercises: [
@@ -1676,7 +1681,7 @@ export const GRAMMAR_LESSONS: GrammarLesson[] = [
         id: "diag-cle-1",
         type: "multiple_choice",
         promptEn: "It was the corrupted cache file _____ caused the unexpected crash.",
-        options: ["that", "which", "what", "where"],
+        options: ["that", "it", "what", "where"],
         correctAnswer: "that",
         explanation: "Câu chẻ nhấn mạnh: 'It was X that...'",
       },
@@ -1708,6 +1713,9 @@ export function getLessonsByLevel(level?: string): GrammarLesson[] {
   if (!level || level === "all") return GRAMMAR_LESSONS;
   return GRAMMAR_LESSONS.filter((l) => l.level === level);
 }
+
+/** Foundation lessons (to be, pronouns, plurals… for A0/A1, `foundation: true`) first, then A1 → C1 */
+export const GRAMMAR_LESSONS: GrammarLesson[] = [...FOUNDATION_LESSONS, ...CORE_LESSONS];
 
 export function getLessonById(id: string): GrammarLesson | undefined {
   return GRAMMAR_LESSONS.find((l) => l.id === id);

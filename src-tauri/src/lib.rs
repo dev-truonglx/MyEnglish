@@ -166,8 +166,8 @@ const WORD_TOPICS: &str = "System Design|Database & Storage|Concurrency & Async|
 /// What English a learner at `level` can read: vocabulary range, allowed grammar, sentence length.
 fn cefr_guide(level: &str) -> &'static str {
     match level {
-        "A1" => "A1: only very common everyday words (top ~1000); present simple/continuous, can, there is/are, imperatives; max 8 words per sentence; no subordinate clauses",
-        "A2" => "A2: common words (Oxford 3000 A1-A2); past simple, going to/will, comparatives, and/but/because/when; max 12 words per sentence",
+        "A1" => "A1: only very common words (top ~1000); to be, present simple/continuous, past simple of common verbs, can, there is/are, going to/will, imperatives, a/an/the, this/that, my/your/his; max 8 words per sentence; no subordinate clauses",
+        "A2" => "A2: common words (Oxford 3000 A1-A2); past continuous, present perfect (ever/never/just/already), should/must/have to, comparatives/superlatives, and/but/because/when; max 12 words per sentence",
         "B1" => "B1: everyday and common work words; present perfect, 1st/2nd conditional, simple passive, relative clauses; max 16 words per sentence",
         "B2" => "B2: work and technical vocabulary, natural collocations; mixed conditionals, passive with modals, participle clauses, reported speech; max 22 words per sentence",
         "C2" => "C2: full native-like range incl. rare, academic and idiomatic words and fine shades of meaning; any structure (ellipsis, subjunctive, nominalisation, inversion); concise, register-aware native style",
@@ -179,16 +179,16 @@ fn cefr_guide(level: &str) -> &'static str {
 fn build_enrich_prompt(word: &str, level: &str) -> String {
     format!(
         "Dictionary entry for Vietnamese learners. Term: \"{word}\". Learner level {guide}.\n\
-Rules: every English sentence, collocation and synonym must stay within {level}, even if the term itself is harder. \
-Vietnamese must be natural. Keep fields short.\n\
+Rules: every English sentence and collocation must stay within {level}, even if the term itself is harder. \
+Each sentence_en must contain the term itself (base or -s/-ed/-ing form). Vietnamese must be natural. Keep fields short.\n\
 Return ONLY minified JSON:\n\
-{{\"cefr\":\"A1|A2|B1|B2|C1|C2 level of the term itself\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"noun|verb|adjective|adverb|phrase\",\
+{{\"cefr\":\"A1|A2|B1|B2|C1|C2 level of the term itself\",\"phonetic\":\"/IPA/\",\"part_of_speech\":\"noun|verb|adjective|adverb|pronoun|preposition|conjunction|determiner|phrase\",\
 \"topic\":\"one of {topics}\",\"meaning_vn\":\"max 12 words\",\"collocations\":[\"max 3\"],\
 \"code_snippet\":\"1-2 code lines only for programming terms, else empty\",\
 \"examples\":[{{\"sentence_en\":\"\",\"sentence_vn\":\"\",\"grammar_analysis\":\"[structure] max 15 Vietnamese words\"}}],\
 \"synonyms\":[{{\"word\":\"\",\"phonetic\":\"\",\"meaning_vn\":\"\",\"examples\":[{{\"sentence_en\":\"\",\"meaning_vn\":\"\"}}]}}],\"antonyms\":[]}}\n\
 Exactly 3 examples, each using a different {level} structure and a work or daily-life context. \
-Max 2 synonyms and 2 antonyms, each with 1 example; use [] when none fit {level}.",
+Max 2 true synonyms (any level) and 2 antonyms, each with 1 {level} example; [] if none.",
         word = word,
         level = level,
         guide = cefr_guide(level),
@@ -199,12 +199,16 @@ Max 2 synonyms and 2 antonyms, each with 1 example; use [] when none fit {level}
 fn build_grammar_prompt(topic: &str, level: &str) -> String {
     format!(
         "Write 10 English grammar questions on \"{topic}\" for Vietnamese learners at {guide}.\n\
-Rules: use only {level} vocabulary and structures; workplace or daily-life contexts; \
-mix types multiple_choice (4 options, distractors = typical learner mistakes), conjugation (base verb in [brackets]), \
-error_spotting (exactly one wrong word). Explanation in Vietnamese, max 25 words, say why the answer fits.\n\
+Rules: the target structure \"{topic}\" is allowed; everything else (words, other structures, length) stays within {level}; \
+workplace or daily-life contexts. Mix types: multiple_choice (4 different options, exactly ONE correct, \
+distractors = typical Vietnamese learner mistakes), conjugation (one blank _____ followed by the base verb in parentheses, e.g. \"She _____ (work) here.\"), \
+error_spotting (exactly one wrong word; error_word = that word exactly as written, correct_answer = its correction). \
+accepted_answers lists other fully correct answers (e.g. contractions), else []. \
+Explanation in Vietnamese, max 25 words, say why the answer fits.\n\
 Return ONLY a minified JSON array:\n\
-[{{\"type\":\"multiple_choice|conjugation|error_spotting\",\"prompt_en\":\"sentence with _____ or [verb]\",\"prompt_vn\":\"\",\
-\"hint\":\"max 8 words\",\"options\":[\"multiple_choice only\"],\"correct_answer\":\"\",\"error_word\":\"error_spotting only\",\"explanation\":\"\"}}]",
+[{{\"type\":\"multiple_choice|conjugation|error_spotting\",\"prompt_en\":\"sentence with _____\",\"prompt_vn\":\"\",\
+\"hint\":\"max 8 words\",\"options\":[\"multiple_choice only\"],\"correct_answer\":\"\",\"accepted_answers\":[],\
+\"error_word\":\"error_spotting only\",\"explanation\":\"\"}}]",
         topic = topic,
         level = level,
         guide = cefr_guide(level),
@@ -251,10 +255,10 @@ Grade: is the target word (or a form of it) used with the right meaning, grammar
 Judge for {level}: do not penalize simple but correct English. Fix only real errors. \
 better_version keeps the learner's idea, stays within {level}, max 25 words. Explanations in Vietnamese, short.\n\
 Return ONLY minified JSON:\n\
-{{\"correct\":true,\"score\":\"integer 0-100\",\"uses_target_word\":true,\
+{{\"correct\":true,\"score\":85,\"uses_target_word\":true,\
 \"corrections\":[{{\"wrong\":\"\",\"right\":\"\",\"why_vn\":\"max 15 words\"}}],\
 \"better_version\":\"\",\"explanation_vn\":\"max 30 words\"}}\n\
-corrections is [] when there is no error.",
+score is an integer 0-100 (a number, not text). corrections is [] when there is no error.",
         guide = cefr_guide(level),
         word = word,
         meaning = meaning,
@@ -275,14 +279,44 @@ Judge for {level}: do not change simple but correct English, no style rewrites. 
 wrong = the exact wrong words copied from the text (2-8 words), right = the corrected words, \
 sentence = the corrected full sentence. better_version = the whole text, natural, within {level}. Explanations in Vietnamese, short.\n\
 Return ONLY minified JSON:\n\
-{{\"score\":\"integer 0-100\",\"corrections\":[{{\"wrong\":\"\",\"right\":\"\",\"sentence\":\"\",\
+{{\"score\":85,\"corrections\":[{{\"wrong\":\"\",\"right\":\"\",\"sentence\":\"\",\
 \"category\":\"article|tense|word_form|preposition|agreement|word_choice|spelling|word_order|other\",\"why_vn\":\"max 15 words\"}}],\
 \"better_version\":\"\",\"explanation_vn\":\"max 30 words\"}}\n\
-corrections is [] when there is no error, at most 8 items.",
+score is an integer 0-100 (a number, not text). corrections is [] when there is no error, at most 8 items.",
         guide = cefr_guide(level),
         text = text_json,
         level = level,
     )
+}
+
+/// A word the learner keeps forgetting (a leech) needs new memory hooks, not a harder exercise:
+/// three new example situations, one memory tip and the word it is usually confused with.
+fn build_memory_aid_prompt(word: &str, meaning_vn: &str, level: &str) -> String {
+    let meaning = if meaning_vn.is_empty() { String::new() } else { format!(" (Vietnamese meaning: {})", meaning_vn) };
+    format!(
+        "A Vietnamese learner at {guide} keeps forgetting the English word \"{word}\"{meaning}. \
+Give NEW memory hooks. Rules: every English sentence stays within {level}, max 12 words, contains \"{word}\" (base form or with -s/-ed/-ing), \
+the three sentences use very different everyday or work situations; natural Vietnamese translations. \
+tip_vn: one short memory tip in Vietnamese (word parts, a vivid picture of the meaning, or a contrast) and never a Vietnamese spelling of the sound. \
+confusable: the English word learners most often confuse with it and the difference in Vietnamese, or null.\n\
+Return ONLY minified JSON:\n\
+{{\"examples\":[{{\"sentence_en\":\"\",\"sentence_vn\":\"\"}}],\"tip_vn\":\"max 30 words\",\"confusable\":{{\"word\":\"\",\"difference_vn\":\"max 25 words\"}}}}\n\
+Exactly 3 examples.",
+        guide = cefr_guide(level),
+        word = word,
+        meaning = meaning,
+        level = level,
+    )
+}
+
+/// A model score (number, or a number written as text) as an integer 0-100; None when it is not a number.
+fn parse_score(value: &serde_json::Value) -> Option<u64> {
+    let n = match value {
+        serde_json::Value::Number(n) => n.as_f64(),
+        serde_json::Value::String(t) => t.trim().parse::<f64>().ok(),
+        _ => None,
+    }?;
+    n.is_finite().then(|| n.round().clamp(0.0, 100.0) as u64)
 }
 
 /// Learner-written text: control characters (incl. newlines) become spaces, whitespace is collapsed.
@@ -1808,15 +1842,13 @@ async fn grade_sentence_ai(
         let obj = parsed
             .as_object_mut()
             .ok_or_else(|| format!("Unexpected grading output: {}", truncate_for_log(&cleaned, 300)))?;
-        // The model sometimes returns the score as a float or a string: normalize to an integer 0-100
-        let score = obj.get("score").and_then(|s| match s {
-            serde_json::Value::Number(n) => n.as_f64(),
-            serde_json::Value::String(t) => t.trim().parse::<f64>().ok(),
-            _ => None,
-        });
-        if let Some(score) = score {
-            obj.insert("score".into(), (score.round().clamp(0.0, 100.0) as u64).into());
-        }
+        // The score decides the review grade: without a real number the grade is refused (the app falls
+        // back to a spelling exercise) instead of being read as 0, which would grade a good sentence Again
+        let score = obj
+            .get("score")
+            .and_then(parse_score)
+            .ok_or_else(|| format!("Grading output has no numeric score: {}", truncate_for_log(&cleaned, 300)))?;
+        obj.insert("score".into(), score.into());
         serde_json::to_string(&parsed).map_err(|e| e.to_string())
     })
     .await
@@ -1852,13 +1884,47 @@ async fn correct_writing_ai(text: String, level: Option<String>, custom_path: Op
         let obj = parsed
             .as_object_mut()
             .ok_or_else(|| format!("Unexpected correction output: {}", truncate_for_log(&cleaned, 300)))?;
-        let score = obj.get("score").and_then(|s| match s {
-            serde_json::Value::Number(n) => n.as_f64(),
-            serde_json::Value::String(t) => t.trim().parse::<f64>().ok(),
-            _ => None,
-        });
-        if let Some(score) = score {
-            obj.insert("score".into(), (score.round().clamp(0.0, 100.0) as u64).into());
+        // Only shown to the learner: a missing score is left out rather than failing the correction
+        if let Some(score) = obj.get("score").and_then(parse_score) {
+            obj.insert("score".into(), score.into());
+        }
+        serde_json::to_string(&parsed).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Task execution failed: {}", e))?
+}
+
+/// New example sentences + a memory tip for a word the learner keeps forgetting. Returns the model's JSON.
+#[tauri::command]
+async fn generate_memory_aid_ai(
+    word: String,
+    meaning_vn: String,
+    level: Option<String>,
+    custom_path: Option<String>,
+) -> Result<String, String> {
+    let term = word.trim().to_string();
+    if !is_safe_term(&term) {
+        return Err("Từ không hợp lệ.".to_string());
+    }
+    let meaning = sanitize_prompt_field(&meaning_vn, 80);
+    let user_level = normalize_cefr_level(&level.unwrap_or_default());
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let (bin_path, _) = get_cli_bin_path(custom_path.as_deref());
+        println!("[MyEnglish AI] Mẹo nhớ cho \"{}\" ({})", term, user_level);
+        let prompt = build_memory_aid_prompt(&term, &meaning, &user_level);
+        let output = run_ai_cli(&bin_path, &prompt)?;
+        if !output.status.success() {
+            let err_msg = truncate_for_log(&String::from_utf8_lossy(&output.stderr), 300);
+            return Err(format!("AI CLI exited with error: {}", err_msg));
+        }
+        let raw_stdout = String::from_utf8_lossy(&output.stdout);
+        let cleaned = clean_json_string(&raw_stdout);
+        let parsed: serde_json::Value = serde_json::from_str(&cleaned).map_err(|e| {
+            format!("Failed to parse memory aid as JSON: {}. Raw: {}", e, truncate_for_log(&cleaned, 300))
+        })?;
+        if !parsed.get("examples").map(|v| v.is_array()).unwrap_or(false) {
+            return Err(format!("Unexpected memory aid output: {}", truncate_for_log(&cleaned, 300)));
         }
         serde_json::to_string(&parsed).map_err(|e| e.to_string())
     })
@@ -2267,6 +2333,7 @@ pub fn run() {
             export_backup,
             grade_sentence_ai,
             correct_writing_ai,
+            generate_memory_aid_ai,
             compute_fsrs_parameters
         ])
         .build(tauri::generate_context!())
@@ -2354,8 +2421,12 @@ mod tests {
         let known: Vec<String> = (0..120).map(|i| format!("word{}", i)).collect();
         for level in ["A1", "A2", "B1", "B2", "C1"] {
             // Rough budget in characters (~4 chars per token) to keep input cost low
-            assert!(build_enrich_prompt("latency", level).len() < 1500, "enrich {}", level);
-            assert!(build_grammar_prompt("Present simple", level).len() < 1100, "grammar {}", level);
+            let enrich = build_enrich_prompt("latency", level).len();
+            let grammar = build_grammar_prompt("Present simple", level).len();
+            assert!(enrich < 1500, "enrich {} {}", level, enrich);
+            // Grammar generation is a rare, user-triggered call; its rules (one correct option, blank format,
+            // error_word semantics) keep generated questions fair, so its budget is larger
+            assert!(grammar < 1300, "grammar {} {}", level, grammar);
             // Exclusion list is capped at 80 words
             let rec = build_recommend_prompt(level, "General Tech", 3, &known);
             assert!(rec.contains("word79,") || rec.contains("word79]"));
@@ -2569,6 +2640,49 @@ mod tests {
         assert!(prompt.contains("\"uses_target_word\""));
         assert!(prompt.len() < 1500, "{} chars", prompt.len());
         assert!(!build_grade_sentence_prompt("deploy", "", "We deploy it.", "B1").contains("Vietnamese meaning"));
+    }
+
+    #[test]
+    fn grading_needs_a_numeric_score() {
+        assert_eq!(parse_score(&serde_json::json!(88.6)), Some(89));
+        assert_eq!(parse_score(&serde_json::json!(" 70 ")), Some(70));
+        assert_eq!(parse_score(&serde_json::json!(140)), Some(100));
+        assert_eq!(parse_score(&serde_json::json!("integer 0-100")), None);
+        assert_eq!(parse_score(&serde_json::json!(null)), None);
+        let prompt = build_grade_sentence_prompt("deploy", "", "We deploy it.", "A1");
+        assert!(prompt.contains("\"score\":85"), "{}", prompt);
+        assert!(!prompt.contains("integer 0-100\""), "{}", prompt);
+    }
+
+    #[test]
+    fn memory_aid_prompt_asks_for_new_hooks_not_sound_spellings() {
+        let prompt = build_memory_aid_prompt("deploy", "triển khai", "A1");
+        assert!(prompt.contains("\"deploy\""));
+        assert!(prompt.contains("triển khai"));
+        assert!(prompt.contains("never a Vietnamese spelling of the sound"));
+        assert!(prompt.contains("max 8 words per sentence"));
+        assert!(prompt.len() < 1300, "{} chars", prompt.len());
+    }
+
+    #[test]
+    fn level_guides_match_the_grammar_lessons() {
+        // A1 lessons teach past simple, going to/will and articles; A2 lessons present perfect and modals
+        let a1 = cefr_guide("A1");
+        for structure in ["to be", "past simple", "going to", "a/an/the"] {
+            assert!(a1.contains(structure), "A1 guide lacks {}", structure);
+        }
+        let a2 = cefr_guide("A2");
+        for structure in ["present perfect", "past continuous", "should/must"] {
+            assert!(a2.contains(structure), "A2 guide lacks {}", structure);
+        }
+        let grammar = build_grammar_prompt("Past simple", "A1");
+        assert!(grammar.contains("target structure \"Past simple\" is allowed"));
+        assert!(grammar.contains("exactly ONE correct"));
+        assert!(grammar.contains("accepted_answers"));
+        assert!(grammar.contains("_____ (work)"));
+        let enrich = build_enrich_prompt("deploy", "A1");
+        assert!(enrich.contains("Each sentence_en must contain the term itself"));
+        assert!(enrich.contains("preposition"));
     }
 
     #[test]

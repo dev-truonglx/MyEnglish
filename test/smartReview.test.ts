@@ -7,6 +7,8 @@ import {
   smartSortReviewQueue,
   escapeRegExp,
   maskWordInSentence,
+  wordForms,
+  formInSentence,
   normalizeTypedText,
   prepareContextMatch,
   contractionVariants,
@@ -23,6 +25,13 @@ describe("deriveRating", () => {
   it("grades any wrong attempt as Again", () => {
     expect(deriveRating({ ...base, exerciseType: "multiple_choice", wrongAttempts: 1 })).toBe(Rating.Again);
     expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 2 })).toBe(Rating.Again);
+    // A synonym tried first does not soften a later wrong answer
+    expect(
+      deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 1, confusedWithSynonym: true })
+    ).toBe(Rating.Again);
+    expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, confusedWithSynonym: true })).toBe(
+      Rating.Hard
+    );
   });
 
   it("caps recognition exercises at Good", () => {
@@ -48,8 +57,13 @@ describe("matchTypedAnswer", () => {
     ["latency", "latency", "exact"],
     ["  Latency ", "latency", "exact"],
     ["latancy", "latency", "near"],
-    ["deploys", "deploy", "near"],
-    ["deployed", "deploy", "near"],
+    ["deploys", "deploy", "exact"],
+    ["deployed", "deploy", "exact"],
+    ["dependencies", "dependency", "exact"],
+    ["wrote", "write", "exact"],
+    ["children", "child", "exact"],
+    ["deployd", "deploy", "near"],
+    ["dependencys", "dependency", "near"],
     ["dep", "deploy", "wrong"],
     ["lat", "lot", "wrong"],
     ["", "deploy", "wrong"],
@@ -66,6 +80,13 @@ describe("matchTypedAnswer leniency", () => {
 
   it("keeps symbols strict", () => {
     expect(matchTypedAnswer("c", "c++")).toBe("wrong");
+  });
+
+  it("never takes another real word for a typo", () => {
+    expect(matchTypedAnswer("date", "data")).toBe("wrong");
+    expect(matchTypedAnswer("effect", "affect", undefined, ["effect"])).toBe("wrong");
+    expect(matchTypedAnswer("efect", "effect")).toBe("near");
+    expect(matchTypedAnswer("card", "car")).toBe("wrong");
   });
 
   it("accepts the whole context sentence", () => {
@@ -99,6 +120,17 @@ describe("isGrammarAnswerCorrect", () => {
 
   it.each(["", "don't work", "she do not work on sunday", "she does not works on sunday"])("rejects %s", (input) => {
     expect(isGrammarAnswerCorrect(input, ex)).toBe(false);
+  });
+
+  it("reads 's and 'd both ways, but never confuses it's with its", () => {
+    const knock = { type: "conjugation", promptEn: "Listen! Someone _____ (knock) on the door.", correctAnswer: "is knocking" };
+    expect(isGrammarAnswerCorrect("Listen! Someone's knocking on the door.", knock)).toBe(true);
+    expect(isGrammarAnswerCorrect("is knocking", knock)).toBe(true);
+    const would = { type: "conjugation", promptEn: "I _____ (like) a coffee.", correctAnswer: "would like" };
+    expect(isGrammarAnswerCorrect("I'd like a coffee", would)).toBe(true);
+    const its = { type: "multiple_choice", promptEn: "The app lost _____ data.", correctAnswer: "its" };
+    expect(isGrammarAnswerCorrect("it's", its)).toBe(false);
+    expect(isGrammarAnswerCorrect("its", its)).toBe(true);
   });
 
   it("does not treat error-spotting tokens as blanks", () => {
@@ -161,6 +193,34 @@ describe("smartSortReviewQueue", () => {
 describe("text helpers", () => {
   it("escapes regex metacharacters", () => {
     expect(() => new RegExp(escapeRegExp("(re)try c++ .net"))).not.toThrow();
+  });
+
+  it("inflects by the spelling rules, without producing other words", () => {
+    const forms = (w: string) => wordForms(w);
+    expect(forms("car")).not.toContain("card");
+    expect(forms("hop")).toEqual(expect.arrayContaining(["hopped", "hopping", "hops"]));
+    expect(forms("hop")).not.toContain("hoped");
+    expect(forms("hope")).toEqual(expect.arrayContaining(["hoped", "hoping", "hopes"]));
+    expect(forms("us")).toEqual(["us"]);
+    expect(forms("plan")).not.toContain("planes");
+    expect(forms("fix")).toEqual(expect.arrayContaining(["fixes", "fixed", "fixing"]));
+    expect(forms("dependency")).toContain("dependencies");
+    expect(forms("commit")).toEqual(expect.arrayContaining(["committed", "committing"]));
+    expect(forms("agree")).toContain("agreeing");
+    expect(forms("write")).toEqual(expect.arrayContaining(["wrote", "written", "writes", "writing"]));
+    expect(forms("write")).not.toContain("writed");
+    expect(forms("be")).toEqual(expect.arrayContaining(["is", "was", "been"]));
+    expect(forms("person")).toContain("people");
+    expect(forms("follow up")).toEqual(expect.arrayContaining(["followed up", "follows up"]));
+  });
+
+  it("finds the form a sentence uses", () => {
+    expect(formInSentence("We deployed it yesterday.", "deploy")).toBe("deployed");
+    expect(formInSentence("She wrote the docs.", "write")).toBe("wrote");
+    expect(formInSentence("Nothing here.", "deploy")).toBeNull();
+    expect(maskWordInSentence("Run npm install to download all dependencies.", "dependency")).toBe(
+      "Run npm install to download all ______."
+    );
   });
 
   it("masks only the first occurrence, including inflections and special characters", () => {

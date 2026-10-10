@@ -17,7 +17,6 @@ import { pipeline, type PipelineItem } from "@/services/pipeline";
 import { parseTerms, parseCollocations } from "@/types/database";
 import { useWordsStore } from "@/stores/wordsStore";
 import { PAGE_CONTAINER, handleSpeak, type DashboardTab } from "./shared";
-import StarterDecksPanel from "./StarterDecksPanel";
 
 interface CaptureTabProps {
   inputWord: string;
@@ -114,7 +113,6 @@ export default function CaptureTab({
         </div>
       </form>
 
-      <StarterDecksPanel />
 
       {/* Live Pipeline Queue */}
       {pipelineQueue.length > 0 && (

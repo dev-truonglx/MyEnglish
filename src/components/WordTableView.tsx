@@ -174,7 +174,7 @@ export default function WordTableView({
                     className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 cursor-pointer transition-colors group"
                   >
                     {/* Word Column */}
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white capitalize">
+                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors text-sm">
                           {item.word}

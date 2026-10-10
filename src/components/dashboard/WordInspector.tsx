@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   BookOpen,
   Sparkles,
@@ -17,8 +18,11 @@ import {
 import { updateWordTopic, PREDEFINED_TOPICS } from "@/services/db";
 import { parseTerms, parseCollocations } from "@/types/database";
 import { useWordsStore } from "@/stores/wordsStore";
+import { getCatalogEntries, type CatalogEntry } from "@/services/vocabCatalog";
 import { pipeline } from "@/services/pipeline";
 import { handleSpeak, type DashboardTab } from "./shared";
+import { AI_VOCAB_ENABLED } from "@/services/features";
+import { pullMessage, pullWordFromDeck } from "@/services/vocabFeed";
 
 interface WordInspectorProps {
   requestDeleteWord: (wordId: string, wordText: string, e?: React.MouseEvent) => void;
@@ -49,6 +53,12 @@ export default function WordInspector({
   /** Related terms are not added automatically (that bypassed the daily new-word limit); the learner chooses */
   const addRelatedTerm = (term: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
+    if (!AI_VOCAB_ENABLED) {
+      pullWordFromDeck(term)
+        .then((r) => setMessage(pullMessage(r)))
+        .catch(() => {});
+      return;
+    }
     pipeline.enqueue(term).then((res) =>
       setMessage(res.accepted ? `Đã thêm "${term}" vào sổ từ, AI đang phân tích...` : `Không thể thêm "${term}": ${res.reason}`)
     );
@@ -111,7 +121,7 @@ export default function WordInspector({
           <div className="flex items-center justify-between flex-wrap gap-2">
             <div>
               <div className="flex items-center gap-2.5">
-                <h2 className="text-3xl font-black text-slate-900 dark:text-white capitalize font-mono tracking-tight">
+                <h2 className="text-3xl font-black text-slate-900 dark:text-white font-mono tracking-tight">
                   {selectedWord.word}
                 </h2>
                 {selectedWord.part_of_speech && (
@@ -135,8 +145,10 @@ export default function WordInspector({
             </button>
           </div>
 
-          {/* Topic Classification & Reassignment */}
-          <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 flex items-center justify-between gap-3 shadow-sm">
+          {selectedWord.catalog_id && <CatalogDetails catalogId={selectedWord.catalog_id} />}
+
+          {/* Topic Classification & Reassignment (deck words: the topic is their level) */}
+          {!selectedWord.catalog_id && <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 flex items-center justify-between gap-3 shadow-sm">
             <div className="flex items-center gap-2">
               <Tag className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0" />
               <span className="text-xs font-mono text-slate-600 dark:text-zinc-400">Chủ đề:</span>
@@ -163,7 +175,7 @@ export default function WordInspector({
                   )}
               </select>
             </div>
-          </div>
+          </div>}
 
           {/* Vietnamese Meaning Card - Balanced readable font size */}
           <div className="p-3.5 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 space-y-1.5 shadow-sm">
@@ -693,5 +705,42 @@ export default function WordInspector({
         </div>
       </div>
     </aside>
+  );
+}
+
+/** A word of the Oxford deck: every meaning by part of speech, UK/US pronunciation, US spelling, level */
+function CatalogDetails({ catalogId }: { catalogId: string }) {
+  const [entry, setEntry] = useState<CatalogEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getCatalogEntries([catalogId])
+      .then(([e]) => !cancelled && setEntry(e ?? null))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [catalogId]);
+  if (!entry) return null;
+  return (
+    <div className="p-3 rounded-2xl bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 space-y-2 text-sm">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="px-2 py-0.5 rounded-full font-bold bg-cyan-100 dark:bg-cyan-950/70 text-cyan-800 dark:text-cyan-300">{entry.cefr}</span>
+        <span className="text-slate-500 dark:text-zinc-400">Oxford {entry.list}</span>
+        {entry.ipaUs[0] && <span className="font-mono text-slate-600 dark:text-zinc-300">US {entry.ipaUs.join(", ")}</span>}
+        {entry.ipaUk[0] && <span className="font-mono text-slate-600 dark:text-zinc-300">UK {entry.ipaUk.join(", ")}</span>}
+        {entry.variants.length > 0 && <span className="text-slate-600 dark:text-zinc-300">Mỹ viết: {entry.variants.join(", ")}</span>}
+      </div>
+      <ul className="space-y-0.5">
+        {entry.senses.map((sense, i) => (
+          <li key={i} className="text-slate-800 dark:text-zinc-200">
+            <span className="text-[11px] font-mono text-purple-700 dark:text-purple-300 mr-1.5">{sense.pos}</span>
+            {sense.vn}
+          </li>
+        ))}
+      </ul>
+      {entry.irregular.length > 0 && (
+        <p className="text-xs text-slate-500 dark:text-zinc-400">Dạng bất quy tắc: {entry.irregular.join(", ")}</p>
+      )}
+    </div>
   );
 }

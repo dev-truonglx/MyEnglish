@@ -5,6 +5,10 @@ import { analyzeText, logEncounters, type BankStatus, type ReadingAnalysis } fro
 import { pipeline } from "@/services/pipeline";
 import { addUserContextExample } from "@/services/db";
 import { PAGE_CONTAINER } from "./shared";
+import { isFoundationMode } from "@/services/learnerProfile";
+import { COMMON_WORDS, FUNCTION_WORDS } from "@/data/commonWords";
+import { AI_VOCAB_ENABLED } from "@/services/features";
+import { pullWordFromDeck } from "@/services/vocabFeed";
 
 const DRAFT_KEY = "myenglish_reading_draft_v1";
 /** Long texts are cut so highlighting stays instant */
@@ -48,10 +52,12 @@ export default function ReadingTab() {
   const [savedSentences, setSavedSentences] = useState<Set<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // A beginner only "knows" function words: everyday words (because, change, need…) are offered to learn
+  const knownCommon = useMemo(() => (isFoundationMode() ? FUNCTION_WORDS : COMMON_WORDS), []);
 
   const analysis: ReadingAnalysis | null = useMemo(
-    () => (reading ? analyzeText(reading, words) : null),
-    [reading, words]
+    () => (reading ? analyzeText(reading, words, knownCommon) : null),
+    [reading, words, knownCommon]
   );
 
   const startReading = () => {
@@ -61,7 +67,7 @@ export default function ReadingTab() {
     setReading(clean);
     setPicked(new Map());
     setSavedSentences(new Set());
-    const met = logEncounters(analyzeText(clean, words).bankHits);
+    const met = logEncounters(analyzeText(clean, words, knownCommon).bankHits);
     if (met > 0) {
       setMessage(`Bạn gặp lại ${met} từ đang học trong bài này. Gặp từ trong văn bản thật giúp bạn hiểu cách dùng của nó.`);
       setTimeout(() => setMessage(null), 5000);
@@ -81,6 +87,13 @@ export default function ReadingTab() {
     let accepted = 0;
     const refused: string[] = [];
     for (const [base, sentence] of picked) {
+      if (!AI_VOCAB_ENABLED) {
+        // The Oxford deck is the only source of words: words it has are learnt next, with this sentence
+        const r = await pullWordFromDeck(base, sentence).catch(() => ({ status: "not_in_deck", word: base }));
+        if (r.status === "not_in_deck") refused.push(base);
+        else accepted++;
+        continue;
+      }
       const res = await pipeline.enqueue(base, { context: sentence });
       if (res.accepted) accepted++;
       else refused.push(base);
@@ -89,8 +102,10 @@ export default function ReadingTab() {
     setPicked(new Map());
     refreshWords();
     setMessage(
-      `Đã thêm ${accepted} từ vào sổ, kèm câu bạn gặp chúng làm ví dụ. AI đang phân tích nghĩa (cần Claude hoặc Gemini CLI).` +
-        (refused.length ? ` Không thêm được: ${refused.join(", ")}.` : "")
+      (AI_VOCAB_ENABLED
+        ? `Đã thêm ${accepted} từ vào sổ, kèm câu bạn gặp chúng làm ví dụ. AI đang phân tích nghĩa (cần Gemini CLI).`
+        : `${accepted} từ sẽ được học sớm, kèm câu bạn gặp chúng làm ví dụ.`) +
+        (refused.length ? ` ${AI_VOCAB_ENABLED ? "Không thêm được" : "Không có trong bộ Oxford 5000"}: ${refused.join(", ")}.` : "")
     );
   };
 

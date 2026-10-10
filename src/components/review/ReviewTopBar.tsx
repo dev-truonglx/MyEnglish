@@ -1,6 +1,7 @@
 import { ChevronLeft, Layers, FileCode, Keyboard, Sparkles, Headphones } from "lucide-react";
 import type { ReviewCard } from "@/types/database";
 import type { StudyMode } from "@/hooks/useReviewSession";
+import { isSimpleMode } from "@/services/learnerProfile";
 
 interface ReviewTopBarProps {
   onExit: () => void;
@@ -24,6 +25,8 @@ export default function ReviewTopBar({
   practiceMode,
   consecutiveCorrect,
 }: ReviewTopBarProps) {
+  // Simple mode: no format selector (the app picks), no combo pill (a run of right answers is not the goal)
+  const simple = isSimpleMode();
   return (
     <div className="w-full shrink-0 mb-3 flex items-center justify-between flex-wrap gap-3">
       <button
@@ -35,6 +38,7 @@ export default function ReviewTopBar({
       </button>
 
       {/* Study Mode Selector */}
+      {!simple && (
       <div className="flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-x-auto max-w-full gap-1">
         <button
           onClick={() => handleModeChange("mixed")}
@@ -130,10 +134,11 @@ export default function ReviewTopBar({
           <span>Luyện nghe</span>
         </button>
       </div>
+      )}
 
       {/* Progress indicator & Streak Pill */}
       <div className="flex items-center gap-3 flex-wrap justify-end">
-        {consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
+        {!simple && consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
           <div
             className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shadow-md transition-all duration-300 animate-in fade-in zoom-in-95 ${
               consecutiveCorrect >= 10
@@ -148,11 +153,7 @@ export default function ReviewTopBar({
               {consecutiveCorrect >= 10 ? "👑" : consecutiveCorrect >= 5 ? "⚡" : "🔥"}
             </span>
             <span className="tracking-wide">
-              {consecutiveCorrect >= 10
-                ? `Siêu chuỗi x${consecutiveCorrect}!`
-                : consecutiveCorrect >= 5
-                ? `Chuỗi x${consecutiveCorrect}!`
-                : `Combo x${consecutiveCorrect}!`}
+              {`Đúng liền ${consecutiveCorrect} câu`}
             </span>
           </div>
         )}
@@ -164,17 +165,17 @@ export default function ReviewTopBar({
               className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"
               title={
                 currentWord.direction === "production"
-                  ? "Thẻ nhớ lại: tự viết/nghe ra từ tiếng Anh (lịch ôn riêng)"
-                  : "Thẻ nhận diện: hiểu nghĩa khi gặp từ (lịch ôn riêng)"
+                  ? "Tự nhớ ra từ tiếng Anh từ nghĩa tiếng Việt (lịch ôn riêng)"
+                  : "Hiểu nghĩa khi gặp từ tiếng Anh (lịch ôn riêng)"
               }
             >
-              {currentWord.direction === "production" ? "Nhớ lại" : "Nhận diện"}
+              {currentWord.direction === "production" ? "Tự nhớ ra từ" : "Hiểu nghĩa"}
             </span>
           )}
           {practiceMode && (
             <span
               className="ml-2 px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300"
-              title="Không có từ đến hạn — phiên này không thay đổi lịch ôn FSRS"
+              title="Không có từ đến hạn: phiên này không thay đổi lịch ôn"
             >
               Luyện thêm
             </span>

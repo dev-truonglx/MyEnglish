@@ -69,31 +69,33 @@ export async function generateSmartMnemonic(word: WordDetail): Promise<string> {
   // Algorithmic memory association generator
   const target = word.word.toLowerCase();
   const meaning = word.meaning_vn.split(/[;\n]/)[0].trim();
-  const firstLetter = target.charAt(0).toUpperCase();
 
   let hook = "";
 
-  // Common high-frequency developer words with hand-crafted vivid mnemonics
+  // Hand-written hooks for a few common developer words. They explain the meaning through word parts or a
+  // picture, never through a Vietnamese spelling of the sound ("La-ten-xì" taught a wrong pronunciation).
   const PRESET_MNEMONICS: Record<string, string> = {
-    ephemeral: '💡 Âm thanh giống "ép-phê-mờ": một hiệu ứng (ép phê) mờ ảo chỉ tồn tại chớp nhoáng, thoáng qua.',
-    resilience: '💡 Liên tưởng "ri-zi-li-ừn" (như dây chun co giãn): kéo căng cỡ nào cũng tự bật hồi phục lại trạng thái ban đầu.',
-    scalability: '💡 "Scale" (chiếc thang leo): hệ thống có thể bắc thêm nhiều bậc thang để tải hàng triệu người dùng cùng lúc.',
-    latency: '💡 "La-ten-xì" (ngồi la cà đợi trà xì tin): mạng đi đường vòng nên bị trễ và đợi lâu.',
-    concurrency: '💡 "Con-cơ-rần" (cùng rần rần chạy đua): nhiều luồng xử lý đồng thời cùng lúc mà không chờ đợi nhau.',
-    idempotent: '💡 "Ai-đem-pô-tần": đem gửi request 1 lần hay 100 lần thì kết quả nhận về vẫn y nguyên một trạng thái.',
-    immutable: '💡 "In-mút": đã đúc vào khuôn đá mút rồi thì không thể biến đổi (bất biến) được nữa.',
-    redundancy: '💡 "Rê-đan-đần" (rê thêm đồ dự phòng): thêm server phụ để khi con chính chết thì con phụ lập tức thế chân.',
-    throughput: '💡 "Through" (xuyên qua) + "Put" (đặt vào): lượng dữ liệu thực tế đẩy trôi chảy qua ống trong 1 giây.',
-    middleware: '💡 "Middle" (ở giữa): người gác cổng đứng ở giữa đón gói tin request trước khi đưa vào tận phòng server.',
-    debounce: '💡 "Đè-bounc-e" (đè nút lò xo): khi user gõ liên tục thì đợi buông tay ra mới chịu kích hoạt gọi hàm.',
-    throttle: '💡 "Thợ-rốt-ga" (van tiết lưu): giới hạn xe chỉ được vặn ga 1 lần mỗi giây dù có nhấn liên tục.',
+    ephemeral: "💡 Như một tin nhắn tự xóa: chỉ tồn tại trong thời gian ngắn rồi biến mất (tạm thời, chóng qua).",
+    resilience: "💡 Như dây chun: kéo căng hay bị lỗi thì vẫn tự hồi phục về trạng thái ban đầu.",
+    scalability: "💡 \"scale\" = mở rộng quy mô: hệ thống thêm máy để phục vụ thêm hàng triệu người dùng.",
+    latency: "💡 Thời gian chờ giữa lúc bấm và lúc có phản hồi: càng thấp càng nhanh (low latency).",
+    concurrency: "💡 \"con\" (cùng) + \"current\" (đang chạy): nhiều việc chạy cùng lúc.",
+    idempotent: "💡 Bấm nút thanh toán 1 lần hay 5 lần thì kết quả vẫn như 1 lần: gọi lại không làm thay đổi thêm.",
+    immutable: "💡 \"im-\" (không) + \"mutable\" (thay đổi được) = không thay đổi được.",
+    redundancy: "💡 Như lốp dự phòng: thêm một bản sao để khi cái chính hỏng thì cái phụ thay thế ngay.",
+    throughput: "💡 \"through\" (xuyên qua) + \"put\" (đặt vào): lượng dữ liệu đi qua hệ thống mỗi giây.",
+    middleware: "💡 \"middle\" (ở giữa): lớp đứng giữa, xử lý request trước khi nó tới phần chính.",
+    debounce: "💡 Như thang máy đợi mọi người vào hết rồi mới đóng cửa: đợi người dùng ngừng gõ rồi mới chạy.",
+    throttle: "💡 Như van nước: dù mở hết cỡ, mỗi giây cũng chỉ cho chảy một lượng nhất định.",
   };
 
   if (PRESET_MNEMONICS[target]) {
     hook = PRESET_MNEMONICS[target];
   } else {
-    // Dynamic structured heuristic mnemonic
-    hook = `💡 [Mẹo ghi nhớ]: Từ "${word.word}" mang nghĩa là "${meaning}". Hãy liên tưởng chữ "${firstLetter}" với hành động cốt lõi và đặt nó trong câu ví dụ: "${word.examples?.[0]?.sentence_en || word.word}".`;
+    const example = word.examples?.[0]?.sentence_en;
+    hook = example
+      ? `💡 Đọc to câu ví dụ hai lần: "${example}". Rồi tự đặt một câu của riêng bạn với "${word.word}" (${meaning}).`
+      : `💡 Tự đặt một câu ngắn về công việc của bạn với "${word.word}" (${meaning}) và đọc to lên.`;
   }
 
   // Don't cache hooks built from a placeholder meaning; regenerate once the word is enriched

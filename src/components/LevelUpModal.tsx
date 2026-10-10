@@ -70,7 +70,7 @@ export default function LevelUpModal() {
 
               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-amber-500/10 text-amber-400 border border-amber-500/30 mt-4">
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>LEVEL UP!</span>
+                <span>LÊN CẤP!</span>
               </div>
             </div>
 
@@ -79,7 +79,7 @@ export default function LevelUpModal() {
                 Cấp Độ {levelUpData.newLevel}
               </h3>
               <p className="text-xs text-zinc-400">
-                Bạn vừa bứt phá giới hạn trí nhớ! Tiếp tục giữ vững phong độ nhé.
+                Học đều mỗi ngày đang có kết quả. Cứ giữ nhịp này nhé!
               </p>
             </div>
 
@@ -112,7 +112,7 @@ export default function LevelUpModal() {
                 <h4 className="text-sm font-bold text-white truncate">{badge.title}</h4>
                 <p className="text-xs text-zinc-400 line-clamp-1">{badge.description}</p>
                 <span className="inline-block text-[11px] font-mono font-bold text-emerald-400 mt-0.5">
-                  +{badge.xpBonus} XP Thưởng
+                  +{badge.xpBonus} XP thưởng
                 </span>
               </div>
               <button

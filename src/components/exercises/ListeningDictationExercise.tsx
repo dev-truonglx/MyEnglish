@@ -61,10 +61,9 @@ export default function ListeningDictationExercise({
       if (option.isCorrect) {
         setIsAnswered(true);
         const attempts = wrongIds.size;
-        completeTimerRef.current = setTimeout(() => {
-          completeTimerRef.current = null;
-          onComplete(attempts === 0, attempts, Rating.Good);
-        }, 1400);
+        // Reported at once: the session keeps this card on screen until the learner continues
+        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+        onComplete(attempts === 0, attempts, Rating.Good);
       } else {
         setWrongIds((prev) => new Set(prev).add(option.id));
       }

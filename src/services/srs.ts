@@ -44,6 +44,10 @@ const FSRS_RETENTION_KEY = "myenglish_fsrs_request_retention";
 const FSRS_MAX_INTERVAL_KEY = "myenglish_fsrs_max_interval";
 const STUDY_LIMITS_KEY = "myenglish_study_limits_v1";
 
+/** A word's recall card is created once its recognition card reaches this stability (days); 7 in
+ * foundation mode (learnerProfile.productionUnlockDays), where recognition needs to settle first */
+export const PRODUCTION_UNLOCK_STABILITY_DAYS = 3;
+
 export interface StudyLimits {
   newCardsPerDay: number; // Max never-reviewed words introduced per day
   maxSessionSize: number; // Max cards in one flashcard session
@@ -222,20 +226,21 @@ export function getCardRetrievability(row: Partial<SRSReview>, now: Date = new D
 }
 
 /**
- * Format interval into human readable short representation (1m, 10m, 2h, 3d, 1mo, 1y)
+ * When the card comes back, in Vietnamese ("1 phút", "10 phút", "2 giờ", "3 ngày", "2 tháng", "1,5 năm").
+ * Short English units ("1m") were read as "1 month" by learners.
  */
 export function formatIntervalPreview(due: Date, now: Date = new Date()): string {
   const diffMs = due.getTime() - now.getTime();
-  if (diffMs <= 60 * 1000) return "1m";
+  if (diffMs <= 60 * 1000) return "1 phút";
   const mins = Math.round(diffMs / (60 * 1000));
-  if (mins < 60) return `${mins}m`;
+  if (mins < 60) return `${mins} phút`;
   const hours = Math.round(diffMs / (60 * 60 * 1000));
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return `${hours} giờ`;
   const days = Math.round(diffMs / (24 * 60 * 60 * 1000));
-  if (days < 30) return `${days}d`;
+  if (days < 30) return `${days} ngày`;
   const months = Math.round(days / 30);
-  if (months < 12) return `${months}mo`;
-  return `${(days / 365).toFixed(1)}y`;
+  if (months < 12) return `${months} tháng`;
+  return `${(days / 365).toFixed(1).replace(".", ",")} năm`;
 }
 
 export interface IntervalPreviews {
@@ -286,7 +291,8 @@ export async function getDueWords(): Promise<WordDetail[]> {
 export async function recordReview(
   wordId: string,
   rating: Rating,
-  requestedDirection: CardDirection = "recognition"
+  requestedDirection: CardDirection = "recognition",
+  options: { unlockProduction?: boolean } = {}
 ): Promise<FSRSResult> {
   const db = await getDatabase();
   const now = new Date();
@@ -376,11 +382,20 @@ export async function recordReview(
   );
 
   // Once a word is known by recognition, start training recall with its own production card.
+  // "Known" = in Review with at least PRODUCTION_UNLOCK_STABILITY_DAYS of stability: typing the word from
+  // its meaning right after one quiz is too hard for a beginner (lots of Again, rising difficulty), so
+  // recall starts after the word has survived a real review (in practice, the second successful one).
   // It becomes due tomorrow so both directions are not drilled in the same session. It starts as a New
   // card: FSRS sets its initial stability from the first recall grade, which is the real evidence of how
   // well the word can be produced (copying the recognition stability would overstate it, and a non-new
-  // card would also bypass the daily limit of new recall cards).
-  if (direction === "recognition" && updatedCard.state === State.Review) {
+  // card would also bypass the daily limit of new cards).
+  // A word marked "already known" (options.unlockProduction false) waits for a real review first.
+  if (
+    options.unlockProduction !== false &&
+    direction === "recognition" &&
+    updatedCard.state === State.Review &&
+    updatedCard.stability >= productionUnlockDays()
+  ) {
     await db.execute(
       `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
        VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
@@ -450,6 +465,8 @@ export async function countTodayWork(): Promise<{
   comeback: ComebackStatus | null;
 }> {
   const { todayWorkFromCounts, getNewCardsIntroducedToday } = await import("./smartReview");
+  // A new day may need new words of the chosen levels in the buffer (cheap when it is full)
+  await import("./vocabFeed").then((m) => m.topUpNewWords()).catch(() => {});
   const [counts, introduced] = await Promise.all([
     countDueCards(),
     getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 })),
@@ -583,7 +600,10 @@ import {
   getLastPopupDisplayTime,
   recordPopupDisplayed,
   getNextReminderTime,
+  reminderPause,
+  getNudgesShownToday,
 } from "./reminderSettings";
+import { productionUnlockDays } from "./learnerProfile";
 import {
   evaluateMotivationState,
   selectMicroQuizQuestion,
@@ -593,6 +613,10 @@ import {
 import { computeStreak, getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
 import {
   detectMoment,
+  dueAnchor,
+  markAnchorFired,
+  ANCHOR_TIMES,
+  type ReminderAnchor,
   getQuietHours,
   refreshQuietHours,
   MIN_GAP_AFTER_REMINDER_MS,
@@ -715,6 +739,7 @@ class SRSBackgroundWorker {
   private pendingMoment: { kind: ReminderMoment; at: number } | null = null;
   /** The moment this tick's reminder is shown for (null = by the clock) */
   private activeMoment: ReminderMoment | null = null;
+  private activeAnchor: ReminderAnchor | null = null;
 
   /** Read the computer's state (at most every 10 s) and remember the latest transition */
   private async observeMoment(now: number): Promise<ReminderMoment | null> {
@@ -752,12 +777,21 @@ class SRSBackgroundWorker {
 
         const now = Date.now();
         // Natural transitions (back at the computer, screen share over...) may bring the reminder forward
-        const moment = settings.contextMoments ? await this.observeMoment(now) : null;
+        // A study time the learner chose ("after lunch") counts as a moment too
+        const anchor = dueAnchor(new Date(now), settings.anchors ?? []);
+        const moment = anchor ? ANCHOR_TIMES[anchor].moment : settings.contextMoments ? await this.observeMoment(now) : null;
         if (settings.avoidQuietHours && now - this.lastQuietRefresh > 60 * 60 * 1000) {
           this.lastQuietRefresh = now;
           refreshQuietHours().catch(() => {});
         }
         if (isSnoozed()) return;
+        // Night, today's goal done, or enough reminders for one day: wait until tomorrow
+        const pause = reminderPause(settings, {
+          hour: new Date(now).getHours(),
+          goalReached: (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal(),
+          shownToday: getNudgesShownToday(),
+        });
+        if (pause) return;
 
         const lastDisplay = getLastPopupDisplayTime();
 
@@ -780,6 +814,7 @@ class SRSBackgroundWorker {
           return;
         }
         this.activeMoment = momentReady ? moment : null;
+        this.activeAnchor = momentReady ? anchor : null;
       }
 
       if (!forceTrigger) {
@@ -837,6 +872,7 @@ class SRSBackgroundWorker {
           hour: new Date().getHours(),
           comeback,
           moment: this.activeMoment,
+          freezes: streakRes.freezes,
         });
 
         const dueWords = await getDueWordsFromDb();
@@ -859,6 +895,7 @@ class SRSBackgroundWorker {
       }
 
       await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
+      if (this.activeAnchor) markAnchorFired(this.activeAnchor);
       // The moment was used: the next one has to be a new transition
       this.pendingMoment = null;
     } catch (err) {

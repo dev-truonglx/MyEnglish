@@ -5,6 +5,10 @@
  *    closed early / snoozed; flashcard session completed
  *  - "pretest": the meaning of a new word guessed before its introduction (meta.correct)
  *  - "encounter": a word being learned met in real text (reading mode), exposure only
+ *  - "pronunciation_quiz": a pronunciation lesson's listening quiz finished (meta.lessonId, correct, total)
+ *  - "say_aloud": the learner repeated a word aloud and rated themselves (meta.ok), never graded
+ *  - "grammar_intro": first meeting with a grammar point in the popup (meta.lessonId, correct)
+ *  - "known": a new word the learner said they already know (scheduled as Easy, no quiz)
  * Used to celebrate progress that matters and to show when the learner actually studies.
  */
 import { getDatabase } from "./db";
@@ -23,7 +27,11 @@ export type LearningEventType =
   | "popup_snoozed"
   | "session_completed"
   | "pretest"
-  | "encounter";
+  | "encounter"
+  | "pronunciation_quiz"
+  | "say_aloud"
+  | "grammar_intro"
+  | "known";
 
 export interface LearningEvent {
   type: LearningEventType;

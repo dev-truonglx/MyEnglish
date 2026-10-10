@@ -52,3 +52,18 @@ wore woke ate eaten drank flew flown hung led lent shut sang swam
 `;
 
 export const COMMON_WORDS: ReadonlySet<string> = new Set(WORDS.split(/\s+/).filter(Boolean));
+
+/**
+ * Function words only (articles, pronouns, auxiliaries, prepositions, conjunctions, question words):
+ * what an absolute beginner can be assumed to recognise. In foundation mode the reader treats only
+ * these as known, so everyday words (because, need, change…) are still offered as words to learn.
+ */
+const FUNCTION = `
+a an the this that these those i me my mine you your yours he him his she her hers it its we us our ours
+they them their theirs myself yourself be am is are was were been being do does did done have has had
+having will would shall should can could may might must not no yes and or but so if than as of to in on
+at by for with from into up down out off over under there here what which who whom whose why how where
+when let's ok okay
+`;
+
+export const FUNCTION_WORDS: ReadonlySet<string> = new Set(FUNCTION.split(/\s+/).filter(Boolean));

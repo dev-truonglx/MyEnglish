@@ -154,6 +154,9 @@ describe("background worker", () => {
   });
 
   it("postpones the reminder while an app is full screen and shows the corner nudge once free", async () => {
+    // A daytime hour: at night the quiet hours would hold the reminder whatever the blockers
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T14:00:00"));
     const worker = await setup(true);
     blockers = { ...none, fullscreen_app: "Keynote" };
     await worker.tick();
@@ -168,18 +171,20 @@ describe("background worker", () => {
 
   it("waits while the user is typing, then shows the nudge after the max wait", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
-    vi.setSystemTime(new Date("2026-10-05T08:00:00Z"));
+    vi.setSystemTime(new Date("2026-10-05T10:00:00"));
     const worker = await setup(true);
     blockers = { ...none, idle_seconds: 1 };
     await worker.tick();
     expect(invokeCalls).not.toContain("show_review_nudge");
 
-    vi.setSystemTime(new Date("2026-10-05T08:11:00Z"));
+    vi.setSystemTime(new Date("2026-10-05T10:11:00"));
     await worker.tick();
     expect(invokeCalls).toContain("show_review_nudge");
   });
 
   it("ignores blockers when the setting is off", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T14:00:00"));
     const worker = await setup(false);
     blockers = { ...none, fullscreen_app: "Keynote" };
     await worker.tick();

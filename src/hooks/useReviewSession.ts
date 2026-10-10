@@ -8,6 +8,7 @@ import {
 import { calculateStreakAndGoal } from "@/services/streak";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { isValidEvidence, toCard } from "@/services/cards";
+import { isSimpleMode } from "@/services/learnerProfile";
 import {
   isLeech,
   isNewCard,
@@ -16,6 +17,7 @@ import {
   selectExerciseType,
   deriveRating,
   matchTypedAnswer,
+  formInSentence,
   pickExample,
   prepareContextMatch,
   prepareMeaningMatch,
@@ -34,14 +36,16 @@ import {
   postponeNewCard,
   recordCardAnswer,
   recordIntro,
+  markWordKnown,
   schedulingDecision,
   type PracticeReason,
 } from "@/services/reviewRecorder";
+import { nextWaitingWord } from "@/services/vocabFeed";
 import { needsIntro } from "@/services/popupSession";
 import { buildPretest, recordPretest, shouldPretest, type PretestResult } from "@/services/pretest";
 import { celebrationFor, type Celebration } from "@/services/celebrations";
 import { logLearningEvent } from "@/services/learningEvents";
-import { checkAndUnlockAchievements } from "@/services/achievements";
+import { checkAndUnlockAchievements, recordFirstTryCorrect } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
 import { handleSpeak } from "@/components/review/speech";
 
@@ -69,7 +73,8 @@ export type StudyMode =
   | "meaning_match"
   | "listening"
   | "reverse_cloze"
-  | "free_writing";
+  | "free_writing"
+  | "letter_tiles";
 
 export interface SessionStats {
   /** Words that reached long-term memory in this session */
@@ -103,6 +108,8 @@ interface UseReviewSessionOptions {
 export function useReviewSession({ wordsToReview, distractorPool, practiceMode }: UseReviewSessionOptions) {
   // Preferred mode persistence
   const [mode, setMode] = useState<StudyMode>(() => {
+    // Simple mode: the app always picks the exercise (no mode selector on screen)
+    if (isSimpleMode()) return "mixed";
     try {
       const saved = localStorage.getItem("myenglish_flashcard_mode");
       if (saved) return saved as StudyMode;
@@ -138,8 +145,16 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
   }, []);
   const answerLockedRef = useRef(false);
-  // Grade of a correct typed answer, applied when the user continues (Enter / "Tiếp tục")
-  const [pendingRating, setPendingRating] = useState<Rating | null>(null);
+  // A finished answer (typed word, or an exercise such as multiple choice) waiting for the learner to
+  // continue (Enter / "Tiếp tục"): the card stays on screen so the right answer can be read. The response
+  // time is taken when the answer was given, not when the learner continues.
+  const [pendingAnswer, setPendingAnswer] = useState<{
+    rating: Rating;
+    exerciseType?: ExerciseType;
+    attempts?: number;
+    responseTimeMs: number;
+  } | null>(null);
+  const pendingRating = pendingAnswer?.rating ?? null;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
@@ -198,6 +213,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     }
     return {
       totalWords: collection.length,
+      rememberedWords: collection.filter((w) => (w.srs.state ?? 0) === 2).length,
       masteredWords: collection.filter((w) => (w.srs.state ?? 0) === 2 && (w.srs.stability ?? 0) >= 21).length,
       currentStreak: calculateStreakAndGoal(collection).currentStreak,
       topicMasterCount: Math.max(0, ...masteredByTopic.values()),
@@ -277,7 +293,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       currentWord.direction === "production" &&
       (currentWord.srs.stability ?? 0) >= MATURE_STABILITY_DAYS &&
       freeWritingUsedToday() < FREE_WRITING_PER_DAY &&
-      Math.random() < 0.35
+      // One mature review in three (deterministic, like selectExerciseType)
+      (currentWord.srs.reps ?? 0) % 3 === 0
     ) {
       return "free_writing";
     }
@@ -318,7 +335,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     setFallbackMode(null);
     gradingLockRef.current = false;
     answerLockedRef.current = false;
-    setPendingRating(null);
+    setPendingAnswer(null);
     synonymTriedRef.current = false;
     cardStartTime.current = Date.now(); // Reset response timer
     setTimeout(() => {
@@ -353,6 +370,28 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     setCurrentIndex((prev) => prev + 1);
   };
 
+  /** "Đã biết": only for a brand-new word, never for a word being relearned */
+  const canMarkKnown =
+    isIntroCard && !!currentWord && currentWord.direction === "recognition" && (currentWord.srs.reps ?? 0) === 0;
+
+  /**
+   * The learner already knows this new word: it is scheduled as Easy without a quiz (outside the daily
+   * budget) and the next waiting word takes its place in the session.
+   */
+  const handleIntroKnown = async () => {
+    if (!currentWord || !canMarkKnown || gradingLockRef.current) return;
+    gradingLockRef.current = true;
+    const word = currentWord;
+    introducedAtRef.current.set(currentKey, Date.now());
+    await markWordKnown(word.id).catch(() => false);
+    const replacement = await nextWaitingWord(queue.map((c) => c.id)).catch(() => null);
+    setQueue((prev) => {
+      const rest = prev.filter((c, i) => i <= currentIndex || c.id !== word.id);
+      return replacement ? [...rest, toCard(replacement, "recognition")] : rest;
+    });
+    setCurrentIndex((prev) => prev + 1);
+  };
+
   // Exercises report their own attempts; the FSRS grade is derived centrally.
   // An exercise reporting Hard with 0 wrong attempts means a hint was used.
   const gradeExercise = (exerciseType: ExerciseType, attempts: number, exerciseRating: Rating): Rating =>
@@ -364,7 +403,12 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       srs: currentWord?.srs,
     });
 
-  const handleGrade = async (requestedRating: Rating, overrideExerciseType?: ExerciseType, attempts?: number) => {
+  const handleGrade = async (
+    requestedRating: Rating,
+    overrideExerciseType?: ExerciseType,
+    attempts?: number,
+    answeredInMs?: number
+  ) => {
     // A ref, not state: a second grade queued from a stale render (double Enter, Skip + timer)
     // must not record the card twice or skip the next card
     if (!currentWord || gradingLockRef.current) return;
@@ -376,7 +420,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       currentWord.direction === "recognition" && requestedRating === Rating.Easy ? Rating.Good : requestedRating;
 
     const activeExType = overrideExerciseType || effectiveExerciseType;
-    const responseTimeMs = Date.now() - cardStartTime.current;
+    const responseTimeMs = answeredInMs ?? Date.now() - cardStartTime.current;
     const wordIsLeech = isLeech(currentWord.srs);
     const attemptCount = attempts ?? wrongAttempts;
     const isFirstTry = attemptCount === 0 && !showHint;
@@ -455,6 +499,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
 
       // Check gamification achievements (scheduled answers only)
       if (decision.scheduled) {
+        if (rating >= Rating.Good && attemptCount === 0) recordFirstTryCorrect();
         checkAndUnlockAchievements({
           ...collectionStats,
           consecutiveCorrect: rating >= Rating.Good ? consecutiveCorrect + 1 : 0,
@@ -482,6 +527,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       } else {
         triggerConfetti(3000);
         setSessionCompleted(true);
+        checkAndUnlockAchievements({ ...collectionStats, sessionCompleted: true });
         logLearningEvent("session_completed", { meta: { cards: reviewCount + 1, practice: practiceMode } });
       }
     } catch (err) {
@@ -506,7 +552,14 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     }
 
     const clozeSentence = effectiveExerciseType === "cloze" ? pickExample(currentWord)?.sentence_en : undefined;
-    const match = matchTypedAnswer(userInput, currentWord.word, clozeSentence);
+    // The form the blank needs ("deployed"); any correct form of the word counts as recalled
+    const expectedForm = formInSentence(clozeSentence, currentWord.word) ?? currentWord.word;
+    const match = matchTypedAnswer(
+      userInput,
+      currentWord.word,
+      clozeSentence,
+      (distractorPool ?? wordsToReview).map((w) => w.word)
+    );
     const matched = match !== "wrong";
 
     // A synonym of the target is not a memory failure: the meaning was recalled, the exact word was not.
@@ -528,8 +581,12 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       // Lock the card right away: Enter / Skip / Show answer during the short delay are ignored
       answerLockedRef.current = true;
       setIsCorrect(true);
+      const typedForm = userInput.trim().toLowerCase();
       setFeedbackMessage({
-        text: "Chính xác tuyệt đối! 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.",
+        text:
+          clozeSentence && typedForm !== expectedForm.toLowerCase()
+            ? `Đúng từ rồi! Trong câu này dùng dạng "${expectedForm}". Nhấn Enter hoặc Tiếp tục.`
+            : "Chính xác! 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.",
         type: "success",
       });
       handleSpeak(currentWord.word);
@@ -546,13 +603,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       });
       if (match === "near") {
         setFeedbackMessage({
-          text: `Gần đúng! Từ chính xác là "${currentWord.word}" (tính là Khó). Nhấn Enter hoặc Tiếp tục.`,
+          text: `Gần đúng! Từ chính xác là "${expectedForm}" (tính là Khó). Nhấn Enter hoặc Tiếp tục.`,
           type: "info",
         });
       }
 
       // No auto-advance: the learner reads the answer and continues when ready
-      setPendingRating(rating);
+      setPendingAnswer({ rating, responseTimeMs: Date.now() - cardStartTime.current });
     } else {
       // ---------------- INCORRECT ----------------
       const newAttempts = wrongAttempts + 1;
@@ -569,16 +626,16 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
       if (newAttempts >= 2) {
         setShowHint(true);
         setFeedbackMessage({
-          text: `Chưa chính xác (đã thử sai ${newAttempts} lần). Hãy xem gợi ý, thử lại hoặc nhấn Xem kết quả / Bỏ qua.`,
+          text: "Chưa đúng. Xem gợi ý rồi thử lại, hoặc xem đáp án: từ này sẽ quay lại sớm để bạn ôn.",
           type: "error",
         });
       } else {
-        const right = firstMismatchIndex(userInput, currentWord.word);
+        const right = firstMismatchIndex(userInput, expectedForm);
         setFeedbackMessage({
           text:
             right > 0
-              ? `Chưa chính xác (lần ${newAttempts}): đúng ${right} chữ cái đầu, sai từ chữ thứ ${right + 1}. Thử lại!`
-              : `Chưa chính xác, hãy thử lại! (Lần ${newAttempts})`,
+              ? `Gần rồi: đúng ${right} chữ cái đầu, xem lại từ chữ thứ ${right + 1} nhé.`
+              : "Chưa đúng, thử lại nhé!",
           type: "error",
         });
       }
@@ -591,10 +648,21 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     }
   };
 
-  /** Apply the grade of a correct typed answer and go to the next card */
+  /** Apply the grade of the finished answer and go to the next card */
   const confirmCorrectAnswer = () => {
-    if (pendingRating === null) return;
-    handleGrade(pendingRating);
+    if (!pendingAnswer) return;
+    handleGrade(pendingAnswer.rating, pendingAnswer.exerciseType, pendingAnswer.attempts, pendingAnswer.responseTimeMs);
+  };
+
+  /**
+   * An exercise was answered (multiple choice, letter tiles, matching…): keep it on screen with the right
+   * answer until the learner continues, instead of jumping to the next card.
+   */
+  const holdExerciseAnswer = (rating: Rating, exerciseType: ExerciseType, attempts: number) => {
+    if (!currentWord || gradingLockRef.current || pendingAnswer) return;
+    // Recognition is capped at Good (as when it is recorded), so the "see it again in…" preview is right
+    const shown = currentWord.direction === "recognition" && rating === Rating.Easy ? Rating.Good : rating;
+    setPendingAnswer({ rating: shown, exerciseType, attempts, responseTimeMs: Date.now() - cardStartTime.current });
   };
 
   // User explicitly skips this word
@@ -626,6 +694,15 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     const handleKeyDown = (e: KeyboardEvent) => {
       if (sessionCompleted || isAdvancing) return;
 
+      // Answer waiting (any exercise): Enter, from the input or anywhere, moves to the next card
+      if (pendingAnswer) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          confirmCorrectAnswer();
+        }
+        return;
+      }
+
       const isInteractiveExercise = [
         "multiple_choice",
         "sentence_builder",
@@ -634,6 +711,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
         "listening",
         "reverse_cloze",
         "free_writing",
+        "letter_tiles",
       ].includes(effectiveExerciseType);
 
       if (isInteractiveExercise) return;
@@ -652,15 +730,6 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
 
       const isTyping =
         e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
-
-      // Correct answer waiting: Enter (from the input or anywhere) moves to the next card
-      if (pendingRating !== null) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          confirmCorrectAnswer();
-        }
-        return;
-      }
 
       // In Cloze or Spelling mode, if typing into input, Enter submits answer
       if (isTyping) {
@@ -700,7 +769,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     isAdvancing,
     wrongAttempts,
     showHint,
-    pendingRating,
+    pendingAnswer,
     isIntroCard,
     isPretestCard,
   ]);
@@ -709,6 +778,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     revealedWithoutRecall,
     pendingRating,
     confirmCorrectAnswer,
+    holdExerciseAnswer,
     mode,
     handleModeChange,
     setFallbackMode,
@@ -718,6 +788,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode }
     effectiveExerciseType,
     isIntroCard,
     handleIntroDone,
+    canMarkKnown,
+    handleIntroKnown,
     pretest,
     isPretestCard,
     pretestResult,

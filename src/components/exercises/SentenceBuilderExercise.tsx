@@ -117,10 +117,8 @@ export default function SentenceBuilderExercise({
       }
 
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      completeTimerRef.current = setTimeout(() => {
-        completeTimerRef.current = null;
-        onCompleteRef.current(true, attempts, rating);
-      }, 1000);
+      // Reported at once: the session keeps this card on screen until the learner continues
+      onCompleteRef.current(true, attempts, rating);
     } else {
       setIsCorrect(false);
       setWrongAttempts((prev) => {

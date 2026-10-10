@@ -25,6 +25,10 @@ export interface ReminderSettings {
   preferPrimaryMonitor: boolean; // show the reminder on the primary monitor instead of the one under the cursor
   contextMoments: boolean; // also remind at natural transitions: back at the computer, screen share / full screen over
   avoidQuietHours: boolean; // skip clock-based reminders in hours where they are almost always ignored
+  stopAfterGoal: boolean; // no more reminders today once the daily goal is reached
+  nightQuiet: boolean; // no reminders from NIGHT_QUIET_START to NIGHT_QUIET_END
+  maxNudgesPerDay: number; // at most this many reminders a day (0 = no limit)
+  anchors: ReminderAnchor[]; // study times chosen by the learner ("after lunch"), see reminderMoments
 }
 
 const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
@@ -45,7 +49,53 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   preferPrimaryMonitor: false,
   contextMoments: true,
   avoidQuietHours: true,
+  stopAfterGoal: true,
+  nightQuiet: true,
+  maxNudgesPerDay: 8,
+  anchors: [],
 };
+
+/** Night hours without reminders (local time): from 22:00 to 07:00 */
+export const NIGHT_QUIET_START = 22;
+export const NIGHT_QUIET_END = 7;
+
+export type ReminderPause = "night" | "goal_reached" | "daily_cap";
+
+/**
+ * Why a clock reminder should not be shown now, or null. A habit app that keeps asking after the day's
+ * work is done, late at night or all day long teaches people to ignore it (or to quit).
+ */
+export function reminderPause(
+  settings: Pick<ReminderSettings, "stopAfterGoal" | "nightQuiet" | "maxNudgesPerDay">,
+  ctx: { hour: number; goalReached: boolean; shownToday: number }
+): ReminderPause | null {
+  if (settings.nightQuiet && (ctx.hour >= NIGHT_QUIET_START || ctx.hour < NIGHT_QUIET_END)) return "night";
+  if (settings.stopAfterGoal && ctx.goalReached) return "goal_reached";
+  if (settings.maxNudgesPerDay > 0 && ctx.shownToday >= settings.maxNudgesPerDay) return "daily_cap";
+  return null;
+}
+
+const NUDGES_TODAY_KEY = "myenglish_nudges_today_v1";
+
+function localDay(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Reminders shown today (counted when the corner card is shown) */
+export function getNudgesShownToday(now: Date = new Date()): number {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(NUDGES_TODAY_KEY) || "{}");
+    return parsed.day === localDay(now) && Number.isFinite(parsed.count) ? parsed.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function countNudgeShown(now: Date = new Date()): void {
+  try {
+    localStorage.setItem(NUDGES_TODAY_KEY, JSON.stringify({ day: localDay(now), count: getNudgesShownToday(now) + 1 }));
+  } catch {}
+}
 
 /** Seconds the corner reminder waits before opening the review by itself */
 export const NUDGE_AUTO_OPEN_SECONDS = 20;
@@ -53,7 +103,7 @@ export const NUDGE_AUTO_OPEN_SECONDS = 20;
 const SECONDS_PER_QUESTION = 20;
 
 import type { DuoMotivationState, MicroQuizQuestion } from "./duoMotivation";
-import type { ReminderMoment } from "./reminderMoments";
+import type { ReminderAnchor, ReminderMoment } from "./reminderMoments";
 import {
   getConsecutiveSkipCount,
   incrementConsecutiveSkipCount,
@@ -324,6 +374,7 @@ export async function triggerReviewNudge(
   extraPayload?: Partial<ReviewNudgePayload>
 ): Promise<boolean> {
   recordPopupDisplayed(Date.now());
+  countNudgeShown();
   const settings = getReminderSettings();
   try {
     // false = not shown (the review popup is already open)

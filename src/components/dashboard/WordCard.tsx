@@ -60,7 +60,7 @@ const WordCard = memo(function WordCard({
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white capitalize font-mono group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white font-mono group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors">
                 {item.word}
               </h3>
               {item.part_of_speech && (

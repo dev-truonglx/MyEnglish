@@ -5,6 +5,10 @@
 import { saveStudyLimits } from "./srs";
 import { setDailyGoal } from "./streak";
 import { saveReminderSettings, type ReminderInterval } from "./reminderSettings";
+import type { ReminderAnchor } from "./reminderMoments";
+import type { GrammarLevel } from "@/types/grammar";
+import { setUserOverrideLevel, syncProficiencyWithReminderSettings } from "./userProficiency";
+import { setFoundationMode } from "./learnerProfile";
 import { persistKeyNow } from "./storageBackup";
 
 const DONE_KEY = "myenglish_onboarding_done_v1";
@@ -27,12 +31,43 @@ export const DAILY_PLANS: Record<DailyMinutes, DailyPlan> = {
   15: { minutes: 15, newCardsPerDay: 8, maxSessionSize: 40, dailyGoal: 45, reminderInterval: 30 },
 };
 
-export function applyDailyPlan(minutes: DailyMinutes, reminders: boolean): DailyPlan {
+/**
+ * When the learner wants to study. Chosen study times ("after lunch") replace frequent clock reminders:
+ * with at least one, the clock only reminds every 2 hours as a fallback.
+ */
+export interface StudyTimes {
+  anchors: ReminderAnchor[];
+  /** Also at natural breaks: back at the computer, a meeting or full-screen app just ended */
+  transitions: boolean;
+}
+
+export function applyDailyPlan(
+  minutes: DailyMinutes,
+  reminders: boolean,
+  times: StudyTimes = { anchors: [], transitions: true }
+): DailyPlan {
   const plan = DAILY_PLANS[minutes];
   saveStudyLimits({ newCardsPerDay: plan.newCardsPerDay, maxSessionSize: plan.maxSessionSize });
   setDailyGoal(plan.dailyGoal);
-  saveReminderSettings({ enabled: reminders, intervalMinutes: reminders ? plan.reminderInterval : 0 });
+  const interval: ReminderInterval = times.anchors.length > 0 ? 120 : plan.reminderInterval;
+  saveReminderSettings({
+    enabled: reminders,
+    intervalMinutes: reminders ? interval : 0,
+    anchors: reminders ? times.anchors : [],
+    contextMoments: times.transitions,
+  });
   return plan;
+}
+
+/** "A0" = mất gốc: studied as A1 content, with foundation mode on (foundation grammar first) */
+export type LevelChoice = "A0" | GrammarLevel;
+
+export function applyLevelChoice(choice: LevelChoice): GrammarLevel {
+  const level: GrammarLevel = choice === "A0" ? "A1" : choice;
+  setUserOverrideLevel(level);
+  syncProficiencyWithReminderSettings(level);
+  setFoundationMode(choice === "A0");
+  return level;
 }
 
 export function isOnboardingDone(): boolean {

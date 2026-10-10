@@ -72,10 +72,8 @@ export default function ReverseClozeExercise({
       else rating = Rating.Hard;
 
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      completeTimerRef.current = setTimeout(() => {
-        completeTimerRef.current = null;
-        onComplete(true, wrongAttempts, rating);
-      }, 900);
+      // Reported at once: the session keeps this card on screen until the learner continues
+      onComplete(true, wrongAttempts, rating);
     } else {
       setWrongAttempts((prev) => prev + 1);
       setShakeIdx(idx);
@@ -111,7 +109,7 @@ export default function ReverseClozeExercise({
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 md:p-8 space-y-4 shadow-sm text-center">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 border border-cyan-200/50 dark:border-cyan-800/40">
           <Sparkles className="w-3 h-3" />
-          <span>Ngữ cảnh câu thực tế (Reverse Cloze)</span>
+          <span>Câu ví dụ thực tế</span>
         </div>
 
         <div className="text-base md:text-lg font-medium text-slate-800 dark:text-zinc-200 leading-relaxed">
@@ -191,7 +189,7 @@ export default function ReverseClozeExercise({
       <div className="h-7 min-h-[28px] flex items-center justify-center text-xs">
         {wrongAttempts > 0 && !isAnswered ? (
           <p className="text-center text-xs text-amber-500 dark:text-amber-400 font-semibold animate-in fade-in duration-150">
-            Chưa đúng ({wrongAttempts} lần thử) — Hãy thử lại phương án khác!
+            Chưa đúng, thử phương án khác nhé!
           </p>
         ) : (
           <span className="text-center text-[11px] text-slate-400 dark:text-zinc-500">

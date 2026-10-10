@@ -1,3 +1,5 @@
+import BeginnerProgressCard from "./BeginnerProgressCard";
+import { isBeginner, isSimpleMode } from "@/services/learnerProfile";
 import { useState, useEffect, useMemo, useRef } from "react";
 import {
   Trophy,
@@ -35,6 +37,7 @@ import { setWordSuspended } from "@/services/reviewRecorder";
 import { pipeline } from "@/services/pipeline";
 import LearningInsightsCard from "./LearningInsightsCard";
 import HabitInsightsCard from "./HabitInsightsCard";
+import { AI_VOCAB_ENABLED } from "@/services/features";
 
 interface AnalyticsViewProps {
   words: WordDetail[];
@@ -47,6 +50,9 @@ export default function AnalyticsView({
   onStartReviewWord,
   onRefreshWords,
 }: AnalyticsViewProps) {
+  const simple = isSimpleMode();
+  const beginner = isBeginner();
+  const [showTechnical, setShowTechnical] = useState(false);
   const [xpState, setXpState] = useState<XPState>(getXPState);
   const [leechSettings, setLeechSettings] = useState<LeechSettings>(getLeechSettings);
   const [reviewAnalytics, setReviewAnalytics] = useState<ReviewAnalyticsData | null>(null);
@@ -135,7 +141,7 @@ export default function AnalyticsView({
             <span>Trung Tâm Phân Tích & Tiến Trình</span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-            Theo dõi năng lực CEFR, khả năng lưu giữ ký ức theo FSRS, xu hướng phản xạ và chế độ tự động bổ sung.
+            Theo dõi trình độ, khả năng ghi nhớ, thói quen học và chế độ tự động bổ sung từ.
           </p>
         </div>
 
@@ -166,7 +172,7 @@ export default function AnalyticsView({
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">
-              Khả năng ghi nhớ (FSRS)
+              Khả năng ghi nhớ
             </span>
             <Brain className="w-4 h-4 text-emerald-500" />
           </div>
@@ -237,16 +243,25 @@ export default function AnalyticsView({
             <span className="text-[11px] text-slate-400 dark:text-zinc-500">từ hay quên</span>
           </div>
           <p className="text-[11px] text-slate-400 dark:text-zinc-500">
-            {stats.leechCount > 0 ? "Cần ưu tiên khắc phục" : "Tuyệt vời, không có từ đỉa!"}
+            {stats.leechCount > 0 ? "Sẽ được ôn kèm mẹo nhớ" : "Tuyệt vời, chưa có từ nào hay quên!"}
           </p>
         </div>
       </div>
+
+      {beginner && <BeginnerProgressCard />}
 
       <WeeklyProgressCard words={words} />
 
       <HabitInsightsCard words={words} />
 
-      <LearningInsightsCard />
+      {/* Calibration of the scheduler: technical, hidden behind a toggle in simple mode */}
+      {simple && !showTechnical ? (
+        <button onClick={() => setShowTechnical(true)} className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline">
+          Xem số liệu kỹ thuật của thuật toán ôn tập
+        </button>
+      ) : (
+        <LearningInsightsCard />
+      )}
 
       {/* Heatmap Widget */}
       <div className="space-y-3">
@@ -299,7 +314,7 @@ export default function AnalyticsView({
         <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-5">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <PieIcon className="w-4 h-4 text-purple-500" />
-            <span>Phân Bổ Trạng Thái Ký Ức (FSRS States)</span>
+            <span>Các từ đang ở giai đoạn nào</span>
           </h3>
 
           <div className="space-y-3">
@@ -381,7 +396,7 @@ export default function AnalyticsView({
           </div>
 
           <p className="text-[11px] text-slate-400 dark:text-zinc-500 pt-2 border-t border-slate-100 dark:border-zinc-800">
-            FSRS tính toán thời điểm lặp lại tối ưu theo Độ ổn định (Stability) và Độ khó (Difficulty) riêng biệt của từng từ.
+            App tự tính thời điểm ôn lại từng từ, dựa trên việc bạn nhớ từ đó chắc đến đâu và nó khó với bạn thế nào.
           </p>
         </div>
 
@@ -565,7 +580,7 @@ export default function AnalyticsView({
                       <span>{isShowingMnemonic ? "Mẹo ghi nhớ" : "Xem mẹo ghi nhớ"}</span>
                     </button>
 
-                    <button
+                    {AI_VOCAB_ENABLED && <button
                       onClick={() => {
                         pipeline.enqueue(w.word).then((res) =>
                           setLeechMessage(res.accepted ? `AI đang tạo lại nghĩa & ví dụ mới cho "${w.word}"...` : `Không thể phân tích lại: ${res.reason}`)
@@ -575,7 +590,7 @@ export default function AnalyticsView({
                       className="text-cyan-600 dark:text-cyan-400 hover:underline"
                     >
                       Tạo ví dụ mới (AI)
-                    </button>
+                    </button>}
                     <button
                       onClick={async () => {
                         await setWordSuspended(w.id, true);

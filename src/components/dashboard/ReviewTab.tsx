@@ -190,7 +190,7 @@ export default function ReviewTab({
                 className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-cyan-500/50 cursor-pointer flex items-center justify-between transition-colors shadow-sm"
               >
                 <div className="space-y-0.5">
-                  <div className="text-base font-bold text-slate-900 dark:text-white capitalize font-mono">
+                  <div className="text-base font-bold text-slate-900 dark:text-white font-mono">
                     {w.word}
                   </div>
                   <div className="text-sm font-medium text-slate-700 dark:text-cyan-200">{w.meaning_vn}</div>

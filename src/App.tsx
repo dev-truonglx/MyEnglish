@@ -1,5 +1,6 @@
 import { useEffect, useState, lazy, Suspense } from "react";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
+import { applyUiScale } from "@/services/learnerProfile";
 import ErrorBoundary from "@/components/ErrorBoundary";
 // Each window (main, quick-input, review-popup) loads only the code it renders
 const QuickInput = lazy(() => import("@/components/QuickInput"));
@@ -32,6 +33,8 @@ export default function App() {
   // Check for updates and sync autostart on startup in the main window
   useEffect(() => {
     if (windowLabel !== "main") return;
+    // Bigger text (Settings → Cỡ chữ) applies to the main window only: popups have fixed sizes
+    applyUiScale();
     checkForUpdates();
     syncAutostartWithSystem();
     const timer = window.setInterval(() => checkForUpdates(), UPDATE_CHECK_INTERVAL_MS);

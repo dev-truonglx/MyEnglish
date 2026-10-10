@@ -1,3 +1,4 @@
+import { setFoundationMode } from "@/services/learnerProfile";
 import { useState, useMemo } from "react";
 import {
   GraduationCap,
@@ -28,6 +29,7 @@ import {
   triggerAutoReplenish,
   type AutoReplenishSettings,
 } from "@/services/autoReplenish";
+import { AI_VOCAB_ENABLED } from "@/services/features";
 
 interface ProficiencyAssessmentCardProps {
   words: WordDetail[];
@@ -179,15 +181,17 @@ export default function ProficiencyAssessmentCard({
           {showPlacement && (
             <PlacementTest
               onClose={() => setShowPlacement(false)}
-              onDone={(lvl) => {
+              onDone={(choice) => {
                 setShowPlacement(false);
-                handleSetOverride(lvl);
+                // A0 (mất gốc) is studied as A1 with foundation mode on
+                setFoundationMode(choice === "A0");
+                handleSetOverride(choice === "A0" ? "A1" : choice);
               }}
             />
           )}
           <button
             onClick={() => setShowPlacement(true)}
-            title="5 câu mỗi cấp độ, dừng sớm khi gặp mức khó — khoảng 1–3 phút"
+            title="Từ vựng, ngữ pháp và nghe; khoảng 6–12 câu, 2–4 phút"
             className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-bold rounded-xl bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:hover:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 transition-colors"
           >
             Kiểm tra trình độ
@@ -399,8 +403,8 @@ export default function ProficiencyAssessmentCard({
         </div>
       )}
 
-      {/* SMART AUTO-REPLENISH ENGINE SECTION */}
-      <div className="bg-gradient-to-r from-slate-50 to-cyan-50/40 dark:from-zinc-800/40 dark:to-cyan-950/20 rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 space-y-4">
+      {/* SMART AUTO-REPLENISH ENGINE SECTION (AI vocabulary; off while the Oxford deck is the only source) */}
+      {AI_VOCAB_ENABLED && <div className="bg-gradient-to-r from-slate-50 to-cyan-50/40 dark:from-zinc-800/40 dark:to-cyan-950/20 rounded-2xl p-5 border border-slate-200/80 dark:border-zinc-800 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-start gap-3">
             <div className="w-9 h-9 rounded-xl bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -473,7 +477,7 @@ export default function ProficiencyAssessmentCard({
             </span>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* RECOMMENDATIONS & AI ADVICE */}
       {profile.recommendations.length > 0 && (

@@ -3,6 +3,7 @@ import type { TermWithMeaning } from "@/types/database";
 import type { GrammarExercise } from "@/types/grammar";
 import { normalizeCefr, isWithinLevel, isOneLevelAbove, type CefrLevel } from "./cefr";
 import { PREDEFINED_TOPICS } from "./db";
+import { escapeRegExp, fillPromptBlanks, isGrammarAnswerCorrect, normalizeTypedText, wordFormsPattern } from "./smartReview";
 
 /** Map the model's topic onto the fixed topic list (avoids near-duplicate topics in the library) */
 function normalizeTopic(value: unknown): string {
@@ -158,6 +159,72 @@ export async function enrichWordWithGemini(
   }
 }
 
+/** Strings from a string, a number or an array of them (the model sometimes returns "has" or ["has","have"]) */
+function stringList(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : value === undefined || value === null ? [] : [value];
+  return list
+    .filter((v) => typeof v === "string" || typeof v === "number")
+    .map((v) => String(v).trim())
+    .filter((v) => v.length > 0);
+}
+
+/**
+ * Check AI-generated grammar questions; a question that could be unfair is dropped:
+ *  - multiple choice: distinct options, exactly one of them correct
+ *  - conjugation: the prompt has a blank to fill
+ *  - error spotting: the wrong word appears as a whole word in the sentence (not inside "This"); the learner
+ *    picks that word, the fix (correct_answer) builds the corrected sentence
+ * Alternative correct answers (accepted_answers, or an array) are kept.
+ */
+export function parseGrammarExercises(items: Array<Record<string, unknown>>, now: number = Date.now()): GrammarExercise[] {
+  const exercises: GrammarExercise[] = [];
+  items.forEach((item, idx) => {
+    if (!item || typeof item !== "object") return;
+    const type = (item.type ?? "multiple_choice") as GrammarExercise["type"];
+    if (!VALID_EXERCISE_TYPES.includes(type)) return;
+
+    const promptEn = String(item.prompt_en || item.prompt || "").trim();
+    const answers = [...new Set([...stringList(item.correct_answer ?? item.correct), ...stringList(item.accepted_answers)])];
+    if (!promptEn || answers.length === 0) return;
+
+    const options = Array.isArray(item.options) ? stringList(item.options) : undefined;
+    const errorWord = item.error_word ? String(item.error_word).trim() : undefined;
+    let correctAnswer: string | string[] = answers.length === 1 ? answers[0] : answers;
+    let correctSentence: string | undefined;
+
+    if (type === "multiple_choice") {
+      if (!options || options.length < 2) return;
+      if (new Set(options.map(normalizeTypedText)).size !== options.length) return;
+      const correctOptions = options.filter((o) => isGrammarAnswerCorrect(o, { type, promptEn, correctAnswer: answers }));
+      if (correctOptions.length !== 1) return;
+      correctAnswer = correctOptions[0];
+    }
+    if (type === "conjugation" && fillPromptBlanks(promptEn, answers[0]) === null) return;
+    if (type === "error_spotting") {
+      if (!errorWord) return;
+      const wordRe = new RegExp(`(?<![\\w'])${escapeRegExp(errorWord)}(?![\\w'])`, "i");
+      if (!wordRe.test(promptEn)) return;
+      const fix = answers.find((a) => normalizeTypedText(a) !== normalizeTypedText(errorWord));
+      if (fix) correctSentence = promptEn.replace(wordRe, fix).replace(/[[\]]/g, "");
+      correctAnswer = errorWord;
+    }
+
+    exercises.push({
+      id: `ai-gen-${now}-${idx}`,
+      type,
+      promptEn,
+      promptVn: item.prompt_vn ? String(item.prompt_vn) : undefined,
+      hint: item.hint ? String(item.hint) : undefined,
+      options,
+      correctAnswer,
+      correctSentence,
+      errorWord,
+      explanation: String(item.explanation || "Bài tập được sinh tự động bởi AI"),
+    });
+  });
+  return exercises;
+}
+
 /**
  * Generate 10 practical grammar test questions using Gemini CLI strictly calibrated to CEFR level
  */
@@ -186,42 +253,7 @@ export async function generateGrammarExercisesWithGemini(
 
     if (items.length === 0) return [];
 
-    const exercises: GrammarExercise[] = [];
-    items.forEach((item, idx) => {
-      if (!item || typeof item !== "object") return;
-      const type = (item.type ?? "multiple_choice") as GrammarExercise["type"];
-      if (!VALID_EXERCISE_TYPES.includes(type)) return;
-
-      const promptEn = String(item.prompt_en || item.prompt || "").trim();
-      const correctAnswer = String(item.correct_answer ?? item.correct ?? "").trim();
-      if (!promptEn || !correctAnswer) return;
-
-      const options = Array.isArray(item.options)
-        ? item.options.map((o) => String(o).trim()).filter((o) => o.length > 0)
-        : undefined;
-      const errorWord = item.error_word ? String(item.error_word).trim() : undefined;
-
-      if (type === "multiple_choice") {
-        const norm = (v: string) => v.trim().toLowerCase();
-        if (!options || options.length < 2 || !options.some((o) => norm(o) === norm(correctAnswer))) return;
-      }
-      if (type === "error_spotting") {
-        if (!errorWord || !promptEn.toLowerCase().includes(errorWord.toLowerCase())) return;
-      }
-
-      exercises.push({
-        id: `ai-gen-${Date.now()}-${idx}`,
-        type,
-        promptEn,
-        promptVn: item.prompt_vn ? String(item.prompt_vn) : undefined,
-        hint: item.hint ? String(item.hint) : undefined,
-        options,
-        correctAnswer,
-        errorWord,
-        explanation: String(item.explanation || "Bài tập được sinh tự động bởi Gemini AI"),
-      });
-    });
-    return exercises;
+    return parseGrammarExercises(items);
   } catch (err) {
     console.error("AI grammar exercise generation failed:", err);
     throw err;
@@ -319,10 +351,23 @@ export interface SentenceGrade {
   explanationVn: string;
 }
 
-/** Parse the AI's JSON grade defensively (missing fields get safe defaults). */
-export function parseSentenceGrade(raw: string): SentenceGrade {
+/**
+ * Parse the AI's JSON grade defensively. A grade without a numeric score is rejected (the caller falls
+ * back to a spelling exercise) rather than read as 0, which would grade a good sentence Again.
+ * When the target is a single word that appears in no form in the sentence, it was not used, whatever
+ * the model says; a missing `uses_target_word` is decided the same way.
+ */
+export function parseSentenceGrade(raw: string, word?: string, sentence?: string): SentenceGrade {
   const obj = JSON.parse(raw) as Record<string, unknown>;
-  const score = Math.max(0, Math.min(100, Math.round(Number(obj.score) || 0)));
+  const rawScore = typeof obj.score === "string" ? Number(obj.score.trim()) : obj.score;
+  if (typeof rawScore !== "number" || !Number.isFinite(rawScore)) {
+    throw new Error("AI không trả về điểm hợp lệ cho câu này.");
+  }
+  const score = Math.max(0, Math.min(100, Math.round(rawScore)));
+  const singleWord = !!word && /^[a-z]+$/i.test(word.trim());
+  const found = singleWord && sentence ? new RegExp(wordFormsPattern(word!.trim()), "i").test(sentence) : null;
+  const usesTargetWord =
+    found === false ? false : typeof obj.uses_target_word === "boolean" ? obj.uses_target_word : found ?? false;
   const corrections = (Array.isArray(obj.corrections) ? obj.corrections : [])
     .map((c) => {
       const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
@@ -332,7 +377,7 @@ export function parseSentenceGrade(raw: string): SentenceGrade {
   return {
     correct: obj.correct === true,
     score,
-    usesTargetWord: obj.uses_target_word !== false,
+    usesTargetWord,
     corrections,
     betterVersion: String(obj.better_version ?? ""),
     explanationVn: String(obj.explanation_vn ?? ""),
@@ -345,7 +390,7 @@ export async function gradeSentenceWithAI(word: string, meaningVn: string, sente
     invoke<string>("grade_sentence_ai", { word, meaningVn, sentence, level, customPath }),
     "Chấm câu bằng AI"
   );
-  return parseSentenceGrade(raw);
+  return parseSentenceGrade(raw, word, sentence);
 }
 
 // ─── Writing correction: a short text (daily standup), every error with its category ───
@@ -418,4 +463,47 @@ export async function correctWritingWithAI(text: string, level?: string): Promis
   const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
   const raw = await withTimeout(invoke<string>("correct_writing_ai", { text, level, customPath }), "Sửa bài viết bằng AI");
   return parseWritingFeedback(raw);
+}
+
+// ─── Memory aid for a word the learner keeps forgetting ─────────────────────
+
+export interface MemoryAid {
+  /** New example sentences, each containing the word */
+  examples: Array<{ sentence_en: string; sentence_vn: string }>;
+  tipVn: string;
+  confusable: { word: string; differenceVn: string } | null;
+}
+
+/** Keep only usable parts: examples that really contain the word, a non-empty tip */
+export function parseMemoryAid(raw: string, word: string): MemoryAid {
+  const obj = JSON.parse(raw) as Record<string, unknown>;
+  const pattern = new RegExp(wordFormsPattern(word.trim()), "i");
+  const examples = (Array.isArray(obj.examples) ? obj.examples : [])
+    .map((e) => {
+      const o = (e && typeof e === "object" ? e : {}) as Record<string, unknown>;
+      return { sentence_en: String(o.sentence_en ?? "").trim(), sentence_vn: String(o.sentence_vn ?? "").trim() };
+    })
+    .filter((e) => e.sentence_en.length > 0 && e.sentence_en.length <= 200 && pattern.test(e.sentence_en))
+    .slice(0, 3);
+  const c = obj.confusable && typeof obj.confusable === "object" ? (obj.confusable as Record<string, unknown>) : null;
+  const confusableWord = c ? String(c.word ?? "").trim() : "";
+  return {
+    examples,
+    tipVn: String(obj.tip_vn ?? "").trim(),
+    confusable:
+      c && confusableWord && confusableWord.toLowerCase() !== word.trim().toLowerCase()
+        ? { word: confusableWord, differenceVn: String(c.difference_vn ?? "").trim() }
+        : null,
+  };
+}
+
+export async function generateMemoryAidWithAI(word: string, meaningVn: string, level?: string): Promise<MemoryAid> {
+  const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+  const raw = await withTimeout(
+    invoke<string>("generate_memory_aid_ai", { word, meaningVn, level, customPath }),
+    "Tạo mẹo nhớ bằng AI"
+  );
+  const aid = parseMemoryAid(raw, word);
+  if (aid.examples.length === 0 && !aid.tipVn) throw new Error("AI không trả về mẹo nhớ dùng được.");
+  return aid;
 }

@@ -16,6 +16,8 @@ import { getDatabase, isPlaceholderMeaning } from "./db";
 import { getCardRetrievability, getStudyLimits } from "./srs";
 import { directionForExercise, getDueCards } from "./cards";
 import { persistKeyNow } from "./storageBackup";
+import { COMMON_WORDS } from "@/data/commonWords";
+import { FULL_VERB_FORMS, IRREGULAR_PLURALS, IRREGULAR_VERB_FORMS } from "@/data/irregularForms";
 
 // ─── 1. RETRIEVABILITY ──────────────────────────────────────────────────────
 
@@ -263,11 +265,15 @@ export interface NewCardCounts {
  */
 export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const db = await getDatabase();
+  // A word marked "already known" never uses the budget for recognition (neither the day it is marked nor
+  // the day of its first real review). Its recall card, started later, is a new card like any other.
   const rows = await db.select<Array<{ direction: string | null; cnt: number }>>(
     `SELECT COALESCE(direction, 'recognition') AS direction, COUNT(*) AS cnt FROM (
        SELECT word_id, COALESCE(direction, 'recognition') AS direction, MIN(timestamp) AS first_seen
        FROM review_logs
-       WHERE is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro'
+       WHERE (is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro')
+         AND NOT (COALESCE(direction, 'recognition') = 'recognition'
+                  AND word_id IN (SELECT word_id FROM review_logs WHERE exercise_type = 'known'))
        GROUP BY word_id, COALESCE(direction, 'recognition')
      ) WHERE first_seen >= $1
      GROUP BY direction`,
@@ -291,6 +297,23 @@ export interface TodayWork {
 }
 
 /**
+ * Today's new cards. The daily limit is ONE budget for both directions: a new recall card costs future
+ * reviews just like a new word, and a beginner can't take 10 new words plus 10 new recall cards a day.
+ * New words get at least half of what is left (rounded up) when enough are waiting; whatever one
+ * direction can't use goes to the other.
+ */
+export function splitNewCardBudget(
+  newCardsPerDay: number,
+  introduced: NewCardCounts,
+  waiting: { recognition: number; production: number }
+): NewCardCounts {
+  const budget = Math.max(0, newCardsPerDay - introduced.recognition - introduced.production);
+  const recognition = Math.min(waiting.recognition, Math.max(Math.ceil(budget / 2), budget - waiting.production));
+  const production = Math.min(waiting.production, budget - recognition);
+  return { recognition, production };
+}
+
+/**
  * What is left to study today. Counting every new word as "due" made the number never reach 0; new
  * words only count up to what the daily new-card budget still allows.
  */
@@ -299,9 +322,11 @@ export function todayWorkFromCounts(
   introduced: NewCardCounts,
   newCardsPerDay: number = getStudyLimits().newCardsPerDay
 ): TodayWork {
-  const newToday =
-    Math.min(counts.newWaiting, Math.max(0, newCardsPerDay - introduced.recognition)) +
-    Math.min(counts.newRecallWaiting ?? 0, Math.max(0, newCardsPerDay - introduced.production));
+  const split = splitNewCardBudget(newCardsPerDay, introduced, {
+    recognition: counts.newWaiting,
+    production: counts.newRecallWaiting ?? 0,
+  });
+  const newToday = split.recognition + split.production;
   return { reviews: counts.reviews, newToday, total: counts.reviews + newToday };
 }
 
@@ -362,8 +387,9 @@ export function newCardAllowance(dueReviewCount: number, maxSessionSize: number)
  *    whose sibling was reviewed today waits until tomorrow
  *  - due review/learning cards ordered by FSRS priority (see calculateUrgencyScore), at most
  *    MAX_LEECHES_PER_SESSION leeches, spread through the session
- *  - cards never reviewed are a separate, budgeted stage per direction (newCardsPerDay each), limited
- *    further by the review backlog (newCardAllowance), oldest first, spread evenly through the session
+ *  - cards never reviewed are a separate, budgeted stage: one daily budget for both directions
+ *    (splitNewCardBudget), limited further by the review backlog (newCardAllowance), oldest first,
+ *    new words and new recall cards alternating, spread evenly through the session
  *  - whole session capped at maxSessionSize (or `options.maxCards`, today's share after a break)
  *  - `options.noNewCards`: reviews only (while a comeback plan clears the backlog)
  */
@@ -410,13 +436,20 @@ export function buildReviewSession(
   const oldestFirst = (a: ReviewCard, b: ReviewCard) =>
     new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime() ||
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-  const newOf = (direction: ReviewCard["direction"], used: number) =>
-    cards
-      .filter((c) => isNewCard(c) && c.direction === direction)
-      .sort(oldestFirst)
-      .slice(0, Math.max(0, limits.newCardsPerDay - used));
-  // Recall cards of known words first: they are cheaper and unlock real usage of the word
-  const newCards = [...newOf("production", introduced.production), ...newOf("recognition", introduced.recognition)];
+  const waitingOf = (direction: ReviewCard["direction"]) =>
+    cards.filter((c) => isNewCard(c) && c.direction === direction).sort(oldestFirst);
+  const newWords = waitingOf("recognition");
+  const newRecall = waitingOf("production");
+  const split = splitNewCardBudget(limits.newCardsPerDay, introduced, {
+    recognition: newWords.length,
+    production: newRecall.length,
+  });
+  // Alternate, so a backlog cut (newCardAllowance) keeps both kinds
+  const newCards: ReviewCard[] = [];
+  for (let i = 0; i < Math.max(split.recognition, split.production); i++) {
+    if (i < split.recognition) newCards.push(newWords[i]);
+    if (i < split.production) newCards.push(newRecall[i]);
+  }
 
   const newSlice = newCards.slice(0, Math.min(limits.maxSessionSize, newCardAllowance(reviewCards.length, limits.maxSessionSize)));
   const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, limits.maxSessionSize - newSlice.length), leechSettings));
@@ -471,6 +504,7 @@ const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
   spelling: 20000,
   cloze: 25000,
   listening: 20000,
+  letter_tiles: 25000,
 };
 
 // ─── Free writing (AI-graded own sentence) ───────────────────────────────────
@@ -585,9 +619,9 @@ export interface AnswerOutcome {
  *    11 -> 46 for G,G,G,G, far beyond what a 2-second multiple-choice answer proves.
  */
 export function deriveRating(outcome: AnswerOutcome): Rating {
-  if (outcome.confusedWithSynonym) return Rating.Hard;
+  // A wrong answer is a memory failure, even after a synonym was tried first
   if (outcome.wrongAttempts > 0) return Rating.Again;
-  if (outcome.usedHint || outcome.nearMiss) return Rating.Hard;
+  if (outcome.confusedWithSynonym || outcome.usedHint || outcome.nearMiss) return Rating.Hard;
   // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
   const slowMs = slowThresholdMs(outcome.exerciseType);
   if (slowMs && outcome.responseTimeMs > slowMs) return Rating.Hard;
@@ -617,10 +651,32 @@ function editDistance(a: string, b: string, max: number): number {
 export type TypedAnswerMatch = "exact" | "near" | "wrong";
 
 /**
- * Compare a typed answer with the target word.
- * "near" = one-letter typo on words of 5+ letters, or a simple inflection (s/es/ed/d/ing) of the target.
+ * A typed word that is a real word other than the target ("effect" for "affect", "date" for "data"):
+ * a different word, not a typo, so it never counts as a near miss.
  */
-export function matchTypedAnswer(input: string, target: string, sentence?: string): TypedAnswerMatch {
+function isOtherRealWord(guess: string, targetForms: string[], knownWords: Iterable<string>): boolean {
+  if (targetForms.includes(guess)) return false;
+  if (COMMON_WORDS.has(guess)) return true;
+  for (const w of knownWords) {
+    const key = w.trim().toLowerCase();
+    if (key && wordForms(key).some((f) => f.toLowerCase() === guess)) return true;
+  }
+  return false;
+}
+
+/**
+ * Compare a typed answer with the target word.
+ * - "exact": the word or any correct form of it (deployed, dependencies, wrote): the word was recalled.
+ *   When the form differs from the one a cloze sentence uses, the UI says which form fits (formInSentence).
+ * - "near": a one-letter slip on a word of 4+ letters, unless what was typed is another real word
+ *   (common English word, or a word of the learner's own list passed in `knownWords`).
+ */
+export function matchTypedAnswer(
+  input: string,
+  target: string,
+  sentence?: string,
+  knownWords: Iterable<string> = []
+): TypedAnswerMatch {
   const guess = input.trim().toLowerCase().replace(/\s+/g, " ");
   const answer = target.trim().toLowerCase().replace(/\s+/g, " ");
   if (!guess) return "wrong";
@@ -634,8 +690,15 @@ export function matchTypedAnswer(input: string, target: string, sentence?: strin
   if (sentence && new RegExp(wordFormsPattern(target), "i").test(sentence) && normGuess === normalizeTypedText(sentence)) {
     return "exact";
   }
-  if (/^(s|es|ed|d|ing)$/.test(guess.startsWith(answer) ? guess.slice(answer.length) : "")) return "near";
-  if (answer.length >= 5 && editDistance(guess, answer, 1) <= 1) return "near";
+  const forms = wordForms(answer).map((f) => f.toLowerCase());
+  if (forms.includes(guess)) return "exact";
+  if (
+    answer.length >= 4 &&
+    forms.some((f) => editDistance(guess, f, 1) <= 1) &&
+    !isOtherRealWord(guess, forms, knownWords)
+  ) {
+    return "near";
+  }
   return "wrong";
 }
 
@@ -651,10 +714,15 @@ export type ExerciseType =
   | "sentence_builder"
   | "reverse_cloze"
   | "listening"
-  | "free_writing";
+  | "free_writing"
+  /** Build the English word from shuffled letters: the first, easiest step of typed recall */
+  | "letter_tiles";
 
-/** "intro" = a new (or relearned) word was shown before its first quiz; not a graded answer */
-export type LoggedExerciseType = ExerciseType | "intro";
+/**
+ * "intro" = a new (or relearned) word was shown before its first quiz; not a graded answer.
+ * "known" = the learner said they already know a new word: scheduled as Easy, outside the daily budget.
+ */
+export type LoggedExerciseType = ExerciseType | "intro" | "known";
 
 export interface ReviewLogEntry {
   id: string;
@@ -743,7 +811,8 @@ export async function saveReviewLog(entry: Omit<ReviewLogEntry, "id">): Promise<
     [
       id, entry.wordId, entry.exerciseType, entry.responseTimeMs, entry.isCorrect ? 1 : 0, entry.wrongAttempts,
       entry.rating, entry.xpEarned, entry.timestamp, entry.implicit ? 2 : entry.isScheduled ? 1 : 0,
-      entry.direction ?? (entry.exerciseType === "intro" ? "recognition" : directionForExercise(entry.exerciseType)),
+      entry.direction ??
+        (entry.exerciseType === "intro" || entry.exerciseType === "known" ? "recognition" : directionForExercise(entry.exerciseType)),
       b ? b.state : null, round(b?.stability, 4), round(b?.difficulty, 4), round(b?.retrievability, 4), round(b?.elapsedDays, 3),
     ]
   );
@@ -831,36 +900,36 @@ interface XPDailyLog {
 }
 
 const LEVEL_THRESHOLDS = [
-  { maxXP: 100, rank: "Beginner", emoji: "🌱" },
-  { maxXP: 200, rank: "Beginner", emoji: "🌱" },
-  { maxXP: 350, rank: "Beginner", emoji: "🌱" },
-  { maxXP: 500, rank: "Beginner", emoji: "🌱" },
-  { maxXP: 700, rank: "Beginner", emoji: "🌱" },
-  { maxXP: 1000, rank: "Learner", emoji: "📚" },
-  { maxXP: 1400, rank: "Learner", emoji: "📚" },
-  { maxXP: 1800, rank: "Learner", emoji: "📚" },
-  { maxXP: 2200, rank: "Learner", emoji: "📚" },
-  { maxXP: 2700, rank: "Learner", emoji: "📚" },
-  { maxXP: 3300, rank: "Explorer", emoji: "🧭" },
-  { maxXP: 4000, rank: "Explorer", emoji: "🧭" },
-  { maxXP: 4800, rank: "Explorer", emoji: "🧭" },
-  { maxXP: 5700, rank: "Explorer", emoji: "🧭" },
-  { maxXP: 6700, rank: "Explorer", emoji: "🧭" },
-  { maxXP: 7800, rank: "Achiever", emoji: "⚡" },
-  { maxXP: 9000, rank: "Achiever", emoji: "⚡" },
-  { maxXP: 10500, rank: "Achiever", emoji: "⚡" },
-  { maxXP: 12500, rank: "Achiever", emoji: "⚡" },
-  { maxXP: 15000, rank: "Achiever", emoji: "⚡" },
-  { maxXP: 18000, rank: "Expert", emoji: "🏅" },
-  { maxXP: 22000, rank: "Expert", emoji: "🏅" },
-  { maxXP: 27000, rank: "Expert", emoji: "🏅" },
-  { maxXP: 33000, rank: "Expert", emoji: "🏅" },
-  { maxXP: 40000, rank: "Expert", emoji: "🏅" },
-  { maxXP: 48000, rank: "Master", emoji: "👑" },
-  { maxXP: 57000, rank: "Master", emoji: "👑" },
-  { maxXP: 67000, rank: "Master", emoji: "👑" },
-  { maxXP: 78000, rank: "Master", emoji: "👑" },
-  { maxXP: 90000, rank: "Master", emoji: "👑" },
+  { maxXP: 100, rank: "Mới bắt đầu", emoji: "🌱" },
+  { maxXP: 200, rank: "Mới bắt đầu", emoji: "🌱" },
+  { maxXP: 350, rank: "Mới bắt đầu", emoji: "🌱" },
+  { maxXP: 500, rank: "Mới bắt đầu", emoji: "🌱" },
+  { maxXP: 700, rank: "Mới bắt đầu", emoji: "🌱" },
+  { maxXP: 1000, rank: "Chăm chỉ", emoji: "📚" },
+  { maxXP: 1400, rank: "Chăm chỉ", emoji: "📚" },
+  { maxXP: 1800, rank: "Chăm chỉ", emoji: "📚" },
+  { maxXP: 2200, rank: "Chăm chỉ", emoji: "📚" },
+  { maxXP: 2700, rank: "Chăm chỉ", emoji: "📚" },
+  { maxXP: 3300, rank: "Khám phá", emoji: "🧭" },
+  { maxXP: 4000, rank: "Khám phá", emoji: "🧭" },
+  { maxXP: 4800, rank: "Khám phá", emoji: "🧭" },
+  { maxXP: 5700, rank: "Khám phá", emoji: "🧭" },
+  { maxXP: 6700, rank: "Khám phá", emoji: "🧭" },
+  { maxXP: 7800, rank: "Tiến bộ", emoji: "⚡" },
+  { maxXP: 9000, rank: "Tiến bộ", emoji: "⚡" },
+  { maxXP: 10500, rank: "Tiến bộ", emoji: "⚡" },
+  { maxXP: 12500, rank: "Tiến bộ", emoji: "⚡" },
+  { maxXP: 15000, rank: "Tiến bộ", emoji: "⚡" },
+  { maxXP: 18000, rank: "Thành thạo", emoji: "🏅" },
+  { maxXP: 22000, rank: "Thành thạo", emoji: "🏅" },
+  { maxXP: 27000, rank: "Thành thạo", emoji: "🏅" },
+  { maxXP: 33000, rank: "Thành thạo", emoji: "🏅" },
+  { maxXP: 40000, rank: "Thành thạo", emoji: "🏅" },
+  { maxXP: 48000, rank: "Bậc thầy", emoji: "👑" },
+  { maxXP: 57000, rank: "Bậc thầy", emoji: "👑" },
+  { maxXP: 67000, rank: "Bậc thầy", emoji: "👑" },
+  { maxXP: 78000, rank: "Bậc thầy", emoji: "👑" },
+  { maxXP: 90000, rank: "Bậc thầy", emoji: "👑" },
 ];
 
 function getLevelFromXP(totalXP: number): { level: number; rank: string; emoji: string; currentLevelXP: number; nextLevelXP: number } {
@@ -922,7 +991,7 @@ export function getXPState(): XPState {
     };
   } catch {
     return {
-      totalXP: 0, level: 1, rank: "Beginner", rankEmoji: "🌱",
+      totalXP: 0, level: 1, rank: "Mới bắt đầu", rankEmoji: "🌱",
       currentLevelXP: 0, nextLevelXP: 100, progressPercent: 0, todayXP: 0,
     };
   }
@@ -1091,13 +1160,21 @@ export function getWordStatsSummary(words: WordDetail[]): WordStatsSummary {
 
 // ─── 7. ADAPTIVE EXERCISE SELECTION ─────────────────────────────────────────
 
-function randomFrom<T>(items: T[]): T {
-  return items[Math.floor(Math.random() * items.length)];
+/**
+ * The format for this review, rotating through the band's formats with the card's review count:
+ * deterministic (the same card state always gets the same format, so results can be compared and
+ * calibrated per format) while successive reviews still give different retrieval cues.
+ */
+function rotate<T>(items: T[], reps: number): T {
+  return items[Math.abs(reps) % items.length];
 }
 
 /** Stability (days) below which a card still needs cues; above MATURE it gets the hardest formats */
 export const YOUNG_STABILITY_DAYS = 3;
 export const MATURE_STABILITY_DAYS = 21;
+/** Recall ladder: letter tiles below this stability (days), then the sentence cue, then typing alone */
+export const TILES_STABILITY_DAYS = 2;
+export const TYPING_STABILITY_DAYS = 7;
 
 /**
  * Choose the exercise for a card from its memory strength, so the format gets harder as the memory gets
@@ -1109,10 +1186,12 @@ export const MATURE_STABILITY_DAYS = 21;
  *  - learning / relearning / young (S < 3d) / leech: multiple choice (cued, quick feedback)
  *  - S 3–21d: multiple choice, listening (audio → meaning), reading in context
  *  - S >= 21d: listening, reading in context, matching
- * Production (produce the English word):
- *  - learning / relearning / young / leech: cloze (the sentence is a cue), else spelling
- *  - S 3–21d: cloze or spelling
+ * Production (produce the English word): a ladder, each step with less help
+ *  - new / learning / relearning / leech / S < 2d: letter tiles (build the word from shuffled letters)
+ *  - S 2–7d: cloze (the sentence is a cue), spelling when the word has no usable sentence
+ *  - S 7–21d: cloze and spelling in turn
  *  - S >= 21d: spelling from the meaning alone
+ * Within a band the format rotates with the review count (no randomness).
  * Sentence building is practice only (it does not test the meaning) and is never picked here.
  */
 export function selectExerciseType(card: WordDetail & { direction?: CardDirection }): ExerciseType {
@@ -1121,17 +1200,33 @@ export function selectExerciseType(card: WordDetail & { direction?: CardDirectio
   const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
 
   if ((card.direction ?? "recognition") === "production") {
-    if (state === 0 || reps === 0 || young) return hasExamples ? "cloze" : "spelling";
-    if (stability < MATURE_STABILITY_DAYS) return hasExamples ? randomFrom<ExerciseType>(["cloze", "spelling"]) : "spelling";
+    if (state === 0 || reps === 0 || state === 1 || state === 3 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) {
+      return "letter_tiles";
+    }
+    if (stability < TYPING_STABILITY_DAYS) return hasExamples ? "cloze" : "spelling";
+    if (stability < MATURE_STABILITY_DAYS) return hasExamples ? rotate<ExerciseType>(["cloze", "spelling"], reps) : "spelling";
     return "spelling";
   }
 
   if (state === 0 || reps === 0) return "flip";
   if (young) return "multiple_choice";
   if (stability < MATURE_STABILITY_DAYS) {
-    return randomFrom<ExerciseType>(hasExamples ? ["multiple_choice", "listening", "context_match", "reverse_cloze"] : ["multiple_choice", "listening"]);
+    return rotate<ExerciseType>(hasExamples ? ["multiple_choice", "listening", "context_match", "reverse_cloze"] : ["multiple_choice", "listening"], reps);
   }
-  return randomFrom<ExerciseType>(hasExamples ? ["listening", "context_match", "reverse_cloze", "meaning_match"] : ["listening", "meaning_match", "multiple_choice"]);
+  return rotate<ExerciseType>(hasExamples ? ["listening", "context_match", "reverse_cloze", "meaning_match"] : ["listening", "meaning_match", "multiple_choice"], reps);
+}
+
+/**
+ * Direction of a multiple-choice question. A young card (learning, relearning, stability under 3 days,
+ * leech) is always asked English -> Vietnamese, the easier recognition step; older cards are asked
+ * Vietnamese -> English one review in three.
+ */
+export function multipleChoiceDirection(card: WordDetail): "en_to_vn" | "vn_to_en" {
+  const { state = 0, stability = 0, reps = 0 } = card.srs || {};
+  const young = state === 0 || state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
+  if (young) return "en_to_vn";
+  // One review in three asks the other way round (deterministic, see selectExerciseType)
+  return reps % 3 === 2 ? "vn_to_en" : "en_to_vn";
 }
 
 // ─── 8. EXERCISE DATA GENERATORS ────────────────────────────────────────────
@@ -1470,7 +1565,8 @@ export function prepareContextMatch(
     for (const ex of ordered) {
       const sentence = ex?.sentence_en?.trim();
       if (!sentence) continue;
-      const masked = maskWordInSentence(sentence, w.word);
+      // Every occurrence is blanked: a second, visible one would give the pairing away
+      const masked = maskAllWordForms(sentence, w.word);
       if (!masked) continue;
       usedWords.add(wordKey);
       if (meaningKey) usedMeanings.add(meaningKey);
@@ -1517,28 +1613,99 @@ export function wordFormsPattern(word: string): string {
   return `(?<![\\w])(?:${alts})(?![\\w])`;
 }
 
-/** `word` plus its common inflections (-s, -es, -ed, -d, -ing, y -> ies/ied, doubled final consonant) */
-export function wordForms(word: string): string[] {
-  const w = word.trim();
+/**
+ * Inflections of one plain word, following the spelling rules, so no unrelated word is produced
+ * ("car" never gives "card", "hop" never gives "hoped"):
+ *  - -s / -es (after s, x, z, ch, sh, o) / consonant + y -> -ies
+ *  - -ed / -d (after e) / consonant + y -> -ied; -ing, dropping a final e (not after ee/oe/ye), ie -> ying
+ *  - a final consonant after one vowel is doubled: always in one-syllable words (stop -> stopped),
+ *    both spellings in longer ones, where it depends on stress (commit -> committed, open -> opened)
+ *  - irregular verbs and plurals from src/data/irregularForms.ts (wrote, written, children)
+ * Words under 3 letters (us, is, at) are not inflected: "us" must not match "used".
+ */
+function inflections(word: string): string[] {
+  const w = word.toLowerCase();
+  const full = FULL_VERB_FORMS.get(w);
+  if (full) return full;
+  const plural = IRREGULAR_PLURALS.get(w);
+  if (plural) return plural;
+  if (w.length < 3) return [];
+
+  const out: string[] = [];
+  if (/(s|x|z|ch|sh)$/.test(w)) out.push(w + "es");
+  else if (/[^aeiou]y$/.test(w)) out.push(w.slice(0, -1) + "ies");
+  else if (/[^aeiou]o$/.test(w)) out.push(w + "es", w + "s");
+  else out.push(w + "s");
+
+  const cvc = /[^aeiou][aeiou][bdgklmnprt]$/.test(w);
+  const oneSyllable = (w.match(/[aeiouy]+/g) ?? []).length === 1;
+  const doubled = cvc ? w + w.slice(-1) : null;
+
+  const irregular = IRREGULAR_VERB_FORMS.get(w);
+  if (irregular) out.push(...irregular);
+  else if (w.endsWith("e")) out.push(w + "d");
+  else if (/[^aeiou]y$/.test(w)) out.push(w.slice(0, -1) + "ied");
+  else if (doubled && oneSyllable) out.push(doubled + "ed");
+  else if (doubled) out.push(doubled + "ed", w + "ed");
+  else out.push(w + "ed");
+
+  if (w.endsWith("ie")) out.push(w.slice(0, -2) + "ying");
+  else if (/(ee|oe|ye)$/.test(w)) out.push(w + "ing");
+  else if (w.endsWith("e")) out.push(w.slice(0, -1) + "ing");
+  else if (doubled && oneSyllable) out.push(doubled + "ing");
+  else if (doubled) out.push(doubled + "ing", w + "ing");
+  else out.push(w + "ing");
+  return out;
+}
+
+/**
+ * Forms the vocabulary deck lists for a word, registered when its words are loaded:
+ *  - `forms`: used as they are (went, children, "is" for "be", the forms its examples use)
+ *  - `variants`: other spellings, inflected like the word (colour -> color, colors)
+ */
+const deckForms = new Map<string, { forms: string[]; variants: string[] }>();
+
+export function registerWordForms(word: string, forms: string[], variants: string[] = []): void {
+  const key = word.trim().toLowerCase();
+  const clean = (list: string[]) =>
+    [...new Set(list.map((f) => f.trim()).filter((f) => f && f.toLowerCase() !== key && f.length <= 40))];
+  deckForms.set(key, { forms: clean(forms), variants: clean(variants) });
+}
+
+function ruleForms(w: string): string[] {
   const forms = new Set<string>([w]);
   if (/^[a-z]+$/i.test(w)) {
-    const lower = w.toLowerCase();
-    const suffixes = ["s", "es", "ed", "d", "ing"];
-    suffixes.forEach((s) => forms.add(w + s));
-    if (lower.endsWith("e")) {
-      forms.add(w.slice(0, -1) + "ing");
-    }
-    if (/[^aeiou]y$/.test(lower)) {
-      forms.add(w.slice(0, -1) + "ies");
-      forms.add(w.slice(0, -1) + "ied");
-    }
-    if (/[^aeiou][aeiou][bdgklmnprt]$/.test(lower)) {
-      const last = w.slice(-1);
-      forms.add(w + last + "ed");
-      forms.add(w + last + "ing");
-    }
+    inflections(w).forEach((f) => forms.add(f));
+  } else if (/^[a-z]+(?: [a-z]+)+$/i.test(w)) {
+    const tokens = w.split(" ");
+    const rest = tokens.slice(1).join(" ");
+    const head = tokens.slice(0, -1).join(" ");
+    inflections(tokens[0]).forEach((f) => forms.add(`${f} ${rest}`));
+    inflections(tokens[tokens.length - 1]).forEach((f) => forms.add(`${head} ${f}`));
   }
   return [...forms];
+}
+
+/**
+ * `word` plus its inflections (see `inflections`). A phrase is inflected on its first word
+ * ("follow up" -> "followed up") and on its last word ("edge case" -> "edge cases").
+ * Forms and spellings listed by the vocabulary deck are added (see `registerWordForms`).
+ */
+export function wordForms(word: string): string[] {
+  const w = word.trim();
+  const forms = new Set(ruleForms(w));
+  const listed = deckForms.get(w.toLowerCase());
+  if (listed) {
+    listed.forms.forEach((f) => forms.add(f));
+    listed.variants.forEach((v) => ruleForms(v).forEach((f) => forms.add(f)));
+  }
+  return [...forms];
+}
+
+/** The form of `word` that a sentence actually uses ("deployed" in "We deployed it"); null when absent */
+export function formInSentence(sentence: string | null | undefined, word: string): string | null {
+  if (!sentence || !word.trim()) return null;
+  return new RegExp(wordFormsPattern(word), "i").exec(sentence)?.[0] ?? null;
 }
 
 /** Blank every occurrence of `word` and its inflections; null when the sentence does not contain it. */
@@ -1603,24 +1770,45 @@ interface GradableExercise {
 }
 
 /**
+ * Every normalized reading of a text. "'s" can be "is", "has" or a possessive and "'d" can be "would"
+ * or "had", so "Someone's knocking" matches "Someone is knocking". The possessive keeps its apostrophe,
+ * so "it's" never matches "its".
+ */
+function answerReadings(text: string): string[] {
+  const t = text.toLowerCase().replace(/[‘’ʼ´`]/g, "'");
+  const sForms = /'s\b/.test(t) ? [" is", " has", "qpossq"] : [null];
+  const dForms = /'d\b/.test(t) ? [" would", " had"] : [null];
+  const out = new Set<string>();
+  for (const sf of sForms) {
+    for (const df of dForms) {
+      let v = t;
+      if (sf) v = v.replace(/'s\b/g, sf);
+      if (df) v = v.replace(/'d\b/g, df);
+      out.add(normalizeTypedText(v).replace(/qpossq/g, "'s"));
+    }
+  }
+  return [...out];
+}
+
+/**
  * Whether a typed or picked answer solves a grammar exercise. Accepts the answer alone or the whole
  * sentence with it filled in ("She does not work on Sunday." for "She [not work] on Sunday."),
- * with contractions, case, curly quotes, punctuation and spacing ignored.
+ * with contractions (incl. 's and 'd), case, curly quotes, punctuation and spacing ignored.
  */
 export function isGrammarAnswerCorrect(input: string, ex: GradableExercise): boolean {
-  const user = normalizeTypedText(input);
-  if (!user) return false;
+  const user = answerReadings(input).filter(Boolean);
+  if (user.length === 0) return false;
   const answers = (Array.isArray(ex.correctAnswer) ? ex.correctAnswer : [ex.correctAnswer]).filter(Boolean);
   if (ex.errorWord) answers.push(ex.errorWord);
-  const targets = answers.map(normalizeTypedText);
+  const targets = new Set(answers.flatMap(answerReadings));
   // In error spotting the brackets mark clickable words, not a blank to fill
   if (ex.type !== "error_spotting") {
     for (const a of answers) {
       const sentence = fillPromptBlanks(ex.promptEn, a);
-      if (sentence) targets.push(normalizeTypedText(sentence));
+      if (sentence) answerReadings(sentence).forEach((r) => targets.add(r));
     }
   }
-  return targets.includes(user);
+  return user.some((r) => targets.has(r));
 }
 
 /** Full form -> contraction pairs used to show equivalent answers ("does not" / "doesn't") */
@@ -1709,6 +1897,7 @@ export async function getReviewAnalytics(days: number = 14): Promise<ReviewAnaly
     reverse_cloze: 0,
     listening: 0,
     free_writing: 0,
+    letter_tiles: 0,
   };
 
   logs.forEach((log) => {

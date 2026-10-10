@@ -1,3 +1,4 @@
+import { EXERCISE_LABEL_VN } from "./exerciseLabels";
 import { useMemo, useState, useEffect } from "react";
 import {
   X,
@@ -68,32 +69,23 @@ function formatPastTime(
   return { relative, exact, isPast: true };
 }
 
-const EXERCISE_NAME_MAP: Record<string, string> = {
-  multiple_choice: "Trắc nghiệm",
-  flip: "Flashcard",
-  cloze: "Điền từ",
-  spelling: "Chính tả / Gõ từ",
-  reverse_cloze: "Đoán nghĩa",
-  sentence_builder: "Ghép câu",
-  context_match: "Nối ngữ cảnh",
-  listening: "Nghe chép",
-};
+const EXERCISE_NAME_MAP: Record<string, string> = { ...EXERCISE_LABEL_VN, intro: "Giới thiệu từ mới" };
 
 const RATING_NAME_MAP: Record<number, { label: string; badgeClass: string }> = {
   1: {
-    label: "Again",
+    label: "Quên",
     badgeClass: "bg-rose-100 text-rose-700 dark:bg-rose-950/70 dark:text-rose-300 border-rose-200 dark:border-rose-900",
   },
   2: {
-    label: "Hard",
+    label: "Khó",
     badgeClass: "bg-amber-100 text-amber-700 dark:bg-amber-950/70 dark:text-amber-300 border-amber-200 dark:border-amber-900",
   },
   3: {
-    label: "Good",
+    label: "Nhớ",
     badgeClass: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/70 dark:text-emerald-300 border-emerald-200 dark:border-emerald-900",
   },
   4: {
-    label: "Easy",
+    label: "Dễ",
     badgeClass: "bg-sky-100 text-sky-700 dark:bg-sky-950/70 dark:text-sky-300 border-sky-200 dark:border-sky-900",
   },
 };
@@ -224,7 +216,7 @@ export default function ReviewTrajectoryModal({
                 Lộ Trình Nhắc Lại Theo Thuật Toán FSRS
               </span>
             </div>
-            <h3 className="text-xl font-bold text-slate-900 dark:text-white capitalize flex items-center gap-2">
+            <h3 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <span>{title}</span>
               {word?.phonetic && (
                 <span className="text-xs font-mono font-normal text-slate-500 dark:text-zinc-400">

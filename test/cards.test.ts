@@ -71,9 +71,9 @@ describe("selectExerciseType by direction", () => {
 });
 
 describe("buildReviewSession with two directions", () => {
-  it("adds at most one card per word and budgets new cards per direction", async () => {
+  it("adds at most one card per word and shares one new-card budget between directions", async () => {
     await freshServices();
-    saveStudyLimits({ newCardsPerDay: 1, maxSessionSize: 30 });
+    saveStudyLimits({ newCardsPerDay: 3, maxSessionSize: 30 });
     const both = makeWord("both", { srs: reviewSrs(2, 10), srsProduction: { ...(reviewSrs(1, 10) as never), word_id: "both" } });
     const newRecall = makeWord("recall", {
       srs: { ...reviewSrs(30, 1), next_review_date: new Date(Date.now() + 20 * DAY_MS).toISOString() },
@@ -81,14 +81,18 @@ describe("buildReviewSession with two directions", () => {
     });
     const brandNew = makeWord("brand-new");
 
-    // Today's recognition budget is used up, the recall budget is not
+    // 3 a day, 1 already introduced: 2 left, one new word and one new recall card
     const session = buildReviewSession([both, newRecall, brandNew], { recognition: 1, production: 0 });
     expect(session.filter((c) => c.id === "both")).toHaveLength(1);
     expect(session.find((c) => c.id === "recall")?.direction).toBe("production");
-    expect(session.some((c) => c.id === "brand-new")).toBe(false);
+    expect(session.some((c) => c.id === "brand-new")).toBe(true);
 
-    // Recall budget used up too: the new recall card waits for tomorrow
-    const later = buildReviewSession([newRecall], { recognition: 1, production: 1 });
+    // Only 1 left: the new word goes first, the new recall card waits
+    const one = buildReviewSession([newRecall, brandNew], { recognition: 1, production: 1 });
+    expect(one.map((c) => c.id)).toEqual(["brand-new"]);
+
+    // Budget used up (by either direction): nothing new until tomorrow
+    const later = buildReviewSession([newRecall], { recognition: 2, production: 1 });
     expect(later.some((c) => c.id === "recall")).toBe(false);
   });
 });
@@ -108,6 +112,31 @@ describe("production cards in the database", () => {
     const [word] = await db.getAllWords();
     expect(word.srsProduction?.state).toBe(State.New);
     expect(new Date(word.srsProduction!.next_review_date).getTime()).toBeGreaterThan(Date.now() + 23 * 3600 * 1000);
+  });
+
+  it("waits for a recognition stability of 3 days before creating the recall card", async () => {
+    const { db, srs } = await freshServices();
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T08:00:00Z"));
+    const id = await addWord(db, "cache");
+
+    // Learnt in one sitting (Good through the minute steps): graduated, but stability is under 3 days,
+    // so no typing drill yet
+    let last = await srs.recordReview(id, Rating.Good);
+    for (let i = 0; i < 3 && last.state !== State.Review; i++) {
+      vi.setSystemTime(new Date(Date.now() + 11 * 60 * 1000));
+      last = await srs.recordReview(id, Rating.Good);
+    }
+    expect(last.state).toBe(State.Review);
+    expect(last.stability).toBeLessThan(srs.PRODUCTION_UNLOCK_STABILITY_DAYS);
+    let [word] = await db.getAllWords();
+    expect(word.srsProduction ?? null).toBeNull();
+
+    // Remembered again after a few days: now it is known, recall training starts
+    vi.setSystemTime(new Date(Date.now() + 3 * DAY_MS));
+    await srs.recordReview(id, Rating.Good);
+    [word] = await db.getAllWords();
+    expect(word.srsProduction?.state).toBe(State.New);
   });
 
   it("records production answers on the production card, falling back to recognition before it exists", async () => {

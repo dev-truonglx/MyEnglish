@@ -1,9 +1,11 @@
 import { getDatabase, getAllWords } from "./db";
 import { awardXP, wordFormsPattern } from "./smartReview";
-import type { GrammarProgress, DiagnosticStatus } from "@/types/grammar";
+import type { GrammarProgress, DiagnosticStatus, GrammarLevel } from "@/types/grammar";
 import { createEmptyCard, Rating, State, type Card, type Grade } from "ts-fsrs";
 import { getGrammarScheduler } from "./srs";
 import { GRAMMAR_LESSONS } from "@/data/grammarData";
+import { persistKeyNow } from "./storageBackup";
+import { includesFoundationGrammar } from "./learnerProfile";
 
 const GRAMMAR_STORAGE_KEY = "myenglish_grammar_progress_v1";
 
@@ -271,8 +273,49 @@ const SAME_SESSION_MS = 12 * 60 * 60 * 1000;
 export const GRAMMAR_PASS_SCORE = 60;
 const DIAGNOSTIC_PASS_SCORE = GRAMMAR_PASS_SCORE;
 const PRACTICE_PASS_SCORE = GRAMMAR_PASS_SCORE;
-/** Answers to one lesson needed in a popup session before the lesson's schedule is updated */
+/** Questions of one lesson asked together in a popup */
 export const MIN_LESSON_ANSWERS = 2;
+/**
+ * First answers to a lesson's own questions are pooled across popups until there are this many, then the
+ * lesson is graded on their score. With 3 the score can be 0/33/67/100, so one miss gives Hard (with 2
+ * answers it was 0/50/100 and a single miss always meant Again).
+ */
+export const LESSON_GRADE_ANSWERS = 3;
+const ANSWER_POOL_KEY = "myenglish_grammar_answer_pool_v1";
+/** Pooled answers older than this are dropped: they no longer describe the current memory */
+const ANSWER_POOL_MAX_AGE_MS = 3 * DAY_MS;
+
+/** The lesson's own (checked) questions; AI-generated and mined ones are practice only */
+export function isCuratedExercise(exerciseId: string): boolean {
+  return !exerciseId.startsWith("ai-gen-") && !exerciseId.startsWith("mined-");
+}
+
+/**
+ * Add one first answer to the lesson's pool. Returns the lesson score (%) once LESSON_GRADE_ANSWERS are
+ * pooled (the pool is then emptied), otherwise null.
+ */
+export function poolLessonAnswer(lessonId: string, correct: boolean, now: number = Date.now()): number | null {
+  let pools: Record<string, { correct: number; total: number; since: number }> = {};
+  try {
+    pools = JSON.parse(localStorage.getItem(ANSWER_POOL_KEY) || "{}") || {};
+  } catch {}
+  const prev = pools[lessonId];
+  const pool = prev && now - prev.since < ANSWER_POOL_MAX_AGE_MS ? prev : { correct: 0, total: 0, since: now };
+  pool.total += 1;
+  if (correct) pool.correct += 1;
+  let score: number | null = null;
+  if (pool.total >= LESSON_GRADE_ANSWERS) {
+    score = Math.round((pool.correct / pool.total) * 100);
+    delete pools[lessonId];
+  } else {
+    pools[lessonId] = pool;
+  }
+  try {
+    localStorage.setItem(ANSWER_POOL_KEY, JSON.stringify(pools));
+    persistKeyNow(ANSWER_POOL_KEY);
+  } catch {}
+  return score;
+}
 
 /**
  * FSRS grade for a lesson result: < 60% Again, < 80% Hard, otherwise Good.
@@ -852,17 +895,20 @@ export interface GrammarExerciseHistory {
   lastAttempt: string;
 }
 
+/** A question answered wrong (or skipped) comes back after this long, not in the very next popup */
+export const MISSED_EXERCISE_COOLDOWN_HOURS = 0.75;
+
 /**
  * Calculates reasonable SRS cooldown hours for an individual grammar exercise:
  * - streak <= 0 (mistake or skip): cooldown 45 mins so the user doesn't get bombarded
- *   in the very next 15-min popup session, but reviews it soon to reinforce learning.
+ *   in the very next popup session, but reviews it soon to reinforce learning.
  * - streak = 1 (answered correctly once): cooldown 12 hours (rest of the day).
  * - streak = 2 (answered correctly twice): cooldown 48 hours (2 days).
  * - streak = 3 (answered correctly 3 times): cooldown 120 hours (5 days).
  * - streak >= 4 (mastered): exponential up to 30 days.
  */
 export function getGrammarExerciseCooldownHours(consecutiveCorrect: number = 0): number {
-  if (consecutiveCorrect <= 0) return 0;
+  if (consecutiveCorrect <= 0) return MISSED_EXERCISE_COOLDOWN_HOURS;
   if (consecutiveCorrect === 1) return 12; // 12 hours
   if (consecutiveCorrect === 2) return 48; // 2 days
   if (consecutiveCorrect === 3) return 120; // 5 days
@@ -873,23 +919,7 @@ export function getGrammarExerciseHistoryMap(): Record<string, GrammarExerciseHi
   try {
     const raw = localStorage.getItem(EXERCISE_HISTORY_KEY);
     if (raw) {
-      const parsed = JSON.parse(raw);
-      // Auto-migrate legacy entries (such as prac-ps-3) that got permanently stuck with high penalty
-      let changed = false;
-      if (parsed["prac-ps-3"]) {
-        const ps3 = parsed["prac-ps-3"];
-        if (ps3.skipped > 0 || ps3.incorrect > 0 || (ps3.consecutiveCorrect || 0) < 3) {
-          ps3.skipped = 0;
-          ps3.incorrect = 0;
-          ps3.consecutiveCorrect = 3;
-          ps3.lastAttempt = new Date().toISOString();
-          changed = true;
-        }
-      }
-      if (changed) {
-        localStorage.setItem(EXERCISE_HISTORY_KEY, JSON.stringify(parsed));
-      }
-      return parsed;
+      return JSON.parse(raw);
     }
   } catch (e) {
     console.warn("Failed to load grammar exercise history:", e);
@@ -1042,19 +1072,82 @@ export function smartPrepareGrammarExercises(
   return result;
 }
 
+const INTRODUCED_LESSONS_KEY = "myenglish_grammar_introduced_v1";
+const LEVEL_RANK: Record<GrammarLevel, number> = { A1: 0, A2: 1, B1: 2, B2: 3, C1: 4 };
+
+function readIntroducedLessons(): Set<string> {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(INTRODUCED_LESSONS_KEY) || "[]");
+    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/**
+ * A grammar point the learner has met: diagnostic taken, practised, or shown once in a popup together
+ * with its formula. Only met lessons are graded from popup answers (the first meeting is learning).
+ */
+export function isLessonIntroduced(lessonId: string): boolean {
+  const p = getAllGrammarProgress()[lessonId];
+  if (p && (p.diagnosticStatus !== "unattempted" || !!p.lastReview || p.reps > 0)) return true;
+  return readIntroducedLessons().has(lessonId);
+}
+
+export function markLessonIntroduced(lessonId: string): void {
+  try {
+    const set = readIntroducedLessons();
+    if (set.has(lessonId)) return;
+    set.add(lessonId);
+    localStorage.setItem(INTRODUCED_LESSONS_KEY, JSON.stringify([...set]));
+    persistKeyNow(INTRODUCED_LESSONS_KEY);
+  } catch {}
+}
+
+/**
+ * The lessons of the given levels in learning order: lowest level first, then lesson order. Foundation
+ * lessons (to be, pronouns, plurals…) come first, for A0/A1 learners only.
+ */
+export function curriculumLessons(
+  levels: GrammarLevel[],
+  withFoundation: boolean = includesFoundationGrammar()
+): import("@/types/grammar").GrammarLesson[] {
+  return GRAMMAR_LESSONS.filter((l) => levels.includes(l.level) && (withFoundation || !l.foundation)).sort(
+    (a, b) => LEVEL_RANK[a.level] - LEVEL_RANK[b.level] || a.order - b.order
+  );
+}
+
+/** The next grammar point to learn: the first lesson of the curriculum not met yet */
+export function nextLessonToLearn(levels: GrammarLevel[]): import("@/types/grammar").GrammarLesson | null {
+  return curriculumLessons(levels).find((l) => !isLessonIntroduced(l.id)) ?? null;
+}
+
+export interface PopupGrammarItem {
+  exercise: import("@/types/grammar").GrammarExercise;
+  lesson: import("@/types/grammar").GrammarLesson;
+  /** First meeting with this grammar point: show its formula, don't grade the lesson */
+  intro: boolean;
+}
+
 /**
  * Select a prioritized pool of grammar exercises for the popup review queue
  * based on user's selected CEFR levels, SRS due status, and lapse weighting.
+ * Lessons follow the curriculum: those already met, plus only the next new one (lowest level first,
+ * then lesson order), so a beginner never gets a B1 point before the A1 ones.
  */
 export async function getGrammarExercisesForReview(
   selectedLevels: ("A1" | "A2" | "B1" | "B2" | "C1")[],
   count: number = 3
-): Promise<Array<{ exercise: import("@/types/grammar").GrammarExercise; lesson: import("@/types/grammar").GrammarLesson }>> {
+): Promise<PopupGrammarItem[]> {
   if (count <= 0) return [];
   const levels = selectedLevels.length > 0 ? selectedLevels : (["A1", "A2", "B1"] as ("A1" | "A2" | "B1" | "B2" | "C1")[]);
 
-  const matchingLessons = GRAMMAR_LESSONS.filter((l) => levels.includes(l.level));
+  const curriculum = curriculumLessons(levels);
+  const nextNewLesson = curriculum.find((l) => !isLessonIntroduced(l.id));
+  const matchingLessons = curriculum.filter((l) => l === nextNewLesson || isLessonIntroduced(l.id));
   if (matchingLessons.length === 0) return [];
+  // Unseen questions of the lowest level come first
+  const lowestRank = Math.min(...matchingLessons.map((l) => LEVEL_RANK[l.level]));
 
   const dueLessonIds = new Set(getDueGrammarLessons());
   const historyMap = getGrammarExerciseHistoryMap();
@@ -1091,7 +1184,7 @@ export async function getGrammarExercisesForReview(
     let score = isLessonDue ? 30 : 0;
 
     if (!hist || hist.attempts === 0) {
-      score += 20; // unseen questions get solid priority
+      score += LEVEL_RANK[item.lesson.level] === lowestRank ? 20 : 10; // unseen questions get solid priority
     } else {
       const streak = hist.consecutiveCorrect || 0;
       const hoursSinceLast = hist.lastAttempt
@@ -1099,7 +1192,8 @@ export async function getGrammarExercisesForReview(
         : Infinity;
       const cooldownHours = getGrammarExerciseCooldownHours(streak);
 
-      if (streak > 0 && hoursSinceLast < cooldownHours) {
+      // A question just missed also waits (MISSED_EXERCISE_COOLDOWN_HOURS): not again in the next popup
+      if (hoursSinceLast < cooldownHours) {
         // Still in cooldown period: strongly penalize so other exercises/lessons get priority
         score -= 100;
       } else {
@@ -1149,12 +1243,12 @@ export async function getGrammarExercisesForReview(
     if (list.length < MIN_LESSON_ANSWERS) list.push({ exercise: ex, lesson });
     byLesson.set(lesson.id, list);
   }
-  const result: Array<{ exercise: import("@/types/grammar").GrammarExercise; lesson: import("@/types/grammar").GrammarLesson }> = [];
+  const result: PopupGrammarItem[] = [];
   for (const list of byLesson.values()) {
     if (list.length < MIN_LESSON_ANSWERS && count - result.length >= MIN_LESSON_ANSWERS) continue;
     for (const item of list) {
       if (result.length >= count) break;
-      result.push(item);
+      result.push({ ...item, intro: item.lesson.id === nextNewLesson?.id });
     }
     if (result.length >= count) break;
   }

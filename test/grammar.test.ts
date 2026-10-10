@@ -206,31 +206,20 @@ describe("recordGrammarExerciseAttempt & skipping", () => {
 
   it("calculates reasonable cooldown hours based on consecutive correct answers", async () => {
     const g = await freshGrammar();
-    expect(g.getGrammarExerciseCooldownHours(0)).toBe(0); // 0 hours (no cooldown if unmastered)
+    expect(g.getGrammarExerciseCooldownHours(0)).toBe(0.75); // a missed question waits 45 minutes
     expect(g.getGrammarExerciseCooldownHours(1)).toBe(12); // 12 hours
     expect(g.getGrammarExerciseCooldownHours(2)).toBe(48); // 2 days
     expect(g.getGrammarExerciseCooldownHours(3)).toBe(120); // 5 days
     expect(g.getGrammarExerciseCooldownHours(4)).toBe(240); // 10 days
   });
 
-  it("auto-migrates legacy stuck prac-ps-3 history", async () => {
+  it("returns the stored history as is (no hard-coded resets erase mistakes)", async () => {
     const g = await freshGrammar();
-    localStorage.setItem(
-      "myenglish_grammar_exercise_history_v1",
-      JSON.stringify({
-        "prac-ps-3": {
-          exerciseId: "prac-ps-3",
-          attempts: 9,
-          incorrect: 4,
-          skipped: 2,
-          lastAttempt: "2026-10-08T04:44:20.918Z",
-        },
-      })
-    );
-    const history = g.getGrammarExerciseHistoryMap();
-    expect(history["prac-ps-3"].skipped).toBe(0);
-    expect(history["prac-ps-3"].incorrect).toBe(0);
-    expect(history["prac-ps-3"].consecutiveCorrect).toBe(3);
+    const stored = {
+      "prac-ps-3": { exerciseId: "prac-ps-3", attempts: 9, incorrect: 4, skipped: 2, lastAttempt: "2026-10-08T04:44:20.918Z" },
+    };
+    localStorage.setItem("myenglish_grammar_exercise_history_v1", JSON.stringify(stored));
+    expect(g.getGrammarExerciseHistoryMap()).toEqual(stored);
   });
 });
 
@@ -241,10 +230,53 @@ describe("popup grammar comes in lesson pairs", () => {
     const db = await import("@/services/db");
     await db.getDatabase();
     const g = await import("@/services/grammarService");
+    // Lessons already met; a fresh learner only gets the next new lesson (see the curriculum test)
+    const { GRAMMAR_LESSONS } = await import("@/data/grammarData");
+    GRAMMAR_LESSONS.filter((l) => l.level === "A1" || l.level === "A2").forEach((l) => g.markLessonIntroduced(l.id));
     const items = await g.getGrammarExercisesForReview(["A1", "A2"], 4);
     expect(items).toHaveLength(4);
+    expect(items.every((i) => !i.intro)).toBe(true);
     const perLesson = new Map<string, number>();
     for (const i of items) perLesson.set(i.lesson.id, (perLesson.get(i.lesson.id) ?? 0) + 1);
     for (const n of perLesson.values()) expect(n).toBe(g.MIN_LESSON_ANSWERS);
+  });
+
+  it("follows the curriculum: a fresh learner meets the first A1 lesson, shown as an intro", async () => {
+    vi.resetModules();
+    localStorage.clear();
+    const db = await import("@/services/db");
+    await db.getDatabase();
+    const g = await import("@/services/grammarService");
+    const { GRAMMAR_LESSONS } = await import("@/data/grammarData");
+    const firstA1 = GRAMMAR_LESSONS.filter((l) => l.level === "A1").sort((a, b) => a.order - b.order)[0];
+
+    const items = await g.getGrammarExercisesForReview(["A1", "A2", "B1"], 4);
+    expect(items.length).toBeGreaterThan(0);
+    expect(items.every((i) => i.lesson.id === firstA1.id && i.intro)).toBe(true);
+
+    // Once met, the next new lesson comes in its turn and the first one is no longer an intro
+    g.markLessonIntroduced(firstA1.id);
+    const next = await g.getGrammarExercisesForReview(["A1", "A2", "B1"], 4);
+    expect(next.filter((i) => i.lesson.id === firstA1.id).every((i) => !i.intro)).toBe(true);
+    expect(next.every((i) => i.lesson.level === "A1")).toBe(true);
+  });
+});
+
+describe("lesson grading from popup answers", () => {
+  it("pools first answers until there are 3, so one miss is Hard rather than Again", async () => {
+    const g = await freshGrammar();
+    expect(g.poolLessonAnswer("a1-present-simple", true)).toBeNull();
+    expect(g.poolLessonAnswer("a1-present-simple", false)).toBeNull();
+    const score = g.poolLessonAnswer("a1-present-simple", true);
+    expect(score).toBe(67);
+    expect(g.gradeFromScore(score!)).toBe(2); // Hard
+    expect(g.poolLessonAnswer("a1-present-simple", true)).toBeNull(); // a new pool starts
+  });
+
+  it("AI-generated and mined questions are practice only", async () => {
+    const g = await freshGrammar();
+    expect(g.isCuratedExercise("diag-ps-1")).toBe(true);
+    expect(g.isCuratedExercise("ai-gen-123-0")).toBe(false);
+    expect(g.isCuratedExercise("mined-a1-x-1")).toBe(false);
   });
 });

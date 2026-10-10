@@ -16,6 +16,7 @@ import {
   type FilterMode,
   type ViewMode,
 } from "./shared";
+import { AI_VOCAB_ENABLED } from "@/services/features";
 
 interface LibraryTabProps {
   message: string | null;
@@ -163,7 +164,7 @@ export default function LibraryTab({
               className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span>Thêm từ vựng mới</span>
+              <span>{AI_VOCAB_ENABLED ? "Thêm từ vựng mới" : "Mở lộ trình từ vựng"}</span>
             </button>
           </div>
         </div>

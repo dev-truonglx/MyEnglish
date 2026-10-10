@@ -7,6 +7,10 @@
 > **Cập nhật 2026-10-05:** ✅ #11, ✅ #1, ✅ #6 xong trên branch `fix/learning-algorithm` (PR #1); ✅ #4, ✅ #12, ✅ #13 xong trên
 > branch `feat/grammar-fsrs-refactor-bundle` (tách ra từ PR #1). Ghi chú triển khai ở từng mục.
 >
+> **Cập nhật 2026-10-10:** rà soát cho người "mất gốc" (dân IT) ở [`review-2026-10-10.md`](./review-2026-10-10.md). Cả 4 giai đoạn
+> đã làm: chấm đáp án, prompt AI, lời nhắc có điểm dừng; nền móng A0 (IT Core 300, phát âm, ngữ pháp nền); màn hình "Hôm nay",
+> chế độ đơn giản, giờ học cố định; bậc thang nhớ lại (xếp chữ), xếp trình độ thích ứng, mẹo nhớ bằng AI.
+>
 > **Cập nhật 2026-10-07 (tối):** các tính năng lôi kéo / giữ chân / học tốt hơn (quay lại nhẹ nhàng, bộ từ có sẵn +
 > onboarding, đoán nghĩa trước khi học, chế độ đọc, sổ lỗi, nhắc lúc chuyển việc) ở
 > [`engagement-features-2026-10-07.md`](./engagement-features-2026-10-07.md). Mục #2 (ngữ cảnh gốc) được mở rộng qua chế độ đọc.

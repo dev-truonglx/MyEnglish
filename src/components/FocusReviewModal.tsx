@@ -26,9 +26,11 @@ import {
 } from "@/services/reminderSettings";
 import {
   getGrammarExercisesForReview,
+  markLessonIntroduced,
   recordGrammarExerciseAttempt,
   recordPracticeResult,
-  MIN_LESSON_ANSWERS,
+  isCuratedExercise,
+  poolLessonAnswer,
 } from "@/services/grammarService";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import { practiceCards } from "@/services/cards";
@@ -37,9 +39,12 @@ import {
   postponeNewCard,
   recordCardAnswer,
   recordIntro,
+  markWordKnown,
   schedulingDecision,
 } from "@/services/reviewRecorder";
 import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating } from "@/services/popupSession";
+import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
+import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import { parseTerms } from "@/types/database";
 import { summarizeSession, type SessionResult, type SessionSummary } from "@/services/progress";
 import { getStoredMnemonic } from "@/services/aiMnemonic";
@@ -64,6 +69,8 @@ import {
   getNewCardsIntroducedToday,
   loadTypicalResponseTimes,
   matchTypedAnswer,
+  selectExerciseType,
+  formInSentence,
   maskAllWordForms,
   needsRelearnIntro,
   pickExample,
@@ -71,6 +78,8 @@ import {
   type ExerciseType,
 } from "@/services/smartReview";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
+import { Rating } from "ts-fsrs";
+import LetterTilesExercise from "./exercises/LetterTilesExercise";
 
 interface FocusReviewModalProps {
   onClose?: () => void;
@@ -85,7 +94,7 @@ interface ChoiceOption {
 
 export type FocusReviewItem =
   | { kind: "word"; word: ReviewCard }
-  | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson };
+  | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson; intro?: boolean };
 
 function getPosLabel(pos?: string | null): string | null {
   if (!pos) return null;
@@ -148,7 +157,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const [loading, setLoading] = useState(true);
 
   // Active question mode: multiple_choice (phím 1-4) or typing (nhập đáp án)
-  const [activeMode, setActiveMode] = useState<"multiple_choice" | "typing">("multiple_choice");
+  const [activeMode, setActiveMode] = useState<"multiple_choice" | "typing" | "letter_tiles">("multiple_choice");
 
   // Multiple choice state
   const [choices, setChoices] = useState<ChoiceOption[]>([]);
@@ -244,18 +253,33 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     return true;
   };
 
-  // First answers per grammar lesson in this session: the lesson is graded once it has
-  // MIN_LESSON_ANSWERS of them (one question alone is too little to reschedule a grammar point)
-  const lessonAnswersRef = useRef<Map<string, { correct: number; total: number }>>(new Map());
-  const gradeGrammarAnswer = async (lessonId: string, correct: boolean, isFirstAnswer: boolean) => {
-    if (!isFirstAnswer) return;
-    const entry = lessonAnswersRef.current.get(lessonId) ?? { correct: 0, total: 0 };
-    entry.total += 1;
-    if (correct) entry.correct += 1;
-    lessonAnswersRef.current.set(lessonId, entry);
-    if (entry.total === MIN_LESSON_ANSWERS) {
-      await recordPracticeResult(lessonId, Math.round((entry.correct / entry.total) * 100));
+  // First answers to a lesson's own questions are pooled (across popups) and the lesson is graded once
+  // there are LESSON_GRADE_ANSWERS of them; AI-generated / mined questions are practice only
+  const gradeGrammarAnswer = async (lessonId: string, exerciseId: string, correct: boolean, isFirstAnswer: boolean) => {
+    if (!isFirstAnswer || !isCuratedExercise(exerciseId)) return;
+    const score = poolLessonAnswer(lessonId, correct);
+    if (score !== null) await recordPracticeResult(lessonId, score);
+  };
+
+  /**
+   * One grammar answer. Only the first answer to a question updates its history (a retry after the answer
+   * was shown is practice). The first meeting with a grammar point (intro: its formula is shown) is
+   * learning: the lesson is marked as met, not graded.
+   */
+  const recordGrammarAnswer = async (
+    item: Extract<FocusReviewItem, { kind: "grammar" }>,
+    correct: boolean,
+    skipped = false
+  ) => {
+    const { exercise: ex, lesson } = item;
+    const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
+    if (first) recordGrammarExerciseAttempt(ex.id, correct, skipped);
+    if (item.intro) {
+      markLessonIntroduced(lesson.id);
+      if (first) logLearningEvent("grammar_intro", { meta: { lessonId: lesson.id, correct } });
+      return;
     }
+    await gradeGrammarAnswer(lesson.id, ex.id, correct, first);
   };
 
   // When each card's introduction was shown (this session, or a recent popup / flashcard session)
@@ -417,6 +441,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [currentIndex, queue.length, handleClose]);
 
+  /** A brand-new word the learner already knows: scheduled as Easy without a quiz, outside the daily budget */
+  const markIntroKnown = useCallback(async () => {
+    if (!currentWord) return;
+    setIntroduced((prev) => new Set(prev).add(introKey));
+    await markWordKnown(currentWord.id).catch(() => false);
+    advanceNextItem();
+  }, [currentWord, introKey, advanceNextItem]);
+
   // Load review queue: song song từ vựng và ngữ pháp theo thuật toán Spaced Repetition & Interleaving
   const loadReviewQueue = async (forceSpinner = true) => {
     if (forceSpinner) setLoading(true);
@@ -445,13 +477,17 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         wordTarget = Math.max(1, targetCount - grammarTarget);
       }
 
+      // New words of the chosen levels enter the deck's buffer before the due words are read
+      await topUpNewWords().catch(() => {});
+
       // 2. Nạp dữ liệu đồng thời từ database & grammar service
-      const [dueWordsRaw, allWordsRaw, grammarCandidates] = await Promise.all([
+      const [dueWordsRaw, allWordsRaw, grammarCandidates, catalogDistractors] = await Promise.all([
         getDueWords().catch(() => [] as WordDetail[]),
         getAllWords().catch(() => [] as WordDetail[]),
         includeGrammar
           ? getGrammarExercisesForReview(grammarLevels, grammarTarget + 4).catch(() => [])
           : Promise.resolve([]),
+        loadCatalogDistractors(getStudyLevels(), 600).catch(() => [] as WordDetail[]),
       ]);
 
       // Words still waiting for AI analysis have no real meaning to quiz on
@@ -460,13 +496,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
       // 3. Tuyển chọn từ vựng ưu tiên SRS (due words)
       let wordPool: WordDetail[] = [];
+      // Practice (nothing due) only uses words already studied: a waiting word needs its introduction
+      const studiedWords = allWords.filter((w) => (w.srs?.reps ?? 0) > 0);
       if (currentSettings.triggerCondition === "due_only") {
         wordPool = dueWords;
       } else {
-        wordPool = dueWords.length > 0 ? dueWords : allWords;
+        wordPool = dueWords.length > 0 ? dueWords : studiedWords;
       }
       if (wordPool.length === 0) {
-        wordPool = allWords;
+        wordPool = studiedWords;
       }
 
       // Due words: FSRS urgency order + daily new-card budget. Otherwise: weakest words first (practice only).
@@ -503,6 +541,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         kind: "grammar",
         exercise: g.exercise,
         lesson: g.lesson,
+        intro: g.intro,
       }));
 
       const finalQueue: FocusReviewItem[] = [];
@@ -527,12 +566,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       introducedAtRef.current = await getRecentIntros().catch(() => new Map<string, number>());
       loadTypicalResponseTimes().catch(() => {});
       scheduledThisSessionRef.current = new Set();
-      lessonAnswersRef.current = new Map();
       retryCountRef.current = new Map();
       setIntroduced(new Set());
       advancedFromRef.current = -1;
       sessionResultsRef.current = new Map();
-      allWordsRef.current = allWords;
+      // Wrong options: the learner's words plus unseen deck words of their levels
+      allWordsRef.current = [...allWords, ...catalogDistractors];
       setSummary(null);
       setQueue(finalQueue);
       setCurrentIndex(0);
@@ -609,8 +648,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      // The card decides the question: recall cards are typed, recognition cards are picked among options
-      setActiveMode(wordObj.direction === "production" ? "typing" : "multiple_choice");
+      // The card decides the question: recognition cards are picked among options; recall cards follow the
+      // same ladder as flashcards (young: build the word from letters, then type it)
+      setActiveMode(
+        wordObj.direction !== "production"
+          ? "multiple_choice"
+          : selectExerciseType(wordObj) === "letter_tiles"
+            ? "letter_tiles"
+            : "typing"
+      );
 
       // 4 English options; the deck was already loaded with the queue
       const pool = allWordsRef.current.length > 0 ? Promise.resolve(allWordsRef.current) : getAllWords();
@@ -702,11 +748,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       } else {
         // Xử lý bài tập ngữ pháp
         const ex = currentItem.exercise;
-        const lesson = currentItem.lesson;
-
-        const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
-        recordGrammarExerciseAttempt(ex.id, correct);
-        await gradeGrammarAnswer(lesson.id, correct, first);
+        await recordGrammarAnswer(currentItem, correct);
         if (correct) {
           setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
@@ -720,6 +762,27 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   };
 
+  // Letter tiles done: built on the first try = remembered (hint -> Hard), after wrong tries = Again
+  const handleTilesComplete = async (attempts: number, rating: Rating) => {
+    if (isAnswered || !currentItem || currentItem.kind !== "word") return;
+    const wordObj = currentItem.word;
+    const correct = attempts === 0;
+    setIsAnswered(true);
+    setIsCorrect(correct);
+    try {
+      if (correct) {
+        const praise = await gradeWord(wordObj, true, "letter_tiles", rating === Rating.Hard);
+        setFeedbackMsg(`${praise ? praiseText(praise) : `Đúng rồi: "${wordObj.word}" 🎉 `}${NEXT_HINT}`);
+      } else {
+        await gradeWord(wordObj, false, "letter_tiles");
+        setFeedbackMsg(`Từ đúng là "${wordObj.word}". Từ này sẽ quay lại sớm để bạn ôn.`);
+        requeueItem(currentItem);
+      }
+    } catch (err) {
+      console.warn("Failed to record letter tiles review:", err);
+    }
+  };
+
   // Xử lý nộp đáp án dạng gõ (Typing)
   const handleTypingSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -727,7 +790,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      const match = matchTypedAnswer(typedInput, wordObj.word, pickExample(wordObj)?.sentence_en);
+      const sentence = pickExample(wordObj)?.sentence_en;
+      const match = matchTypedAnswer(typedInput, wordObj.word, sentence, allWordsRef.current.map((w) => w.word));
+      const expectedForm = formInSentence(sentence, wordObj.word) ?? wordObj.word;
       const correct = match !== "wrong";
       const typed = typedInput.trim().toLowerCase();
       if (!correct && parseTerms(wordObj.synonyms).some((t) => t.word.trim().toLowerCase() === typed)) {
@@ -746,7 +811,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           const praise = await gradeWord(wordObj, true, "spelling", match === "near");
           setFeedbackMsg(
             match === "near"
-              ? `Gần đúng! Từ chính xác là "${wordObj.word}" ✍️ ${praiseText(praise)}${NEXT_HINT}`
+              ? `Gần đúng! Từ chính xác là "${expectedForm}" ✍️ ${praiseText(praise)}${NEXT_HINT}`
               : `${praise ? praiseText(praise) : "Tuyệt vời! Bạn đã gõ chính xác 🚀 "}${NEXT_HINT}`
           );
         } else {
@@ -760,16 +825,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     } else {
       // Gõ đáp án ngữ pháp (chia động từ / điền từ)
       const ex = currentItem.exercise;
-      const lesson = currentItem.lesson;
       const correct = isGrammarAnswerCorrect(typedInput, ex);
 
       setIsAnswered(true);
       setIsCorrect(correct);
 
       try {
-        const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, correct, null);
-        recordGrammarExerciseAttempt(ex.id, correct);
-        await gradeGrammarAnswer(lesson.id, correct, first);
+        await recordGrammarAnswer(currentItem, correct);
         if (correct) {
           setFeedbackMsg(`Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
@@ -786,15 +848,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const handleSkipGrammar = async () => {
     if (isAnswered || !currentItem || currentItem.kind === "word") return;
     const ex = currentItem.exercise;
-    const lesson = currentItem.lesson;
 
     setIsAnswered(true);
     setIsCorrect(false);
 
     try {
-      const first = noteFirstAnswer(`g:${ex.id}`, lesson.title, false, null);
-      recordGrammarExerciseAttempt(ex.id, false, true);
-      await gradeGrammarAnswer(lesson.id, false, first);
+      await recordGrammarAnswer(currentItem, false, true);
       setFeedbackMsg(`Bạn đã bỏ qua câu này. Đáp án đúng là: ${formatAnswerForms(ex)}`);
       requeueItem(currentItem);
     } catch (err) {
@@ -832,7 +891,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
       if (
         (e.key === "s" || e.key === "S") &&
-        activeMode !== "typing" &&
+        activeMode === "multiple_choice" &&
         !isAnswered
       ) {
         e.preventDefault();
@@ -1139,6 +1198,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 <ArrowRight className="w-4 h-4" />
                 <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[10px] font-mono">Enter</kbd>
               </button>
+              {currentWord.direction !== "production" && (currentWord.srs?.reps ?? 0) === 0 && (
+                <button
+                  onClick={markIntroKnown}
+                  className="w-full py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+                >
+                  ✓ Đã biết từ này (hỏi lại sau khoảng một tuần)
+                </button>
+              )}
             </div>
           ) : currentItem.kind === "word" ? (
             /* ========================================================
@@ -1250,6 +1317,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     })}
                   </div>
                 </div>
+              )}
+
+              {/* Xếp chữ cái (thẻ nhớ lại còn non) */}
+              {activeMode === "letter_tiles" && currentWord && !isAnswered && (
+                <LetterTilesExercise
+                  key={`${currentWord.id}-${currentIndex}`}
+                  word={currentWord}
+                  onSpeak={(t) => handleSpeak(t)}
+                  onComplete={(_ok, attempts, rating) => handleTilesComplete(attempts, rating)}
+                />
               )}
 
               {/* Gõ từ vựng */}
@@ -1394,7 +1471,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                       <span>
                         Bài tập ngữ pháp (
                         {currentGrammar.exercise.type === "conjugation"
-                          ? "Chia động từ"
+                          ? "Điền vào chỗ trống"
                           : currentGrammar.exercise.type === "error_spotting"
                           ? "Tìm lỗi sai"
                           : currentGrammar.exercise.type === "sentence_transform"
@@ -1411,6 +1488,19 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                       </span>
                     </div>
                   </div>
+
+                  {/* First meeting with this grammar point: show its formula before the question */}
+                  {currentGrammar.intro && (
+                    <div className="p-3 rounded-xl bg-violet-50/70 dark:bg-violet-950/30 border border-violet-200/70 dark:border-violet-800/50 text-xs text-violet-900 dark:text-violet-200 space-y-1">
+                      <p className="font-semibold">
+                        Điểm ngữ pháp mới: {currentGrammar.lesson.titleVn || currentGrammar.lesson.title}
+                      </p>
+                      <p className="font-mono">{currentGrammar.lesson.formula.positive}</p>
+                      <p className="text-violet-700/80 dark:text-violet-300/70">
+                        Lần đầu gặp nên không tính điểm. Cứ thử, sai cũng không sao.
+                      </p>
+                    </div>
+                  )}
 
                   {/* Câu bài tập tiếng Anh chính */}
                   <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 text-center">

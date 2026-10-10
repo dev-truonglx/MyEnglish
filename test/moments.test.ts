@@ -65,3 +65,33 @@ describe("quiet hours", () => {
     expect(quietHours([ev("nudge_shown", 15, 1), ev("nudge_shown", 9, 1), ev("nudge_opened", 9, 1)])).toEqual([]);
   });
 });
+
+describe("reminder pauses", () => {
+  const on = { stopAfterGoal: true, nightQuiet: true, maxNudgesPerDay: 8 };
+
+  it("stays quiet at night, after the daily goal and past the daily cap", async () => {
+    const { reminderPause } = await import("@/services/reminderSettings");
+    const day = { hour: 10, goalReached: false, shownToday: 0 };
+    expect(reminderPause(on, day)).toBeNull();
+    expect(reminderPause(on, { ...day, hour: 22 })).toBe("night");
+    expect(reminderPause(on, { ...day, hour: 6 })).toBe("night");
+    expect(reminderPause(on, { ...day, hour: 7 })).toBeNull();
+    expect(reminderPause(on, { ...day, goalReached: true })).toBe("goal_reached");
+    expect(reminderPause(on, { ...day, shownToday: 8 })).toBe("daily_cap");
+  });
+
+  it("each pause can be turned off", async () => {
+    const { reminderPause } = await import("@/services/reminderSettings");
+    const off = { stopAfterGoal: false, nightQuiet: false, maxNudgesPerDay: 0 };
+    expect(reminderPause(off, { hour: 23, goalReached: true, shownToday: 50 })).toBeNull();
+  });
+
+  it("counts reminders shown today and starts again the next day", async () => {
+    localStorage.clear();
+    const { getNudgesShownToday, triggerReviewNudge } = await import("@/services/reminderSettings");
+    expect(getNudgesShownToday()).toBe(0);
+    await triggerReviewNudge(3).catch(() => {});
+    expect(getNudgesShownToday()).toBe(1);
+    expect(getNudgesShownToday(new Date(Date.now() + 86400000))).toBe(0);
+  });
+});

@@ -147,3 +147,39 @@ export async function loadHabitInsights(days: number = 30, weeks: number = 8, no
     days,
   };
 }
+
+// ─── Beginner metrics: is the foundation path working? ───────────────────────
+
+export interface BeginnerMetrics {
+  /** Active days in the last 14 */
+  activeDays14: number;
+  /** First scheduled answer of each recall (typing) card: how many were remembered */
+  firstRecall: { total: number; remembered: number };
+  /** Say-aloud self-checks (intro cards and pronunciation lessons) and how many felt right */
+  sayAloud: { total: number; ok: number };
+  pronunciationQuizzes: number;
+  grammarIntros: number;
+}
+
+/**
+ * What tells whether a beginner is on track: studying most days, remembering a word the first time it has
+ * to be typed (the recall ladder and the later recall start should push this up), and practising sound.
+ */
+export function beginnerMetrics(
+  logs: Array<{ rating: number; isScheduled: boolean; direction?: string; stateBefore?: number | null }>,
+  events: LearningEvent[],
+  activeDates: string[],
+  now: Date = new Date()
+): BeginnerMetrics {
+  const since = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13);
+  const sinceKey = dayKey(since);
+  const firstRecall = logs.filter((l) => l.isScheduled && l.direction === "production" && l.stateBefore === 0);
+  const say = events.filter((e) => e.type === "say_aloud");
+  return {
+    activeDays14: new Set(activeDates.filter((d) => d >= sinceKey && d <= dayKey(now))).size,
+    firstRecall: { total: firstRecall.length, remembered: firstRecall.filter((l) => l.rating > 1).length },
+    sayAloud: { total: say.length, ok: say.filter((e) => e.meta?.ok === true).length },
+    pronunciationQuizzes: events.filter((e) => e.type === "pronunciation_quiz").length,
+    grammarIntros: events.filter((e) => e.type === "grammar_intro").length,
+  };
+}

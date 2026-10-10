@@ -1,3 +1,4 @@
+import DisplaySettings from "./dashboard/DisplaySettings";
 import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
 import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
 import { getQuietHours } from "@/services/reminderMoments";
@@ -49,6 +50,8 @@ import {
   getLastPopupDisplayTime,
   getNextReminderTime,
   getRemainingSecondsToNextReminder,
+  NIGHT_QUIET_START,
+  NIGHT_QUIET_END,
   type ReminderSettings,
   type ReminderInterval,
   type SnoozeDuration,
@@ -1134,6 +1137,59 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                     onChange={(e) => handleUpdateReminder({ avoidQuietHours: e.target.checked })}
                   />
                 </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Xong mục tiêu ngày thì thôi nhắc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Đạt mục tiêu hôm nay rồi thì nghỉ, mai nhắc tiếp. Bạn vẫn có thể tự mở bài ôn bất cứ lúc nào.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.stopAfterGoal}
+                    onChange={(e) => handleUpdateReminder({ stopAfterGoal: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Không nhắc ban đêm ({NIGHT_QUIET_START}:00–{String(NIGHT_QUIET_END).padStart(2, "0")}:00)
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Ngủ đủ giúp nhớ từ tốt hơn học khuya.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.nightQuiet}
+                    onChange={(e) => handleUpdateReminder({ nightQuiet: e.target.checked })}
+                  />
+                </label>
+                <div className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Tối đa số lần nhắc mỗi ngày
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Nhắc quá nhiều dễ thành thói quen bấm bỏ qua.
+                    </span>
+                  </span>
+                  <select
+                    className="text-xs rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 shrink-0"
+                    value={reminderSettings.maxNudgesPerDay}
+                    onChange={(e) => handleUpdateReminder({ maxNudgesPerDay: Number(e.target.value) })}
+                  >
+                    {[4, 6, 8, 12, 0].map((n) => (
+                      <option key={n} value={n}>
+                        {n === 0 ? "Không giới hạn" : `${n} lần`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Field 4: Words per Session */}
@@ -1433,8 +1489,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               {([
                 {
                   key: "newCardsPerDay" as const,
-                  title: "Số từ mới mỗi ngày",
-                  desc: "Giới hạn số từ chưa học được đưa vào ôn mỗi ngày để lượng ôn tập không dồn ứ.",
+                  title: "Số thẻ mới mỗi ngày",
+                  desc: "Gồm từ mới và lượt tập gõ lại từ đã nhớ (thẻ nhớ lại mới). Giữ thấp để lượng ôn các ngày sau không dồn ứ.",
                   options: [3, 5, 8, 10, 20],
                 },
                 {
@@ -1493,6 +1549,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 />
               </label>
             </div>
+
+            <DisplaySettings />
 
             <AdvancedLearningSettings />
 

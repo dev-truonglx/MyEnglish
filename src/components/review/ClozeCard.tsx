@@ -24,6 +24,8 @@ interface ClozeCardProps {
   handleShowAnswer: () => void;
   originalSentence: string;
   clozeDisplaySentence: string;
+  /** The form of the word the blank needs ("deployed"), shown in hints and in the answer */
+  answerForm: string;
 }
 
 /** MODE 2: CLOZE DELETION (type the missing word into the context sentence) */
@@ -45,6 +47,7 @@ export default function ClozeCard({
   handleShowAnswer,
   originalSentence,
   clozeDisplaySentence,
+  answerForm,
 }: ClozeCardProps) {
   return (
     <div className="flex-1 min-h-0 flex flex-col justify-between">
@@ -57,14 +60,14 @@ export default function ClozeCard({
                 Điền từ tiếng Anh còn thiếu vào ngữ cảnh
               </span>
               <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Gõ từ và nhấn Enter. Đúng sẽ tự động chuyển, sai sẽ cho nhập lại.
+                Gõ từ và nhấn Enter. Đúng thì xem lại đáp án rồi nhấn Enter để sang câu mới; sai thì nhập lại.
               </p>
             </div>
 
             {/* Context Code Card */}
             <div className="p-4 md:p-5 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-3 shadow-inner shrink-0">
               <div className="flex items-center justify-between text-[11px] font-mono text-slate-500 dark:text-zinc-400">
-                <span>Context Sentence</span>
+                <span>Câu ví dụ</span>
                 <span className="text-indigo-600 dark:text-indigo-400 font-semibold">{currentWord.topic || "Dev Tech"}</span>
               </div>
               <p className="text-sm md:text-base font-medium text-slate-900 dark:text-zinc-100 leading-relaxed font-mono">
@@ -98,7 +101,7 @@ export default function ClozeCard({
                   data-gramm="false"
                   data-enable-grammarly="false"
                   data-lpignore="true"
-                  placeholder={`Gõ từ còn thiếu (${currentWord.word.length} ký tự) và nhấn Enter ↵`}
+                  placeholder={`Gõ từ còn thiếu (${answerForm.length} ký tự) và nhấn Enter ↵`}
                   className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-xl px-4 py-3 text-base font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-wide shadow-sm transition-all ${
                     isCorrect
                       ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-100 ring-4 ring-emerald-500/10 font-bold"
@@ -134,7 +137,7 @@ export default function ClozeCard({
                     </div>
                     {(showHint || wrongAttempts >= 2) && (
                       <span className="text-[11px] font-mono font-bold text-amber-700 dark:text-amber-300 shrink-0 ml-2">
-                        Gợi ý: "{currentWord.word[0].toUpperCase()}" ({currentWord.word.length} ký tự)
+                        Gợi ý: "{answerForm[0].toUpperCase()}" ({answerForm.length} ký tự)
                       </span>
                     )}
                   </div>
@@ -145,11 +148,11 @@ export default function ClozeCard({
                       <span className="truncate">
                         Gợi ý: Bắt đầu bằng{" "}
                         <span className="font-mono font-bold text-amber-800 dark:text-amber-300">
-                          "{currentWord.word[0].toUpperCase()}"
+                          "{answerForm[0].toUpperCase()}"
                         </span>
                         , độ dài:{" "}
                         <span className="font-bold text-amber-800 dark:text-amber-300">
-                          {currentWord.word.length} ký tự
+                          {answerForm.length} ký tự
                         </span>
                       </span>
                     </div>
@@ -244,8 +247,8 @@ export default function ClozeCard({
                 )}
                 <span className="text-xs font-semibold">
                   {isCorrect
-                    ? `Chính xác! Từ cần điền là "${currentWord.word}"`
-                    : `Đáp án chính xác: "${currentWord.word}"`}
+                    ? `Chính xác! Từ cần điền là "${answerForm}"`
+                    : `Đáp án chính xác: "${answerForm}"`}
                 </span>
               </div>
               <button

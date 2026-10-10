@@ -149,7 +149,7 @@ export default function SpellingCard({
                   </div>
                 ) : (
                   <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
-                    <span>Nghe phát âm hoặc xem nghĩa rồi gõ lại chính xác từ vựng</span>
+                    <span>Đọc nghĩa tiếng Việt rồi tự gõ từ tiếng Anh. Phát âm sẽ có sau khi trả lời.</span>
                   </div>
                 )}
               </div>

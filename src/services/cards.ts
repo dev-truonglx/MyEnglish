@@ -22,6 +22,7 @@ const EXERCISE_DIRECTION: Record<ExerciseType, CardDirection | null> = {
   spelling: "production",
   cloze: "production",
   free_writing: "production",
+  letter_tiles: "production",
   sentence_builder: null,
 };
 

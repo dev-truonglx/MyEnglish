@@ -53,7 +53,7 @@ export default function ContextMatchExercise({
   const [matches, setMatches] = useState<Record<string, string>>({});
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
-  const [wrongAttempts, setWrongAttempts] = useState(0);
+  const [, setWrongAttempts] = useState(0);
   const targetMistakesRef = useRef(0);
 
   const onFallbackRef = useRef(onFallback);
@@ -141,10 +141,8 @@ export default function ContextMatchExercise({
 
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
       const mistakes = targetMistakesRef.current;
-      completeTimerRef.current = setTimeout(() => {
-        completeTimerRef.current = null;
-        onComplete(mistakes === 0, mistakes, Rating.Good);
-      }, 1000);
+      // Reported at once: the session keeps this card on screen until the learner continues
+      onComplete(mistakes === 0, mistakes, Rating.Good);
     } else {
       if (targetWrong) targetMistakesRef.current += 1;
       setIsCorrect(false);
@@ -297,13 +295,13 @@ export default function ContextMatchExercise({
         {isAnswered && isCorrect ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span className="font-semibold">Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Đang chuyển tiếp...</span>
+            <span className="font-semibold">Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Nhấn Enter hoặc Tiếp tục.</span>
           </div>
         ) : isCorrect === false && !isAnswered ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
-              <span>Một số cặp ghép chưa chính xác (Lần {wrongAttempts}). Hãy đổi lại vị trí!</span>
+              <span>Có cặp chưa khớp, đổi lại vị trí rồi thử tiếp nhé!</span>
             </div>
             <button
               onClick={handleReset}

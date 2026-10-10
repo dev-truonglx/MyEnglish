@@ -30,6 +30,43 @@ export const BADGE_DEFINITIONS: Array<{
   xpBonus: number;
   targetValue: number;
 }> = [
+  // Early wins: reachable in the first days, so a beginner sees progress before any word is "mastered"
+  {
+    id: "first_session",
+    title: "Buổi Học Đầu Tiên",
+    description: "Hoàn thành phiên học đầu tiên",
+    emoji: "🚀",
+    category: "learning",
+    xpBonus: 30,
+    targetValue: 1,
+  },
+  {
+    id: "streak_3",
+    title: "Ba Ngày Liền",
+    description: "Học 3 ngày liên tiếp (1 câu mỗi ngày là đủ)",
+    emoji: "🌱",
+    category: "streak",
+    xpBonus: 60,
+    targetValue: 3,
+  },
+  {
+    id: "remembered_10",
+    title: "Mười Từ Qua Đêm",
+    description: "10 từ đã nhớ lại được ở lần ôn sau (qua ít nhất một đêm)",
+    emoji: "🌙",
+    category: "learning",
+    xpBonus: 60,
+    targetValue: 10,
+  },
+  {
+    id: "pronunciation_1",
+    title: "Tai Nghe Đầu Tiên",
+    description: "Hoàn thành bài phát âm đầu tiên",
+    emoji: "👂",
+    category: "learning",
+    xpBonus: 40,
+    targetValue: 1,
+  },
   {
     id: "first_word",
     title: "Bước Chân Đầu Tiên",
@@ -67,13 +104,13 @@ export const BADGE_DEFINITIONS: Array<{
     targetValue: 500,
   },
   {
-    id: "perfect_10",
-    title: "Xạ Thủ Trí Nhớ",
-    description: "10 thẻ đến hạn liên tiếp nhớ đúng ngay lần đầu trong 1 phiên",
+    id: "first_try_50",
+    title: "Bền Bỉ",
+    description: "Tổng cộng 50 lần nhớ đúng ngay lần đầu (không cần liên tiếp)",
     emoji: "🎯",
     category: "mastery",
     xpBonus: 150,
-    targetValue: 10,
+    targetValue: 50,
   },
   {
     id: "streak_7",
@@ -94,15 +131,6 @@ export const BADGE_DEFINITIONS: Array<{
     targetValue: 30,
   },
   {
-    id: "night_owl",
-    title: "Cú Đêm Luyện Công",
-    description: "Hoàn thành phiên ôn tập sau 22:00 đêm",
-    emoji: "🦉",
-    category: "learning",
-    xpBonus: 75,
-    targetValue: 1,
-  },
-  {
     id: "early_bird",
     title: "Chim Sớm Cần Mẫn",
     description: "Hoàn thành phiên ôn tập trước 07:00 sáng",
@@ -113,8 +141,8 @@ export const BADGE_DEFINITIONS: Array<{
   },
   {
     id: "leech_slayer",
-    title: "Dũng Sĩ Diệt Leech",
-    description: "Khắc phục và ôn thành công 3 từ Leech (từ khó hay quên)",
+    title: "Không Bỏ Cuộc",
+    description: "Nhớ được 3 từ trước đây hay quên",
     emoji: "🗡️",
     category: "mastery",
     xpBonus: 150,
@@ -145,6 +173,7 @@ interface StoredAchievement {
 }
 
 export function getAchievements(context?: {
+  rememberedWords?: number;
   totalWords?: number;
   masteredWords?: number;
   weekOnTarget?: boolean;
@@ -181,8 +210,14 @@ export function getAchievements(context?: {
       case "streak_30":
         currentValue = ctx.currentStreak || 0;
         break;
-      case "perfect_10":
-        currentValue = ctx.consecutiveCorrect || 0;
+      case "first_try_50":
+        currentValue = getFirstTryTotal();
+        break;
+      case "streak_3":
+        currentValue = ctx.currentStreak || 0;
+        break;
+      case "remembered_10":
+        currentValue = ctx.rememberedWords || 0;
         break;
       case "leech_slayer":
         currentValue = ctx.leechesSlain || 0;
@@ -190,7 +225,8 @@ export function getAchievements(context?: {
       case "topic_master":
         currentValue = ctx.topicMasterCount || 0;
         break;
-      case "night_owl":
+      case "first_session":
+      case "pronunciation_1":
       case "early_bird":
         currentValue = isAlreadyUnlocked ? 1 : 0;
         break;
@@ -225,6 +261,32 @@ export interface AchievementCheckContext {
   responseTimeMs?: number;
   isCorrect?: boolean;
   topicMasterCount?: number;  // max mastered words within a single topic
+  /** Words whose recognition card graduated to Review (remembered at a later review) */
+  rememberedWords?: number;
+  /** A study session was completed */
+  sessionCompleted?: boolean;
+  /** A pronunciation lesson was passed */
+  pronunciationPassed?: boolean;
+}
+
+const FIRST_TRY_KEY = "myenglish_first_try_total_v1";
+
+/** Scheduled answers remembered on the first try, in total (the "Bền Bỉ" badge) */
+export function getFirstTryTotal(): number {
+  try {
+    const n = Number(localStorage.getItem(FIRST_TRY_KEY));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function recordFirstTryCorrect(): number {
+  const next = getFirstTryTotal() + 1;
+  try {
+    localStorage.setItem(FIRST_TRY_KEY, String(next));
+  } catch {}
+  return next;
 }
 
 function readStoredAchievements(): Record<string, StoredAchievement> {
@@ -259,13 +321,15 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
   }
   if (context.weekOnTarget) evaluateBadge("on_target", true);
 
+  if (context.sessionCompleted) evaluateBadge("first_session", true);
+  if (context.pronunciationPassed) evaluateBadge("pronunciation_1", true);
+  if (context.rememberedWords !== undefined) evaluateBadge("remembered_10", context.rememberedWords >= 10);
+  evaluateBadge("first_try_50", getFirstTryTotal() >= 50);
+
   if (context.currentStreak !== undefined) {
+    evaluateBadge("streak_3", context.currentStreak >= 3);
     evaluateBadge("streak_7", context.currentStreak >= 7);
     evaluateBadge("streak_30", context.currentStreak >= 30);
-  }
-
-  if (context.consecutiveCorrect !== undefined) {
-    evaluateBadge("perfect_10", context.consecutiveCorrect >= 10);
   }
 
   if (context.leechesSlain !== undefined) {
@@ -276,11 +340,8 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
     evaluateBadge("topic_master", context.topicMasterCount >= 10);
   }
 
-  // Time based
+  // Time based (no badge for studying late at night: sleep helps memory more)
   if (context.sessionReviewCount && context.sessionReviewCount >= 1) {
-    if (currentHour >= 22 || currentHour < 4) {
-      evaluateBadge("night_owl", true);
-    }
     if (currentHour >= 4 && currentHour < 7) {
       evaluateBadge("early_bird", true);
     }

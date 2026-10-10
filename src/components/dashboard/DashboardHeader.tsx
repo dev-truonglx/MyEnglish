@@ -5,6 +5,7 @@ import { triggerAutoReplenish } from "@/services/autoReplenish";
 import { useWordsStore } from "@/stores/wordsStore";
 import type { GlobalToastData } from "./DashboardBanners";
 import type { DashboardTab, FilterMode, LibraryStats, ViewMode } from "./shared";
+import { AI_VOCAB_ENABLED } from "@/services/features";
 
 interface DashboardHeaderProps {
   searchInputRef: RefObject<HTMLInputElement>;
@@ -79,7 +80,7 @@ export default function DashboardHeader({
           type="text"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Tìm kiếm từ, nghĩa, hoặc từ đồng nghĩa... (nhấn / để tìm)"
+          placeholder="Tìm từ hoặc nghĩa... (nhấn / để tìm)"
           className="w-full bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 rounded-lg pl-9 pr-14 py-1.5 text-xs text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
         />
         {searchQuery ? (
@@ -101,7 +102,7 @@ export default function DashboardHeader({
         {/* Streak & Daily Goal Quick Indicator */}
         <button
           onClick={() => setActiveTab("analytics")}
-          title={`Chuỗi: ${streakStats.currentStreak} ngày • Hôm nay: ${streakStats.todayCount}/${streakStats.dailyGoal} từ (Click để xem chi tiết)`}
+          title={`Chuỗi: ${streakStats.currentStreak} ngày • Hôm nay: ${streakStats.todayCount}/${streakStats.dailyGoal} câu (bấm để xem tiến độ)`}
           className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-xs transition-colors shadow-sm"
         >
           <div className="flex items-center gap-1 font-mono font-bold text-orange-600 dark:text-orange-400">
@@ -145,7 +146,8 @@ export default function DashboardHeader({
           </div>
         )}
 
-        {/* Filter Pills */}
+        {/* Filter Pills (word library only) */}
+        {activeTab === "library" && (
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-300 dark:border-zinc-800">
           <button
             onClick={() => setFilterMode("all")}
@@ -154,7 +156,7 @@ export default function DashboardHeader({
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
           >
-            All
+            Tất cả
           </button>
           <button
             onClick={() => setFilterMode("due")}
@@ -163,7 +165,7 @@ export default function DashboardHeader({
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
           >
-            Due
+            Đến hạn
             {dueCount > 0 && (
               <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
             )}
@@ -175,7 +177,7 @@ export default function DashboardHeader({
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
           >
-            Mastered
+            Đã thuộc
           </button>
           <button
             onClick={() => setFilterMode("leech")}
@@ -184,12 +186,11 @@ export default function DashboardHeader({
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
           >
-            🐛 Leech
-            {libraryStats.leechCount > 0 && (
-              <span className="w-1.5 h-1.5 rounded-full bg-rose-500 animate-pulse" />
-            )}
+            Hay quên
+            {libraryStats.leechCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
           </button>
         </div>
+        )}
 
         {/* Refresh */}
         <button
@@ -201,7 +202,8 @@ export default function DashboardHeader({
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-600 dark:text-cyan-400" : ""}`} />
         </button>
 
-        {/* Quick Auto-Replenish Button */}
+        {/* Quick Auto-Replenish Button (needs the AI CLI: word library and capture only) */}
+        {AI_VOCAB_ENABLED && (activeTab === "library" || activeTab === "capture") && (
         <button
           onClick={handleQuickReplenish}
           disabled={isQuickReplenishing}
@@ -216,16 +218,14 @@ export default function DashboardHeader({
           ) : (
             <>
               <Sparkles className="w-3.5 h-3.5 text-yellow-200" />
-              <span>Bổ sung ngay</span>
-              <span className="text-[10px] bg-black/25 text-white px-1.5 py-0.5 rounded font-mono font-bold">
-                {effectiveLevel}
-              </span>
+              <span>Gợi ý 3 từ (AI)</span>
             </>
           )}
         </button>
+        )}
 
-        {/* Quick Review Button */}
-        {onStartReview && (
+        {/* Quick Review Button (the Today screen has its own, single main button) */}
+        {onStartReview && activeTab !== "today" && (
           <button
             onClick={onStartReview}
             title={
@@ -248,13 +248,15 @@ export default function DashboardHeader({
         )}
 
         {/* Add Word Button */}
+        {activeTab === "library" && (
         <button
           onClick={() => setActiveTab("capture")}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-sm transition-all"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>Add Word</span>
+          <span>{AI_VOCAB_ENABLED ? "Thêm từ" : "Tìm từ trong bộ Oxford"}</span>
         </button>
+        )}
       </div>
     </header>
   );

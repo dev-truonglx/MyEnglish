@@ -59,6 +59,19 @@ export interface GrammarExercise {
   breakdown?: SyntaxToken[];
 }
 
+/** How the structure differs from Vietnamese: the source of most beginner mistakes */
+export interface VnContrast {
+  title: string;
+  points: Array<{
+    /** The Vietnamese way of saying it */
+    vn: string;
+    /** The English sentence */
+    en: string;
+    /** Why they differ, in Vietnamese */
+    note: string;
+  }>;
+}
+
 export interface GrammarLesson {
   id: string;
   level: GrammarLevel;
@@ -72,6 +85,12 @@ export interface GrammarLesson {
     negative: string;
     question: string;
   };
+  /** Labels of the three formulas when they are not affirmative / negative / question */
+  formulaLabels?: {
+    positive: string;
+    negative: string;
+    question: string;
+  };
   timeSignals: string[]; // Dấu hiệu nhận biết: always, usually, right now, yesterday...
   usagePoints: Array<{
     title: string;
@@ -80,6 +99,9 @@ export interface GrammarLesson {
   }>;
   contrast?: GrammarContrast;
   commonMistakes: GrammarMistake[];
+  /** Foundation lesson for absolute beginners (A0/A1): studied first, not part of the A1 level check */
+  foundation?: boolean;
+  vnContrast?: VnContrast;
   diagnosticExercises: GrammarExercise[]; // 2-3 câu làm kiểm tra đầu vào trước
   practiceExercises: GrammarExercise[]; // 3-4 câu luyện tập củng cố
 }

@@ -7,7 +7,7 @@
 import { Rating } from "ts-fsrs";
 import { emit } from "@tauri-apps/api/event";
 import type { CardDirection, ReviewCard, SRSReview } from "@/types/database";
-import { getDatabase } from "./db";
+import { getDatabase, SRS_COLUMNS } from "./db";
 import { getFSRSSettings, recordReview, type FSRSResult } from "./srs";
 import { isValidEvidence } from "./cards";
 import {
@@ -258,6 +258,36 @@ export async function recordIntro(card: ReviewCard, now: Date = new Date()): Pro
     direction: card.direction,
     before: reviewLogBefore(card.srs, now),
   }).catch((err) => console.warn("Intro log save failed:", err));
+}
+
+/**
+ * The learner already knows a new word: its recognition card is scheduled as Easy (a check in about a week)
+ * without a quiz. It is outside the daily new-word budget, and recall practice only starts once a real
+ * review has confirmed the word (otherwise skimming hundreds of easy words would flood the budget with
+ * recall cards). A word already studied is left alone. Returns whether the word was marked.
+ */
+export async function markWordKnown(wordId: string, now: Date = new Date()): Promise<boolean> {
+  const db = await getDatabase();
+  const rows = await db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id = $1 LIMIT 1`, [wordId]);
+  const before = rows[0];
+  if (before && ((before.reps ?? 0) > 0 || (before.state ?? 0) !== 0)) return false;
+  await recordReview(wordId, Rating.Easy, "recognition", { unlockProduction: false });
+  await saveReviewLog({
+    wordId,
+    exerciseType: "known",
+    responseTimeMs: 0,
+    isCorrect: true,
+    wrongAttempts: 0,
+    rating: Rating.Easy,
+    xpEarned: 0,
+    timestamp: now.toISOString(),
+    isScheduled: false,
+    direction: "recognition",
+    before: before ? reviewLogBefore(before, now) : undefined,
+  });
+  await logLearningEvent("known", { wordId, direction: "recognition", at: now });
+  notifyWordsChanged();
+  return true;
 }
 
 /**

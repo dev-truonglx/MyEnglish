@@ -3,11 +3,16 @@ import { listen } from "@tauri-apps/api/event";
 import { takePendingContext, pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
+import { isPlaceholderMeaning } from "@/services/db";
 import { getDueCards, isWordDue, practiceCards, getNextReviewDate } from "@/services/cards";
 import { formatNextReviewRelative, compareNextReview, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
+import { AI_VOCAB_ENABLED } from "@/services/features";
+import { getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
+import { loadCatalogDistractors } from "@/services/vocabCatalog";
+import { needsVocabMigration } from "@/services/vocabReset";
 import {
   getRetrievabilityInfo,
   isLeech,
@@ -29,6 +34,10 @@ const GrammarHub = lazy(() => import("./grammar/GrammarHub"));
 const OnboardingFlow = lazy(() => import("./OnboardingFlow"));
 const ReadingTab = lazy(() => import("./dashboard/ReadingTab"));
 const WritingTab = lazy(() => import("./dashboard/WritingTab"));
+const PronunciationTab = lazy(() => import("./dashboard/PronunciationTab"));
+const TodayTab = lazy(() => import("./dashboard/TodayTab"));
+const VocabTab = lazy(() => import("./dashboard/VocabTab"));
+const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
 
 function TabFallback() {
   return (
@@ -87,7 +96,8 @@ export default function MainDashboard({
   const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
-  const [activeTab, setActiveTab] = useState<DashboardTab>("library");
+  // The app opens on "Hôm nay": one clear thing to do, not the whole word library
+  const [activeTab, setActiveTab] = useState<DashboardTab>("today");
   // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
   const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(null);
   useEffect(() => {
@@ -173,7 +183,7 @@ export default function MainDashboard({
     };
   }, []);
   useEffect(() => {
-    if (replenishCheckedRef.current || loading || words.length === 0) return;
+    if (!AI_VOCAB_ENABLED || replenishCheckedRef.current || loading || words.length === 0) return;
     replenishCheckedRef.current = true;
     // Timer is only cleared on unmount so later refreshes don't cancel the one-shot check
     replenishTimerRef.current = setTimeout(() => {
@@ -212,6 +222,43 @@ export default function MainDashboard({
   useEffect(() => {
     if (shouldShowOnboarding(words.length, loading)) setShowOnboarding(true);
   }, [words.length, loading]);
+  // Switching to the Oxford deck: old words must be cleared first (migration), or the levels chosen
+  const [vocabSetup, setVocabSetup] = useState<"migrate" | "levels" | null>(null);
+  const [vocabSetupChecked, setVocabSetupChecked] = useState(false);
+  useEffect(() => {
+    needsVocabMigration()
+      .then((migrate) => {
+        if (migrate) setVocabSetup("migrate");
+        else if (hasChosenStudyLevels())
+          topUpNewWords()
+            .then((r) => {
+              if (r.added > 0) refreshWords();
+            })
+            .catch(() => {});
+      })
+      .catch(() => {})
+      .finally(() => setVocabSetupChecked(true));
+  }, []);
+  useEffect(() => {
+    // Already onboarded (or every word deleted) but no levels yet: ask for them
+    if (vocabSetupChecked && !loading && !showOnboarding && vocabSetup === null && !hasChosenStudyLevels()) setVocabSetup("levels");
+  }, [vocabSetupChecked, loading, showOnboarding, vocabSetup]);
+  const handleVocabSetupDone = async () => {
+    setVocabSetup(null);
+    await refreshWords();
+    setActivityVersion((v) => v + 1);
+  };
+
+  // Wrong options for multiple choice: the learner's words plus unseen deck words of their levels
+  const [catalogDistractors, setCatalogDistractors] = useState<WordDetail[]>([]);
+  useEffect(() => {
+    const load = () => loadCatalogDistractors(getStudyLevels()).then(setCatalogDistractors).catch(() => {});
+    load();
+    window.addEventListener("myenglish-study-levels-changed", load);
+    return () => window.removeEventListener("myenglish-study-levels-changed", load);
+  }, []);
+  const distractorPool = useMemo(() => [...words, ...catalogDistractors], [words, catalogDistractors]);
+
   const handleOnboardingFinish = async (startNow: boolean) => {
     setShowOnboarding(false);
     await refreshWords();
@@ -222,7 +269,7 @@ export default function MainDashboard({
   useEffect(() => {
     refreshWords({ showLoading: true });
     // Resume AI analysis for words left with a placeholder meaning (app closed mid-analysis / failed)
-    requeuePendingWords().catch((err) => console.warn("Requeue pending words failed:", err));
+    if (AI_VOCAB_ENABLED) requeuePendingWords().catch((err) => console.warn("Requeue pending words failed:", err));
     srsWorker.start(); // Check reviews dynamically in background according to user settings
 
     // Subscribe to AI pipeline updates; refresh only when an item finishes (completed/failed)
@@ -249,6 +296,16 @@ export default function MainDashboard({
     listen<{ word: string }>("word-submitted", (event) => {
       if (isCancelled) return;
       const w = event.payload.word;
+      if (!AI_VOCAB_ENABLED) {
+        // The deck is the only source of words: a word typed in Quick Input is learnt early if it is in it
+        pullWordFromDeck(w, takePendingContext(w))
+          .then((r) => {
+            setMessage(pullMessage(r));
+            scheduleRefresh();
+          })
+          .catch(() => {});
+        return;
+      }
       pipeline.enqueue(w, { context: takePendingContext(w) }).then((res) => {
         setMessage(
           res.accepted ? `Received "${w}" from Quick Input. Gemini AI is analyzing...` : `Không thể thêm "${w}": ${res.reason}`
@@ -326,7 +383,12 @@ export default function MainDashboard({
 
     // Catch up when the window comes back after a while (missed events, day rollover)
     const handleFocus = () => {
-      if (Date.now() - lastRefreshAtRef.current > 30_000) scheduleRefresh();
+      if (Date.now() - lastRefreshAtRef.current > 30_000) {
+        // A new day may need new words in the buffer
+        topUpNewWords()
+          .catch(() => {})
+          .finally(scheduleRefresh);
+      }
     };
     window.addEventListener("focus", handleFocus);
 
@@ -374,9 +436,12 @@ export default function MainDashboard({
     if (session.length > 0) {
       setIsPracticeSession(false);
     } else {
-      // Nothing due (or new-card budget used up): extra practice on the weakest words, not recorded in FSRS
+      // Nothing due (or new-card budget used up): extra practice on the weakest words, not recorded in FSRS.
+      // Only words already studied: a new word needs its introduction and counts toward the daily
+      // new-word limit; a word still waiting for AI analysis has no meaning to practise yet.
       const { maxSessionSize } = getStudyLimits();
-      session = practiceCards(smartSortReviewQueue(pool, now).slice(0, maxSessionSize));
+      const studied = pool.filter((w) => (w.srs?.reps ?? 0) > 0 && !isPlaceholderMeaning(w.meaning_vn));
+      session = practiceCards(smartSortReviewQueue(studied, now).slice(0, maxSessionSize));
       setIsPracticeSession(true);
     }
 
@@ -405,14 +470,20 @@ export default function MainDashboard({
     }
   };
 
+  // The library shows the learner's words: deck words still waiting to be introduced are not theirs yet
+  const libraryWords = useMemo(
+    () => words.filter((w) => !(w.catalog_id && (w.srs?.reps ?? 0) === 0 && (w.srs?.state ?? 0) === 0)),
+    [words]
+  );
+
   const topicStats = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const w of words) {
+    for (const w of libraryWords) {
       const t = (w.topic || "General Tech").trim();
       counts[t] = (counts[t] || 0) + 1;
     }
     return counts;
-  }, [words]);
+  }, [libraryWords]);
 
   const availableTopics = useMemo(() => {
     return Object.keys(topicStats).sort((a, b) => {
@@ -437,7 +508,7 @@ export default function MainDashboard({
   // Filter & Search Logic
   const filteredWords = useMemo(() => {
     const now = new Date(nowTick);
-    const result = words.filter((item) => {
+    const result = libraryWords.filter((item) => {
       // Search
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
@@ -483,13 +554,13 @@ export default function MainDashboard({
 
     // Default sort: words due earliest / coming up next first
     return result.sort((a, b) => compareNextReview(a, b, now));
-  }, [words, searchQuery, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
+  }, [libraryWords, searchQuery, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
 
   // Counts for each review schedule bucket
   const reviewBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
     const now = new Date(nowTick);
     const counts: Record<ReviewTimeBucket, number> = {
-      all: words.length,
+      all: libraryWords.length,
       due: 0,
       today: 0,
       "1-3d": 0,
@@ -497,23 +568,23 @@ export default function MainDashboard({
       future: 0,
       new: 0,
     };
-    for (const w of words) {
+    for (const w of libraryWords) {
       const isNew = (!w.srs.reps && !w.srs.repetitions) || w.srs.repetitions === 0;
       const nextDate = getNextReviewDate(w);
       const info = formatNextReviewRelative(nextDate, isNew, now);
       counts[info.bucket]++;
     }
     return counts;
-  }, [words, nowTick]);
+  }, [libraryWords, nowTick]);
 
   // Single pass over words: due/learned/leech counts and per-topic {total, due}
   const libraryStats = useMemo<LibraryStats>(() => {
     const now = new Date(nowTick);
-    const leechIds = new Set(getLeechWords(words).map((w) => w.id));
+    const leechIds = new Set(getLeechWords(libraryWords).map((w) => w.id));
     const dueWords: WordDetail[] = [];
     const perTopic: Record<string, { total: number; due: number }> = {};
     let learnedCount = 0;
-    for (const w of words) {
+    for (const w of libraryWords) {
       const isDue = isWordDue(w, now);
       if (isDue) dueWords.push(w);
       if (w.srs.repetitions > 0) learnedCount++;
@@ -523,7 +594,7 @@ export default function MainDashboard({
       if (isDue) entry.due++;
     }
     return { dueWords, learnedCount, leechCount: leechIds.size, perTopic };
-  }, [words, nowTick]);
+  }, [libraryWords, nowTick]);
 
   // What a review session will actually contain today: due reviews + new words within the daily budget
   const dueCount = todayWork.total;
@@ -670,6 +741,20 @@ export default function MainDashboard({
           onStartReview={() => handleStartReview(true)}
         />
 
+        {/* TODAY: the opening screen, one main action */}
+        {activeTab === "today" && (
+          <Suspense fallback={<TabFallback />}>
+            <TodayTab
+              words={words}
+              todayWork={todayWork}
+              comeback={comeback}
+              streakStats={streakStats}
+              onStart={() => handleStartReview(true)}
+              setActiveTab={setActiveTab}
+            />
+          </Suspense>
+        )}
+
         {/* TAB 1: VOCABULARY LIBRARY */}
         {activeTab === "library" && (
           <LibraryTab
@@ -695,8 +780,13 @@ export default function MainDashboard({
           />
         )}
 
-        {/* TAB 2: QUICK CAPTURE & AI PIPELINE */}
-        {activeTab === "capture" && (
+        {/* TAB 2: QUICK CAPTURE & AI PIPELINE (the Oxford deck's levels while AI vocabulary is off) */}
+        {activeTab === "capture" && !AI_VOCAB_ENABLED && (
+          <Suspense fallback={<TabFallback />}>
+            <VocabTab />
+          </Suspense>
+        )}
+        {activeTab === "capture" && AI_VOCAB_ENABLED && (
           <CaptureTab
             inputWord={inputWord}
             setInputWord={setInputWord}
@@ -732,16 +822,16 @@ export default function MainDashboard({
             <FlashcardReview
               key={sessionId}
               wordsToReview={reviewSet}
-              distractorPool={words}
+              distractorPool={distractorPool}
               practiceMode={isPracticeSession}
               onFinish={() => {
                 setIsReviewing(false);
-                refreshWords();
+                topUpNewWords().catch(() => {}).finally(() => refreshWords());
               }}
               onExit={() => {
                 setIsReviewing(false);
                 // Reviews answered before exiting were already persisted
-                refreshWords();
+                topUpNewWords().catch(() => {}).finally(() => refreshWords());
               }}
             />
           ) : (
@@ -783,6 +873,9 @@ export default function MainDashboard({
           />
         )}
 
+        {/* PRONUNCIATION: final sounds, -s/-ed endings, th, stress, IT words */}
+        {activeTab === "pronunciation" && <PronunciationTab />}
+
         {/* TAB 6: GRAMMAR HUB (A1 - C1 ROADMAP & DIAGNOSTIC PRACTICE) */}
         {activeTab === "grammar" && <GrammarHub key={grammarLessonToOpen ?? "hub"} initialLessonId={grammarLessonToOpen} />}
         </Suspense>
@@ -823,6 +916,12 @@ export default function MainDashboard({
       {showOnboarding && (
         <Suspense fallback={null}>
           <OnboardingFlow onFinish={handleOnboardingFinish} />
+        </Suspense>
+      )}
+
+      {!showOnboarding && vocabSetup && (
+        <Suspense fallback={null}>
+          <VocabSetupScreen mode={vocabSetup} onDone={handleVocabSetupDone} />
         </Suspense>
       )}
 

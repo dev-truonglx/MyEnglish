@@ -19,7 +19,51 @@ export type ReminderMoment =
   /** Just stopped sharing the screen (presentation or meeting share over) */
   | "after_share"
   /** Just left a full-screen app (video call, presentation, focused work) */
-  | "after_fullscreen";
+  | "after_fullscreen"
+  /** The time the learner chose to study at: after lunch / at the end of the work day */
+  | "anchor_lunch"
+  | "anchor_evening";
+
+/**
+ * Study times the learner picks at onboarding ("after lunch, I review"). Tying a habit to an existing
+ * routine works better than a reminder every N minutes. Each anchor fires at most once a day, within
+ * ANCHOR_WINDOW_MS of its time.
+ */
+export type ReminderAnchor = "after_lunch" | "end_of_day";
+export const ANCHOR_TIMES: Record<ReminderAnchor, { hour: number; minute: number; moment: ReminderMoment; label: string }> = {
+  after_lunch: { hour: 13, minute: 15, moment: "anchor_lunch", label: "Sau bữa trưa (13:15)" },
+  end_of_day: { hour: 17, minute: 30, moment: "anchor_evening", label: "Cuối ngày làm việc (17:30)" },
+};
+export const ANCHOR_WINDOW_MS = 90 * 60 * 1000;
+const ANCHOR_FIRED_KEY = "myenglish_anchor_fired_v1";
+
+function firedToday(now: Date): ReminderAnchor[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ANCHOR_FIRED_KEY) || "{}");
+    return parsed.day === getLocalDateString(now) && Array.isArray(parsed.fired) ? parsed.fired : [];
+  } catch {
+    return [];
+  }
+}
+
+/** The chosen anchor whose time has come today and which has not reminded yet, or null */
+export function dueAnchor(now: Date, anchors: ReminderAnchor[]): ReminderAnchor | null {
+  const done = firedToday(now);
+  for (const a of anchors) {
+    const t = ANCHOR_TIMES[a];
+    if (!t || done.includes(a)) continue;
+    const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), t.hour, t.minute).getTime();
+    if (now.getTime() >= at && now.getTime() < at + ANCHOR_WINDOW_MS) return a;
+  }
+  return null;
+}
+
+export function markAnchorFired(anchor: ReminderAnchor, now: Date = new Date()): void {
+  try {
+    const fired = [...new Set([...firedToday(now), anchor])];
+    localStorage.setItem(ANCHOR_FIRED_KEY, JSON.stringify({ day: getLocalDateString(now), fired }));
+  } catch {}
+}
 
 /** Away from the keyboard this long (or the computer slept this long) before "back" counts */
 export const AWAY_SECONDS = 5 * 60;

@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { buildPretest, isPretestEnabled, setPretestEnabled, shouldPretest } from "@/services/pretest";
 import { toCard } from "@/services/cards";
 import { makeWord } from "./helpers";
+import { setUserOverrideLevel } from "@/services/userProficiency";
 
 const example = (sentence_en: string) => [{ id: "e1", word_id: "x", sentence_en, sentence_vn: "Câu dịch.", grammar_analysis: "" }];
 
@@ -26,7 +27,20 @@ describe("pretest", () => {
     expect(buildPretest(pool[1], pool)).toBeNull();
   });
 
+  it("is off by default for beginners (A1 or no level), on from A2", () => {
+    localStorage.clear();
+    expect(isPretestEnabled()).toBe(false);
+    setUserOverrideLevel("A1");
+    expect(isPretestEnabled()).toBe(false);
+    setUserOverrideLevel("B1");
+    expect(isPretestEnabled()).toBe(true);
+    setPretestEnabled(true);
+    setUserOverrideLevel("A1");
+    expect(isPretestEnabled()).toBe(true); // the learner's own choice wins
+  });
+
   it("only for brand-new words, and can be turned off", () => {
+    setPretestEnabled(true);
     const fresh = toCard(makeWord("idempotent"), "recognition");
     const relearn = toCard(makeWord("cache", { srs: { state: 3, reps: 6, lapses: 5 } }), "recognition");
     expect(shouldPretest(fresh)).toBe(true);

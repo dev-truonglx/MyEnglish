@@ -10,6 +10,7 @@ import { generateMultipleChoiceQuestion, pickExample } from "./smartReview";
 import { needsIntro } from "./popupSession";
 import { logLearningEvent } from "./learningEvents";
 import { persistKeyNow } from "./storageBackup";
+import { getUserOverrideLevel } from "./userProficiency";
 
 const ENABLED_KEY = "myenglish_pretest_enabled_v1";
 
@@ -31,12 +32,17 @@ export interface PretestResult {
   chosen: string | null;
 }
 
+/**
+ * The learner's own choice when they made one. Otherwise on from A2 up: a beginner (A1, or no level
+ * chosen) can't read the English sentence yet, so the guess is blind and only feels like failing.
+ */
 export function isPretestEnabled(): boolean {
   try {
-    return localStorage.getItem(ENABLED_KEY) !== "0";
-  } catch {
-    return true;
-  }
+    const stored = localStorage.getItem(ENABLED_KEY);
+    if (stored === "0" || stored === "1") return stored === "1";
+  } catch {}
+  const level = getUserOverrideLevel();
+  return level !== null && level !== "A1";
 }
 
 export function setPretestEnabled(enabled: boolean): void {

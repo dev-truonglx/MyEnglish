@@ -6,6 +6,7 @@ import { gradeSentenceWithAI, type SentenceGrade } from "@/services/ai";
 import { ratingFromSentenceGrade, recordFreeWritingUse } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
 import { applyCorrections, saveMistakes } from "@/services/mistakes";
+import { getActiveCefrLevel } from "@/services/pipeline";
 
 interface FreeWritingExerciseProps {
   word: WordDetail;
@@ -34,7 +35,7 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
     if (grading || grade || sentence.trim().length < 3) return;
     setGrading(true);
     try {
-      const g = await gradeSentenceWithAI(word.word, word.meaning_vn, sentence.trim(), level);
+      const g = await gradeSentenceWithAI(word.word, word.meaning_vn, sentence.trim(), level ?? (await getActiveCefrLevel()));
       recordFreeWritingUse();
       let r = ratingFromSentenceGrade(g);
       // The first letter was given: the word itself was not recalled unaided
@@ -96,7 +97,7 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
         rows={3}
         autoFocus
         spellCheck={false}
-        placeholder="Ví dụ: Our retry logic must be idempotent so that..."
+        placeholder="Một câu ngắn là đủ. Ví dụ: I fixed a bug today."
         className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-violet-500"
       />
 

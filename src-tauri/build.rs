@@ -29,6 +29,7 @@ const APP_COMMANDS: &[&str] = &[
     "export_backup",
     "grade_sentence_ai",
     "correct_writing_ai",
+    "generate_memory_aid_ai",
     "compute_fsrs_parameters",
 ];
 

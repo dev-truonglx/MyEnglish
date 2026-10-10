@@ -61,7 +61,7 @@ describe("duoMotivation algorithm", () => {
         hour: 15,
       });
       expect(state1.tone).toBe("level_2_playful_guilt");
-      expect(state1.mascotMood).toBe("pleading");
+      expect(state1.mascotMood).toBe("happy"); // a skipped reminder is never answered with a pleading face
       expect(state1.isMicroQuizPreferred).toBe(false);
 
       const state2 = evaluateMotivationState({
@@ -101,7 +101,8 @@ describe("duoMotivation algorithm", () => {
         hour: 14,
       });
       expect(state.tone).toBe("level_4_drama_resignation");
-      expect(state.mascotMood).toBe("dramatic");
+      expect(state.mascotMood).toBe("happy");
+      expect(state.message).not.toContain("FSRS");
       expect(state.isMicroQuizPreferred).toBe(true);
     });
 
@@ -114,9 +115,27 @@ describe("duoMotivation algorithm", () => {
         dailyGoal: 10,
         hour: 10,
       });
-      expect(state.title).toContain("Cứu hộ khẩn cấp");
-      expect(state.title).toContain("35 từ");
-      expect(state.message).toContain("Đừng sợ số lượng nhiều");
+      expect(state.title).toBe("Ôn dần, mỗi lần vài từ");
+      expect(state.message).toContain("35 từ");
+      expect(state.message).toContain("không cần ôn hết một lúc");
+      expect(state.mascotMood).toBe("happy");
+    });
+
+    it("never says the streak is 1 day when it is 0, nor promises a freeze the learner doesn't have", () => {
+      const base = { dueCount: 8, consecutiveSkips: 0, todayCount: 0, dailyGoal: 10, hour: 21 };
+      const noStreak = evaluateMotivationState({ ...base, streak: 0 });
+      expect(noStreak.title).toBe("Bắt đầu chuỗi hôm nay");
+      expect(noStreak.message).not.toContain("đóng băng");
+      const noFreeze = evaluateMotivationState({ ...base, streak: 3, freezes: 0 });
+      expect(noFreeze.message).not.toContain("đóng băng");
+      const withFreeze = evaluateMotivationState({ ...base, streak: 9, freezes: 1 });
+      expect(withFreeze.message).toContain("1 lượt đóng băng");
+    });
+
+    it("gives an honest time estimate instead of '1 phút' for many cards", () => {
+      const state = evaluateMotivationState({ dueCount: 19, consecutiveSkips: 0, streak: 2, todayCount: 0, dailyGoal: 10, hour: 9 });
+      expect(state.message).not.toContain("1 phút là xong");
+      expect(state.message).toContain("phút");
     });
 
     it("provides smart timing contextual message for lunchtime", () => {

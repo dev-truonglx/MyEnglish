@@ -31,7 +31,7 @@ export default function RevealedWordContent({
       <div className="space-y-2 shrink-0 pb-2 border-b border-slate-200 dark:border-zinc-800">
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2.5 flex-wrap">
-            <h3 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white capitalize font-mono">
+            <h3 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white font-mono">
               {currentWord.word}
             </h3>
             {currentWord.phonetic && (

@@ -63,6 +63,8 @@ export interface MotivationEvaluationParams {
   comeback?: ComebackStatus | null;
   /** Shown at a natural transition (back at the computer, screen share over...) */
   moment?: ReminderMoment | null;
+  /** Streak freezes in stock: only mentioned when there really is one */
+  freezes?: number;
 }
 
 const CONSECUTIVE_SKIPS_KEY = "myenglish_duo_consecutive_skips_v1";
@@ -105,7 +107,9 @@ export function resetConsecutiveSkipCount(): void {
  * Algorithm: Determine user's psychological state and select Duolingo-style messaging tone
  */
 export function evaluateMotivationState(params: MotivationEvaluationParams): DuoMotivationState {
-  const { dueCount, consecutiveSkips, streak, todayCount, dailyGoal, hour, comeback } = params;
+  const { dueCount, consecutiveSkips, streak, todayCount, dailyGoal, hour, comeback, freezes = 0 } = params;
+  // Honest time estimate (~12 s per card), never "1 minute" for a pile of 19 cards
+  const dueMinutes = minutesFor(Math.max(1, dueCount));
 
   // 0. Back after a break: the streak is gone and the pile is big, pressure here makes people quit
   if (comeback && !comeback.caughtUp && comeback.todayRemaining > 0) {
@@ -146,6 +150,16 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
         message: "Tranh thủ 1 câu ôn trước khi bắt đầu việc tiếp theo.",
         quiz: true,
       },
+      anchor_lunch: {
+        title: "Giờ học sau bữa trưa 🍜",
+        message: `Như bạn đã hẹn: vài thẻ (~${minutes} phút) rồi quay lại làm việc.`,
+        quiz: false,
+      },
+      anchor_evening: {
+        title: "Trước khi rời máy 🌇",
+        message: `Như bạn đã hẹn: ôn ~${minutes} phút để khép lại ngày học.`,
+        quiz: false,
+      },
     };
     const m = moments[params.moment];
     return { tone: "level_1_encouraging", title: m.title, message: m.message, mascotMood: "happy", isMicroQuizPreferred: m.quiz };
@@ -165,7 +179,7 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
       },
       {
         title: "Ôn ngắn, lúc nào cũng được",
-        message: "Ôn muộn vài giờ không sao: FSRS sẽ tính lại lịch theo đúng lúc bạn ôn.",
+        message: "Ôn muộn vài giờ không sao: app tự xếp lại lịch theo lúc bạn ôn.",
       },
     ];
     const picked = dramaMessages[consecutiveSkips % dramaMessages.length];
@@ -173,7 +187,7 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
       tone: "level_4_drama_resignation",
       title: picked.title,
       message: picked.message,
-      mascotMood: "dramatic",
+      mascotMood: "happy",
       isMicroQuizPreferred: true, // Auto trigger micro-quiz to reduce friction
     };
   }
@@ -182,12 +196,16 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   if (!isGoalReached && (isLateEvening || (streak > 0 && hour >= 19))) {
     const fomoMessages = [
       {
-        title: `Chuỗi ${streak > 0 ? streak : 1} ngày`,
-        message: `Hôm nay: ${todayCount}/${dailyGoal}. Vài câu là giữ được chuỗi (và bạn còn lượt đóng băng nếu cần).`,
+        title: streak > 0 ? `Chuỗi ${streak} ngày` : "Bắt đầu chuỗi hôm nay",
+        message:
+          (streak > 0
+            ? `Hôm nay: ${todayCount}/${dailyGoal}. Chỉ 1 câu là giữ được chuỗi`
+            : `Chỉ 1 câu là có ngày học đầu tiên của chuỗi`) +
+          (streak > 0 && freezes > 0 ? ` (bạn còn ${freezes} lượt đóng băng nếu cần).` : "."),
       },
       {
         title: "Trước khi kết thúc ngày",
-        message: `Mục tiêu hôm nay: ${todayCount}/${dailyGoal} thẻ. Ôn ~2 phút nếu bạn muốn giữ nhịp.`,
+        message: `Mục tiêu hôm nay: ${todayCount}/${dailyGoal} câu. Ôn ~2 phút nếu bạn muốn giữ nhịp.`,
       },
     ];
     const picked = fomoMessages[consecutiveSkips % fomoMessages.length];
@@ -205,7 +223,7 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
     const guiltMessages = [
       {
         title: "Khi nào rảnh tay",
-        message: `${dueCount} thẻ đang chờ, khoảng ${Math.max(1, Math.round(dueCount * 0.2))} phút. Hoặc thử 1 câu nhanh ngay đây.`,
+        message: `${dueCount} thẻ đang chờ, khoảng ${dueMinutes} phút. Hoặc thử 1 câu nhanh ngay đây.`,
       },
       {
         title: "Một câu nhanh?",
@@ -217,7 +235,7 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
       tone: "level_2_playful_guilt",
       title: picked.title,
       message: picked.message,
-      mascotMood: "pleading",
+      mascotMood: "happy",
       isMicroQuizPreferred: consecutiveSkips >= 2 || dueCount > 15,
     };
   }
@@ -226,9 +244,9 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   if (dueCount >= 20) {
     return {
       tone: "level_1_encouraging",
-      title: `⚡ Cứu hộ khẩn cấp (${dueCount} từ)`,
-      message: "Đừng sợ số lượng nhiều! Chỉ cần 1 phút lướt nhanh vài từ quan trọng nhất là nhẹ gánh ngay.",
-      mascotMood: "alarm",
+      title: "Ôn dần, mỗi lần vài từ",
+      message: `Có ${dueCount} từ đang chờ, không cần ôn hết một lúc. Vài câu bây giờ là đã nhẹ đi rồi.`,
+      mascotMood: "happy",
       isMicroQuizPreferred: false,
     };
   }
@@ -258,7 +276,8 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
   return {
     tone: "level_1_encouraging",
     title: "Đến giờ ôn tập rồi bạn ơi! 🦉",
-    message: dueCount > 0 ? `Có ${dueCount} từ cần bạn điểm danh. 1 phút là xong!` : "Ôn nhanh vài câu để ghi nhớ sâu nào!",
+    message:
+      dueCount > 0 ? `Có ${dueCount} từ cần bạn điểm danh, khoảng ${dueMinutes} phút.` : "Ôn nhanh vài câu để ghi nhớ sâu nào!",
     mascotMood: "happy",
     isMicroQuizPreferred: false,
   };

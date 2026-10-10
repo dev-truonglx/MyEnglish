@@ -7,13 +7,21 @@ import { calculateStreakAndGoal } from "./streak";
 import { saveReminderSettings } from "./reminderSettings";
 import { isPlaceholderMeaning } from "./db";
 import { normalizeCefr } from "./cefr";
+import { LEVEL_OVERRIDE_KEY } from "./learnerProfile";
+import { CATALOG_LEVEL_COUNTS } from "./vocabCatalog";
 
-const PROFICIENCY_OVERRIDE_KEY = "myenglish_user_cefr_override_v1";
+const PROFICIENCY_OVERRIDE_KEY = LEVEL_OVERRIDE_KEY;
 
 /** A word counts as known when its recognition card is in Review with at least this stability (days) */
 const KNOWN_WORD_MIN_STABILITY = 7;
-/** Known words of a level needed (together with its grammar) to complete that level */
-const LEVEL_VOCAB_TARGET: Record<GrammarLevel, number> = { A1: 40, A2: 60, B1: 80, B2: 100, C1: 120 };
+/**
+ * Known words of a level needed (together with its grammar) to complete that level: 80% of the deck's
+ * words of that level. A function, read at call time (the deck module sits in an import cycle).
+ */
+const LEVEL_VOCAB_SHARE = 0.8;
+function levelVocabTarget(level: GrammarLevel): number {
+  return Math.round(CATALOG_LEVEL_COUNTS[level] * LEVEL_VOCAB_SHARE);
+}
 
 
 export interface LevelBreakdown {
@@ -212,7 +220,9 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
     C1: [],
   };
 
+  // Foundation lessons (A0) are extra help, not part of what A1 requires
   for (const lesson of GRAMMAR_LESSONS) {
+    if (lesson.foundation) continue;
     if (lessonsByLevel[lesson.level]) {
       lessonsByLevel[lesson.level].push(lesson);
     }
@@ -314,7 +324,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   let untaggedKnown = totalKnown - taggedKnown;
   const levelVocab = {} as Record<GrammarLevel, { known: number; target: number }>;
   for (const lvl of ALL_LEVELS) {
-    const target = LEVEL_VOCAB_TARGET[lvl];
+    const target = levelVocabTarget(lvl);
     const fill = Math.min(untaggedKnown, Math.max(0, target - knownByLevel[lvl]));
     untaggedKnown -= fill;
     levelVocab[lvl] = { known: knownByLevel[lvl] + fill, target };
