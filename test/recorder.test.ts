@@ -96,6 +96,8 @@ describe("recordCardAnswer", () => {
     await recorder.recordIntro(card);
     expect((await smart.getNewCardsIntroducedToday()).recognition).toBe(1);
     expect((await recorder.getRecentIntros()).has(`${id}:recognition`)).toBe(true);
+    const [afterIntro] = await db.getWordsByIds([id]);
+    expect(afterIntro.srs.last_review).not.toBeNull();
 
     await recorder.postponeNewCard(id, "recognition", 10);
     const [after] = await db.getWordsByIds([id]);
@@ -153,12 +155,36 @@ describe("migrations", () => {
     const wordCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(words);`)).map((c) => c.name);
     expect(wordCols).toContain("suspended");
     const [{ user_version }] = await conn.select<{ user_version: number }[]>(`PRAGMA user_version;`);
-    expect(user_version).toBe(10);
+    expect(user_version).toBe(12);
     const tables = (await conn.select<{ name: string }[]>(`SELECT name FROM sqlite_master WHERE type = 'table';`)).map((t) => t.name);
     expect(tables).toContain("learning_events");
     expect(tables).toContain("mistakes");
     expect(tables).toContain("vocab_catalog");
+    expect(tables).toContain("grammar_book_chapters");
     expect(wordCols).toEqual(expect.arrayContaining(["catalog_id", "variants", "forms"]));
+  });
+});
+
+describe("grammar book tables", () => {
+  it("a v11 database created without them gets them (the bug: \"no such table: grammar_book_chapters\")", async () => {
+    const { db } = await freshServices();
+    const conn = await db.getDatabase();
+    for (const t of ["grammar_book_chapters", "grammar_book_lessons", "grammar_book_sets", "grammar_book_items"]) {
+      await conn.execute(`DROP TABLE ${t};`);
+    }
+    await conn.execute(`PRAGMA user_version = 11;`);
+    await db.initSchema(conn);
+    const tables = (await conn.select<{ name: string }[]>(`SELECT name FROM sqlite_master WHERE type = 'table';`)).map((t) => t.name);
+    expect(tables).toEqual(expect.arrayContaining(["grammar_book_chapters", "grammar_book_lessons", "grammar_book_sets", "grammar_book_items"]));
+  });
+
+  it("saving a chapter recreates missing tables instead of failing", async () => {
+    const { db } = await freshServices();
+    const conn = await db.getDatabase();
+    await conn.execute(`DROP TABLE grammar_book_chapters;`);
+    const book = await import("@/services/grammarBook");
+    await book.saveGrammarBookChapter({ format: "myenglish-grammar-book", version: 2, chapterId: "ch01", lessons: [], exerciseSets: [], practiceGroups: [] });
+    expect((await conn.select<{ n: number }[]>(`SELECT COUNT(*) AS n FROM grammar_book_chapters;`))[0].n).toBe(1);
   });
 });
 

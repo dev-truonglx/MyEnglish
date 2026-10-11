@@ -58,11 +58,36 @@ export function toCard(word: WordDetail, direction: CardDirection): ReviewCard {
     : { ...word, srs: srsRecognition, srsRecognition, direction: "recognition" };
 }
 
-function isDueSrs(srs: SRSReview | null | undefined, now: Date): boolean {
-  return !!srs && new Date(srs.next_review_date).getTime() <= now.getTime();
+/** A new word's first graded quiz must come at least this long after its introduction card */
+export const INTRO_READY_MS = 60 * 1000;
+
+/** Start of the local day after `now` (ms) */
+export function nextLocalDayStart(now: Date): number {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
 }
 
-/** Cards of this word that are due now (recognition first). */
+/**
+ * The one "is this card due" rule, used by sessions, counts and grading:
+ *  - a Review card on a schedule of a day or more is due for its whole due day (local time), like Anki:
+ *    once the morning's reviews are done, the same cards do not come back in the evening
+ *  - learning / relearning cards (minute steps) and new cards are due to the minute
+ *  - a new card whose introduction was shown (last_review set by recordIntro) at least INTRO_READY_MS ago
+ *    is due: postponing its first quiz only keeps it out of the minute after the introduction
+ */
+export function isDueSrs(srs: Partial<SRSReview> | null | undefined, now: Date = new Date()): boolean {
+  if (!srs?.next_review_date) return false;
+  const due = new Date(srs.next_review_date).getTime();
+  if (due <= now.getTime()) return true;
+  const state = srs.state ?? 0;
+  if (state === 2 && (srs.scheduled_days ?? srs.interval ?? 0) >= 1) return due < nextLocalDayStart(now);
+  if (state === 0 && (srs.reps ?? 0) === 0 && srs.last_review) {
+    const introducedAt = new Date(srs.last_review).getTime();
+    return Number.isFinite(introducedAt) && now.getTime() - introducedAt >= INTRO_READY_MS;
+  }
+  return false;
+}
+
+/** Cards of this word that are due now (recognition first), see isDueSrs. */
 export function getDueCards(word: WordDetail, now: Date = new Date()): ReviewCard[] {
   const cards: ReviewCard[] = [];
   if (isDueSrs(recognitionSrs(word), now)) cards.push(toCard(word, "recognition"));

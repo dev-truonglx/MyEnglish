@@ -66,6 +66,14 @@ export default function SessionSummary({
         <p className="text-sm text-slate-600 dark:text-zinc-400">
           Bạn vừa học <span className="text-emerald-600 dark:text-emerald-400 font-bold">{reviewCount}</span> câu.
         </p>
+        {sessionStats.day && (
+          <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">
+            🔥 Chuỗi {sessionStats.day.streak} ngày · {sessionStats.day.todayCount}/{sessionStats.day.dailyGoal} câu hôm nay
+            {sessionStats.day.goalReachedNow && (
+              <span className="block text-xs font-medium text-emerald-700 dark:text-emerald-400">Bạn vừa đạt mục tiêu hôm nay!</span>
+            )}
+          </p>
+        )}
       </div>
 
       {/* What went well, first */}

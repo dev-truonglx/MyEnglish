@@ -129,7 +129,9 @@ export async function loadHabitInsights(days: number = 30, weeks: number = 8, no
   const events = await getLearningEventsSince(earliest);
   const db = await getDatabase();
   const rows = await db.select<Array<{ timestamp: string }>>(
-    `SELECT timestamp FROM review_logs WHERE timestamp >= $1 AND exercise_type != 'intro' AND COALESCE(is_scheduled, 1) != 2`,
+    // Marking words "Đã biết" in bulk is not studying at that hour
+    `SELECT timestamp FROM review_logs
+     WHERE timestamp >= $1 AND exercise_type NOT IN ('intro', 'known') AND COALESCE(is_scheduled, 1) != 2`,
     [since.toISOString()]
   );
   const recent = events.filter((e) => new Date(e.at) >= since);

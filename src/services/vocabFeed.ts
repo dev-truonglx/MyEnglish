@@ -14,6 +14,7 @@ import type { WordDetail } from "@/types/database";
 import { getStudyLimits } from "./srs";
 import { persistKeyNow } from "./storageBackup";
 import { markWordKnown } from "./reviewRecorder";
+import { MASTERED_STABILITY_DAYS } from "./progress";
 import {
   CATALOG_LEVEL_COUNTS,
   STUDY_LEVELS,
@@ -26,6 +27,8 @@ import {
 } from "./vocabCatalog";
 
 const LEVELS_KEY = "myenglish_study_levels_v1";
+/** Deck words the learner pulled in themselves ("Học sớm", ⌘⇧E): kept when the levels change */
+const PICKED_KEY = "myenglish_picked_words_v1";
 /** Unstudied words kept in `words` beyond the daily new-word budget */
 export const BUFFER_EXTRA = 5;
 
@@ -59,6 +62,29 @@ function writeSetting(s: LevelsSetting): void {
     localStorage.setItem(LEVELS_KEY, JSON.stringify(s));
     persistKeyNow(LEVELS_KEY);
   } catch {}
+}
+
+function readPicked(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(PICKED_KEY) || "[]");
+    if (Array.isArray(raw)) return new Set(raw.filter((x): x is string => typeof x === "string"));
+  } catch {}
+  return new Set();
+}
+
+function rememberPicked(entryId: string): void {
+  const picked = readPicked();
+  if (picked.has(entryId)) return;
+  picked.add(entryId);
+  try {
+    localStorage.setItem(PICKED_KEY, JSON.stringify([...picked]));
+    persistKeyNow(PICKED_KEY);
+  } catch {}
+}
+
+/** Catalog ids of the words the learner chose to learn early */
+export function getPickedCatalogIds(): string[] {
+  return [...readPicked()];
 }
 
 export function hasChosenStudyLevels(): boolean {
@@ -134,6 +160,68 @@ export function toCatalogWordInput(e: CatalogEntry, createdAt: string): CatalogW
   };
 }
 
+/** `vocab_catalog_meta` key: the deck version the learner's words were last synced with */
+const WORDS_SYNCED_KEY = "words_version";
+
+/**
+ * After a new deck version (vocabCatalog.ts copies it into `vocab_catalog`), the words already in `words`
+ * take the deck's new level, meaning, IPA, part of speech and forms, matched by `catalog_id`. Examples
+ * and notes are not touched; the topic only follows the level when the learner has not changed it.
+ * Cheap when in sync (one query). Returns how many words changed.
+ */
+export async function syncWordsWithCatalog(): Promise<number> {
+  const db = await getDatabase();
+  const meta = await db.select<Array<{ key: string; value: string }>>(
+    `SELECT key, value FROM vocab_catalog_meta WHERE key IN ('version', $1)`,
+    [WORDS_SYNCED_KEY]
+  );
+  const version = meta.find((m) => m.key === "version")?.value;
+  if (!version || meta.find((m) => m.key === WORDS_SYNCED_KEY)?.value === version) return 0;
+
+  const rows = await db.select<
+    Array<{
+      id: string;
+      catalog_id: string;
+      phonetic: string | null;
+      part_of_speech: string | null;
+      meaning_vn: string;
+      cefr_level: string | null;
+      topic: string | null;
+      variants: string | null;
+      forms: string | null;
+    }>
+  >(`SELECT id, catalog_id, phonetic, part_of_speech, meaning_vn, cefr_level, topic, variants, forms FROM words WHERE catalog_id IS NOT NULL`);
+  const entries = new Map((await getCatalogEntries(rows.map((r) => r.catalog_id))).map((e) => [e.id, e]));
+  let changed = 0;
+  for (const r of rows) {
+    const e = entries.get(r.catalog_id);
+    if (!e) continue; // dropped from the deck: the word stays as it is
+    const fresh = toCatalogWordInput(e, "");
+    const next = [
+      fresh.phonetic,
+      fresh.partOfSpeech,
+      fresh.meaningVn,
+      fresh.cefr,
+      r.topic === r.cefr_level ? fresh.cefr : r.topic,
+      JSON.stringify(fresh.variants),
+      JSON.stringify(fresh.forms),
+    ];
+    const current = [r.phonetic, r.part_of_speech, r.meaning_vn, r.cefr_level, r.topic, r.variants, r.forms];
+    if (next.every((v, i) => v === current[i])) continue;
+    await db.execute(
+      `UPDATE words SET phonetic = $1, part_of_speech = $2, meaning_vn = $3, cefr_level = $4, topic = $5, variants = $6, forms = $7
+       WHERE id = $8`,
+      [...next, r.id]
+    );
+    changed++;
+  }
+  await db.execute(
+    `INSERT INTO vocab_catalog_meta (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [WORDS_SYNCED_KEY, version]
+  );
+  return changed;
+}
+
 /** Deck words not in `words` yet, per level */
 async function availableByLevel(levels: readonly StudyLevel[]): Promise<Partial<Record<StudyLevel, number>>> {
   const db = await getDatabase();
@@ -182,11 +270,25 @@ export interface TopUpResult {
  * now, after the words already waiting, so they are introduced in this order.
  */
 let topping: Promise<TopUpResult> | null = null;
+/** Result of the last top-up: `exhausted` = the chosen levels have nothing left to add (see suggestNextLevel) */
+let lastTopUp: TopUpResult | null = null;
 export function topUpNewWords(options: { target?: number; now?: Date } = {}): Promise<TopUpResult> {
-  topping ??= doTopUp(options).finally(() => {
-    topping = null;
-  });
+  topping ??= doTopUp(options)
+    .then((r) => (lastTopUp = r))
+    .finally(() => {
+      topping = null;
+    });
   return topping;
+}
+
+/** The chosen levels had nothing left to add at the last top-up (null before any top-up) */
+export function isFeedExhausted(): boolean | null {
+  return lastTopUp ? lastTopUp.exhausted : null;
+}
+
+/** Wait until no top-up is running (one started meanwhile is waited for too) */
+async function settleTopUp(): Promise<void> {
+  while (topping) await topping.catch(() => {});
 }
 
 async function doTopUp({ target, now = new Date() }: { target?: number; now?: Date }): Promise<TopUpResult> {
@@ -194,6 +296,7 @@ async function doTopUp({ target, now = new Date() }: { target?: number; now?: Da
   const setting = readSetting();
   if (!setting) return { added: 0, exhausted: false };
   await ensureCatalogSeeded();
+  await syncWordsWithCatalog().catch((err) => console.warn("Word sync with the deck failed:", err));
   const goal = target ?? getStudyLimits().newCardsPerDay + BUFFER_EXTRA;
   const need = goal - (await countWaitingWords());
   const available = await availableByLevel(setting.levels);
@@ -209,13 +312,15 @@ async function doTopUp({ target, now = new Date() }: { target?: number; now?: Da
   const entries = await getCatalogEntries(ids);
   const base = now.getTime() - entries.length;
   await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
-  writeSetting(setting);
+  // The levels may have changed while this ran: the mix count then belongs to the old choice, never write it back
+  const latest = readSetting();
+  if (latest && latest.levels.join() === setting.levels.join()) writeSetting({ ...latest, drawn: setting.drawn });
   return { added: entries.length, exhausted: left - entries.length <= 0 };
 }
 
 /**
  * "Learn this early": a deck word goes to the front of the new words (added if needed). A word already
- * studied is left alone. Does not count in the level mix.
+ * studied is left alone. Does not count in the level mix, and stays when the levels change.
  */
 export async function learnEarly(entryId: string, now: Date = new Date()): Promise<"added" | "moved" | "studied"> {
   await ensureCatalogSeeded();
@@ -236,23 +341,35 @@ export async function learnEarly(entryId: string, now: Date = new Date()): Promi
     if ((reps ?? 0) > 0 || (state ?? 0) !== 0) return "studied";
     await db.execute(`UPDATE words SET created_at = $1, suspended = 0 WHERE id = $2`, [at, id]);
     await db.execute(`UPDATE srs_reviews SET next_review_date = $1 WHERE word_id = $2`, [at, id]);
+    rememberPicked(entryId);
     return "moved";
   }
   const [entry] = await getCatalogEntries([entryId]);
   if (!entry) return "studied";
   await insertCatalogWords([toCatalogWordInput(entry, at)]);
+  rememberPicked(entryId);
   return "added";
 }
 
-/** Change the levels: unstarted words of levels no longer chosen leave the buffer, which is refilled */
+/**
+ * Change the levels: unstarted words of levels no longer chosen leave the buffer (not the ones the learner
+ * picked), which is refilled. A top-up already running read the old levels: it is waited for first, so its
+ * words are filtered too, then a fresh top-up runs with the new levels.
+ */
 export async function changeStudyLevels(levels: readonly string[]): Promise<StudyLevel[]> {
   const next = setStudyLevels(levels);
+  await settleTopUp();
+  // Read again: another change may have been saved while waiting
+  const current = getStudyLevels();
+  const picked = readPicked();
   const db = await getDatabase();
-  const filter = `SELECT w.id FROM words w JOIN srs_reviews s ON s.word_id = w.id
-    WHERE w.catalog_id IS NOT NULL AND w.cefr_level NOT IN (${next.map((_, i) => `$${i + 1}`).join(", ")})
+  const filter = `SELECT w.id, w.catalog_id FROM words w JOIN srs_reviews s ON s.word_id = w.id
+    WHERE w.catalog_id IS NOT NULL AND w.cefr_level NOT IN (${current.map((_, i) => `$${i + 1}`).join(", ")})
       AND COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0
       AND NOT EXISTS (SELECT 1 FROM review_logs r WHERE r.word_id = w.id)`;
-  const ids = (await db.select<Array<{ id: string }>>(filter, [...next])).map((r) => r.id);
+  const ids = (await db.select<Array<{ id: string; catalog_id: string }>>(filter, [...current]))
+    .filter((r) => !picked.has(r.catalog_id))
+    .map((r) => r.id);
   for (let i = 0; i < ids.length; i += 500) {
     const chunk = ids.slice(i, i + 500);
     const ph = chunk.map((_, j) => `$${j + 1}`).join(", ");
@@ -261,19 +378,51 @@ export async function changeStudyLevels(levels: readonly string[]): Promise<Stud
     }
     await db.execute(`DELETE FROM words WHERE id IN (${ph})`, chunk);
   }
+  await settleTopUp();
   await topUpNewWords();
   return next;
 }
 
 export interface LevelProgress {
   level: StudyLevel;
+  /** Words of the level in the deck */
   total: number;
   /** Studied at least once (including words marked as known) */
   met: number;
-  /** In long-term memory: Review state with at least a week of stability, after a real review (not just marked) */
+  /**
+   * In long-term memory: Review state with at least MASTERED_STABILITY_DAYS of stability, after a real review
+   * (a word only marked "Đã biết" does not count)
+   */
   remembered: number;
   /** Marked "already known" */
   known: number;
+  /** Deck words of the level not added to the learner's words yet (0 = the level has nothing left to add) */
+  notAdded: number;
+}
+
+/** Share of a level's words met, and remembered for the long run, before the next level is suggested */
+export const UNLOCK_MET_SHARE = 0.8;
+export const UNLOCK_REMEMBERED_SHARE = 0.5;
+
+export function levelReadyToAdvance(p: LevelProgress): boolean {
+  return p.total > 0 && p.met >= p.total * UNLOCK_MET_SHARE && p.remembered >= p.total * UNLOCK_REMEMBERED_SHARE;
+}
+
+export interface NextLevelSuggestion {
+  /** null: C1 is already chosen, nothing above it */
+  next: StudyLevel | null;
+  /** "ready": the chosen levels are met and remembered enough; "exhausted": no new word left in them */
+  reason: "ready" | "exhausted";
+}
+
+/** Whether to offer the next level, and why (null = keep going with the chosen levels) */
+export function suggestNextLevel(progress: LevelProgress[], levels: readonly StudyLevel[]): NextLevelSuggestion | null {
+  const chosen = progress.filter((p) => levels.includes(p.level));
+  if (chosen.length === 0) return null;
+  const next = STUDY_LEVELS[normalizeStudyLevels(levels).length] ?? null;
+  if (chosen.every((p) => p.notAdded === 0)) return { next, reason: "exhausted" };
+  if (next && chosen.every(levelReadyToAdvance)) return { next, reason: "ready" };
+  return null;
 }
 
 export async function loadLevelProgress(): Promise<LevelProgress[]> {
@@ -281,24 +430,35 @@ export async function loadLevelProgress(): Promise<LevelProgress[]> {
   const rows = await db.select<Array<{ level: string; met: number; remembered: number; known: number }>>(
     `SELECT w.cefr_level AS level,
             SUM(CASE WHEN COALESCE(s.reps, 0) > 0 THEN 1 ELSE 0 END) AS met,
-            SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= 7 AND EXISTS (
+            SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 AND EXISTS (
                   SELECT 1 FROM review_logs r WHERE r.word_id = w.id AND r.exercise_type NOT IN ('known', 'intro')
+                    AND COALESCE(r.is_scheduled, 1) != 2
                 ) THEN 1 ELSE 0 END) AS remembered,
             SUM(CASE WHEN k.word_id IS NOT NULL THEN 1 ELSE 0 END) AS known
      FROM words w JOIN srs_reviews s ON s.word_id = w.id
      LEFT JOIN (SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'known') k ON k.word_id = w.id
      WHERE w.catalog_id IS NOT NULL
-     GROUP BY w.cefr_level`
+     GROUP BY w.cefr_level`,
+    [MASTERED_STABILITY_DAYS]
+  );
+  const deck = await db.select<Array<{ level: string; total: number; not_added: number }>>(
+    `SELECT cefr AS level, COUNT(*) AS total,
+            SUM(CASE WHEN NOT EXISTS (SELECT 1 FROM words w WHERE w.catalog_id = c.id) THEN 1 ELSE 0 END) AS not_added
+     FROM vocab_catalog c GROUP BY cefr`
   );
   const byLevel = new Map(rows.map((r) => [r.level, r]));
+  const deckByLevel = new Map(deck.map((r) => [r.level, r]));
   return STUDY_LEVELS.map((level) => {
     const r = byLevel.get(level);
+    const d = deckByLevel.get(level);
     return {
       level,
-      total: CATALOG_LEVEL_COUNTS[level],
+      // The deck in SQLite when seeded (it is the source of the words), the bundled counts otherwise
+      total: d ? Number(d.total) : CATALOG_LEVEL_COUNTS[level],
       met: Number(r?.met ?? 0),
       remembered: Number(r?.remembered ?? 0),
       known: Number(r?.known ?? 0),
+      notAdded: d ? Number(d.not_added) : CATALOG_LEVEL_COUNTS[level],
     };
   });
 }

@@ -1,8 +1,7 @@
 import { describe, it, expect } from "vitest";
 import catalogFile from "@/data/vocabCatalog.json";
 import { CATALOG_LEVEL_COUNTS, CATALOG_VERSION, STUDY_LEVELS, type CatalogEntry } from "@/services/vocabCatalog";
-import { GRAMMAR_LESSONS } from "@/data/grammarData";
-import { FOUNDATION_LESSONS } from "@/data/foundationGrammar";
+import { BOOK_CHAPTERS, VALID_CHAPTER_IDS, validateGrammarBookFile } from "@/services/grammarBook";
 import { PRONUNCIATION_LESSONS } from "@/data/pronunciation";
 import { PLACEMENT_A0_VOCAB, PLACEMENT_GRAMMAR, PLACEMENT_LISTENING } from "@/data/placementBank";
 import { COVERAGE_TEXTS } from "@/data/coverageCorpus";
@@ -61,38 +60,33 @@ describe("vocabulary deck (Oxford 5000, A1–C1)", () => {
   });
 });
 
-describe("grammar lessons", () => {
-  it("foundation lessons come first and are marked", () => {
-    expect(FOUNDATION_LESSONS).toHaveLength(8);
-    expect(GRAMMAR_LESSONS.slice(0, 8).every((l) => l.foundation && l.level === "A1" && l.order < 1)).toBe(true);
-    expect(FOUNDATION_LESSONS.every((l) => l.vnContrast && l.vnContrast.points.length >= 3)).toBe(true);
-  });
-
-  it("every exercise id is unique", () => {
-    const ids = GRAMMAR_LESSONS.flatMap((l) => [...l.diagnosticExercises, ...l.practiceExercises]).map((e) => e.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it("every multiple-choice question has exactly one correct option, every blank is fillable", () => {
-    for (const lesson of GRAMMAR_LESSONS) {
-      for (const ex of [...lesson.diagnosticExercises, ...lesson.practiceExercises]) {
-        const answers = Array.isArray(ex.correctAnswer) ? ex.correctAnswer : [ex.correctAnswer];
-        expect(answers.length, ex.id).toBeGreaterThan(0);
-        if (ex.type === "multiple_choice") {
-          const correct = (ex.options ?? []).filter((o) => isGrammarAnswerCorrect(o, ex));
-          expect(correct, `${ex.id}: ${ex.promptEn}`).toHaveLength(1);
-          expect(new Set(ex.options).size, ex.id).toBe(ex.options?.length);
-        }
-        if (ex.type === "conjugation") {
-          expect(fillPromptBlanks(ex.promptEn, answers[0]), `${ex.id}: ${ex.promptEn}`).not.toBeNull();
-        }
-        if (ex.type === "error_spotting") {
-          expect(ex.errorWord, ex.id).toBeTruthy();
-          expect(ex.options ?? [], ex.id).toContain(ex.errorWord);
-        }
-        for (const a of answers) expect(isGrammarAnswerCorrect(a, ex), `${ex.id}: ${a}`).toBe(true);
-      }
+describe("grammar book chapters", () => {
+  it("defines the 31 fixed book chapters in order", () => {
+    expect(BOOK_CHAPTERS).toHaveLength(31);
+    expect(VALID_CHAPTER_IDS.size).toBe(31);
+    for (let i = 1; i <= 31; i++) {
+      const ch = BOOK_CHAPTERS[i - 1];
+      expect(ch.order).toBe(i);
+      expect(ch.title.length).toBeGreaterThan(0);
+      expect(ch.titleVn.length).toBeGreaterThan(0);
+      expect(VALID_CHAPTER_IDS.has(`ch${String(i).padStart(2, "0")}`)).toBe(true);
     }
+  });
+
+  it("matches the chapter list of the conversion prompt", async () => {
+    const fs = await import("node:fs");
+    const prompt = fs.readFileSync("docs/grammar-import-prompt.md", "utf8");
+    for (const [i, ch] of BOOK_CHAPTERS.entries()) {
+      const id = `ch${String(i + 1).padStart(2, "0")}`;
+      expect(prompt, id).toMatch(new RegExp(`\\| ${id} \\| ${ch.title.split(" ")[0]}`));
+    }
+  });
+
+  it("validates the sample parts", async () => {
+    const p1 = await import("./fixtures/grammarBook/ch01-p1.json");
+    const res = validateGrammarBookFile(p1.default || p1, "ch01-p1.json");
+    expect(res.valid).toBe(true);
+    expect(res.data?.lessons).toHaveLength(3);
   });
 });
 

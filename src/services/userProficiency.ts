@@ -1,22 +1,20 @@
 import type { WordDetail } from "@/types/database";
-import type { GrammarLevel, GrammarLesson } from "@/types/grammar";
-import { GRAMMAR_LESSONS } from "@/data/grammarData";
-import { getAllGrammarProgress } from "./grammarService";
-import { calculateRetrievability, getXPState } from "./smartReview";
+import type { GrammarLevel } from "@/types/grammar";
+import { getAllGrammarProgress, isLessonMastered } from "./grammarService";
+import { getEffectiveLessonIds } from "./grammarPath";
+import { calculateRetrievability, getXPState, isWordKnown } from "./smartReview";
 import { calculateStreakAndGoal } from "./streak";
 import { saveReminderSettings } from "./reminderSettings";
 import { isPlaceholderMeaning } from "./db";
 import { normalizeCefr } from "./cefr";
 import { LEVEL_OVERRIDE_KEY } from "./learnerProfile";
 import { CATALOG_LEVEL_COUNTS } from "./vocabCatalog";
+import { hasRealReview } from "./progress";
 
 const PROFICIENCY_OVERRIDE_KEY = LEVEL_OVERRIDE_KEY;
-
-/** A word counts as known when its recognition card is in Review with at least this stability (days) */
-const KNOWN_WORD_MIN_STABILITY = 7;
 /**
- * Known words of a level needed (together with its grammar) to complete that level: 80% of the deck's
- * words of that level. A function, read at call time (the deck module sits in an import cycle).
+ * Known words of a level needed to complete that level: 80% of the deck's words of that level.
+ * A function, read at call time (the deck module sits in an import cycle).
  */
 const LEVEL_VOCAB_SHARE = 0.8;
 function levelVocabTarget(level: GrammarLevel): number {
@@ -24,15 +22,17 @@ function levelVocabTarget(level: GrammarLevel): number {
 }
 
 
+/**
+ * One CEFR level on the card. Grammar comes from the learner's own book, whose lessons have no CEFR level,
+ * so a level is measured by its vocabulary only.
+ */
 export interface LevelBreakdown {
   level: GrammarLevel;
   label: string;
   description: string;
-  totalLessons: number;
-  attemptedLessons: number;
-  passedLessons: number;
-  averageMastery: number; // 0 - 100%
-  averageScore: number;   // 0 - 100%
+  /** Known words of the level vs the target, 0 - 100% */
+  vocabPercent: number;
+  /** "mastered": below the active level (chosen or assessed) or its vocabulary complete */
   status: "locked" | "learning" | "mastered";
 }
 
@@ -152,138 +152,35 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const streakStats = calculateStreakAndGoal(words);
   const userOverrideLevel = getUserOverrideLevel();
 
-  // 1. Analyze Grammar Performance by CEFR Level
-  const levelBreakdown: Record<GrammarLevel, LevelBreakdown> = {
-    A1: {
-      level: "A1",
-      label: "A1 - Starter",
-      description: "Thì cơ bản, cấu trúc câu đơn & từ vựng nhập môn",
-      totalLessons: 0,
-      attemptedLessons: 0,
-      passedLessons: 0,
-      averageMastery: 0,
-      averageScore: 0,
-      status: "learning",
-    },
-    A2: {
-      level: "A2",
-      label: "A2 - Elementary",
-      description: "Quá khứ tiếp diễn, câu so sánh & ngữ cảnh hàng ngày",
-      totalLessons: 0,
-      attemptedLessons: 0,
-      passedLessons: 0,
-      averageMastery: 0,
-      averageScore: 0,
-      status: "locked",
-    },
-    B1: {
-      level: "B1",
-      label: "B1 - Intermediate",
-      description: "Hiện tại hoàn thành, câu điều kiện 1 & 2, bị động",
-      totalLessons: 0,
-      attemptedLessons: 0,
-      passedLessons: 0,
-      averageMastery: 0,
-      averageScore: 0,
-      status: "locked",
-    },
-    B2: {
-      level: "B2",
-      label: "B2 - Upper-Intermediate",
-      description: "Điều kiện hỗn hợp, bị động nâng cao, mệnh đề phân từ",
-      totalLessons: 0,
-      attemptedLessons: 0,
-      passedLessons: 0,
-      averageMastery: 0,
-      averageScore: 0,
-      status: "locked",
-    },
-    C1: {
-      level: "C1",
-      label: "C1 - Advanced",
-      description: "Đảo ngữ, câu chẻ, văn phong kỹ thuật & học thuật cao cấp",
-      totalLessons: 0,
-      attemptedLessons: 0,
-      passedLessons: 0,
-      averageMastery: 0,
-      averageScore: 0,
-      status: "locked",
-    },
+  const LEVEL_DESCRIPTIONS: Record<GrammarLevel, string> = {
+    A1: "Thì cơ bản, cấu trúc câu đơn & từ vựng nhập môn",
+    A2: "Quá khứ tiếp diễn, câu so sánh & ngữ cảnh hàng ngày",
+    B1: "Hiện tại hoàn thành, câu điều kiện 1 & 2, bị động",
+    B2: "Điều kiện hỗn hợp, bị động nâng cao, mệnh đề phân từ",
+    C1: "Đảo ngữ, câu chẻ, văn phong kỹ thuật & học thuật cao cấp",
   };
 
-  // Group lessons by level
-  const lessonsByLevel: Record<GrammarLevel, GrammarLesson[]> = {
-    A1: [],
-    A2: [],
-    B1: [],
-    B2: [],
-    C1: [],
-  };
-
-  // Foundation lessons (A0) are extra help, not part of what A1 requires
-  for (const lesson of GRAMMAR_LESSONS) {
-    if (lesson.foundation) continue;
-    if (lessonsByLevel[lesson.level]) {
-      lessonsByLevel[lesson.level].push(lesson);
+  // 1. Grammar: share of the lessons on the learner's path that are mastered
+  const selectedLessonIds = getEffectiveLessonIds();
+  let selectedMastered = 0;
+  let grammarAttempted = 0;
+  for (const id of selectedLessonIds) {
+    const prog = grammarProgressMap[id];
+    if (prog) {
+      if ((prog.reps ?? 0) > 0 || (prog.score ?? 0) > 0 || prog.diagnosticStatus !== "unattempted") grammarAttempted++;
+      if (isLessonMastered(prog)) selectedMastered++;
     }
   }
-
-  let totalGrammarWeightSum = 0;
-  let weightedGrammarPoints = 0;
-
-  ALL_LEVELS.forEach((lvl, idx) => {
-    const list = lessonsByLevel[lvl] || [];
-    levelBreakdown[lvl].totalLessons = list.length;
-
-    let sumMastery = 0;
-    let sumScore = 0;
-    let attempted = 0;
-    let passed = 0;
-
-    for (const l of list) {
-      const prog = grammarProgressMap[l.id];
-      if (prog && (prog.diagnosticStatus !== "unattempted" || prog.reps > 0 || prog.score > 0)) {
-        attempted++;
-        sumMastery += prog.mastery || 0;
-        sumScore += prog.score || 0;
-        if (
-          prog.diagnosticStatus === "passed_first_try" ||
-          prog.diagnosticStatus === "reviewed_and_passed" ||
-          // Mastery builds up over several answers (a single question is capped at 50)
-          prog.mastery >= 70
-        ) {
-          passed++;
-        }
-      }
-    }
-
-    const avgMastery = attempted > 0 ? Math.round(sumMastery / list.length) : 0;
-    const avgScore = attempted > 0 ? Math.round(sumScore / attempted) : 0;
-    levelBreakdown[lvl].attemptedLessons = attempted;
-    levelBreakdown[lvl].passedLessons = passed;
-    levelBreakdown[lvl].averageMastery = avgMastery;
-    levelBreakdown[lvl].averageScore = avgScore;
-
-    if (avgMastery >= 75 && passed >= Math.ceil(list.length * 0.6)) {
-      levelBreakdown[lvl].status = "mastered";
-    } else if (attempted > 0 || idx === 0) {
-      levelBreakdown[lvl].status = "learning";
-    } else {
-      levelBreakdown[lvl].status = "locked";
-    }
-
-    // Weight factor: Higher levels give progressively more points toward CEFR score
-    const levelMaxContribution = [20, 20, 25, 20, 15][idx];
-    const completionRatio = list.length > 0 ? (passed * 0.6 + (avgMastery / 100) * list.length * 0.4) / list.length : 0;
-    weightedGrammarPoints += completionRatio * levelMaxContribution;
-    totalGrammarWeightSum += levelMaxContribution;
-  });
-
-  const grammarScore = Math.min(100, Math.round(weightedGrammarPoints));
+  const grammarScore = selectedLessonIds.length > 0
+    ? Math.round((selectedMastered / selectedLessonIds.length) * 100)
+    : 0;
 
   // 2. Analyze Vocabulary & FSRS Retention
-  // Only words actually studied (reviewed at least once, not pending AI analysis) count
-  const studiedWords = words.filter((w) => (w.srs.reps ?? 0) > 0 && !isPlaceholderMeaning(w.meaning_vn));
+  // Only words actually studied (reviewed at least once, not pending AI analysis) count; a word only marked
+  // "Đã biết" counts once a real review has confirmed it
+  const studiedWords = words.filter(
+    (w) => (w.srs.reps ?? 0) > 0 && hasRealReview(w) && !isPlaceholderMeaning(w.meaning_vn)
+  );
   const totalWords = studiedWords.length;
   let masteredWords = 0;
   let learningWords = 0;
@@ -307,7 +204,7 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   // Per-level vocabulary: words tagged with their CEFR level that the learner reliably recognises
   // (recognition card in Review with >= 7 days stability). Untagged words (added before tagging)
   // fill the remaining gaps from the lowest level up, so the result changes smoothly as tags arrive.
-  const isKnown = (w: WordDetail) => w.srs.state === 2 && (w.srs.stability ?? 0) >= KNOWN_WORD_MIN_STABILITY;
+  const isKnown = (w: WordDetail) => isWordKnown(w);
   const knownByLevel: Record<GrammarLevel, number> = { A1: 0, A2: 0, B1: 0, B2: 0, C1: 0 };
   let taggedKnown = 0;
   let totalKnown = 0;
@@ -340,20 +237,12 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const habitScore = Math.min(100, Math.round(streakPts + xpPts + activeLearnerPts));
 
   // 4. Assessed level = the first level the learner has not completed yet.
-  // A level is completed when its grammar is mastered AND enough of its vocabulary is known.
-  // Habit (streak/XP) is shown separately and never changes the level.
-  const grammarPercent = (lvl: GrammarLevel) => {
-    const b = levelBreakdown[lvl];
-    if (b.totalLessons === 0) return 100;
-    const passedPart = Math.min(1, b.passedLessons / Math.ceil(b.totalLessons * 0.6));
-    const masteryPart = Math.min(1, b.averageMastery / 75);
-    return Math.round((passedPart * 0.5 + masteryPart * 0.5) * 100);
-  };
-  const isLevelCompleted = (lvl: GrammarLevel) =>
-    (levelBreakdown[lvl].totalLessons === 0 || levelBreakdown[lvl].status === "mastered") && vocabPercent(lvl) >= 100;
+  // A level is completed when enough of its vocabulary is known (LEVEL_VOCAB_SHARE of its words).
+  // Grammar and habit (streak/XP) are shown separately and never change the level.
+  const isLevelCompleted = (lvl: GrammarLevel) => vocabPercent(lvl) >= 100;
 
   const assessedLevel: GrammarLevel = ALL_LEVELS.find((lvl) => !isLevelCompleted(lvl)) ?? "C1";
-  const assessedProgress = Math.round((grammarPercent(assessedLevel) + vocabPercent(assessedLevel)) / 2);
+  const assessedProgress = vocabPercent(assessedLevel);
 
   // Overall 0-100 score on the same scale as CEFR_LEVEL_METADATA.minScore (for display)
   const levelMin = CEFR_LEVEL_METADATA[assessedLevel].minScore;
@@ -367,29 +256,41 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const currentIdx = ALL_LEVELS.indexOf(effectiveLevel);
   const nextLevel = currentIdx < ALL_LEVELS.length - 1 ? ALL_LEVELS[currentIdx + 1] : null;
 
-  // Progress inside the active level: half grammar, half level vocabulary
-  const progressToNextLevel = Math.round((grammarPercent(effectiveLevel) + vocabPercent(effectiveLevel)) / 2);
+  // Progress inside the active level: based on level vocabulary
+  const progressToNextLevel = vocabPercent(effectiveLevel);
 
-  // Confidence level
+  // Per level: levels below the active one count as passed (the learner chose or reached a higher level)
+  const levelBreakdown = {} as Record<GrammarLevel, LevelBreakdown>;
+  for (const [i, lvl] of ALL_LEVELS.entries()) {
+    const done = i < currentIdx || isLevelCompleted(lvl);
+    levelBreakdown[lvl] = {
+      level: lvl,
+      label: CEFR_LEVEL_METADATA[lvl].label,
+      description: LEVEL_DESCRIPTIONS[lvl],
+      vocabPercent: vocabPercent(lvl),
+      status: done ? "mastered" : i === currentIdx ? "learning" : "locked",
+    };
+  }
+
+  // Confidence level: how much the learner has practised (grammar lessons tried on their path, words studied)
   let levelConfidence: "preliminary" | "moderate" | "high" = "preliminary";
-  const totalGrammarAttempts = Object.values(levelBreakdown).reduce((acc, curr) => acc + curr.attemptedLessons, 0);
-  if (totalGrammarAttempts >= 8 && totalWords >= 40) {
+  if (grammarAttempted >= 8 && totalWords >= 40) {
     levelConfidence = "high";
-  } else if (totalGrammarAttempts >= 3 || totalWords >= 15) {
+  } else if (grammarAttempted >= 3 || totalWords >= 15) {
     levelConfidence = "moderate";
   }
 
   // Generate personalized actionable recommendations
   const recommendations: string[] = [];
-  if (levelBreakdown[effectiveLevel].attemptedLessons < levelBreakdown[effectiveLevel].totalLessons) {
+  if (selectedLessonIds.length > 0 && selectedMastered < selectedLessonIds.length) {
     recommendations.push(
-      `Hoàn thành thêm các bài kiểm tra chẩn đoán ngữ pháp cấp độ ${effectiveLevel} để củng cố nền tảng.`
+      `Bạn đã nắm vững ${selectedMastered}/${selectedLessonIds.length} bài ngữ pháp trong lộ trình. Ôn các bài đến hạn để nhớ lâu hơn.`
     );
   }
   if (vocabPercent(effectiveLevel) < 100) {
     const { known, target } = levelVocab[effectiveLevel];
     recommendations.push(
-      `Bạn đã thuộc ${known}/${target} từ cấp độ ${effectiveLevel}. Học thêm từ đúng cấp độ này (tự động nạp từ sẽ chỉ gợi ý từ ${effectiveLevel}).`
+      `Bạn đã thuộc ${known}/${target} từ cấp độ ${effectiveLevel}. Mỗi ngày học vài từ mới và ôn đúng hạn để tiến gần mục tiêu.`
     );
   }
   if (avgRetrievability < 75 && totalWords > 10) {

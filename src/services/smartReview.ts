@@ -14,7 +14,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
 import { getCardRetrievability, getStudyLimits } from "./srs";
-import { directionForExercise, getDueCards } from "./cards";
+import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs } from "./cards";
 import { persistKeyNow } from "./storageBackup";
 import { COMMON_WORDS } from "@/data/commonWords";
 import { FULL_VERB_FORMS, IRREGULAR_PLURALS, IRREGULAR_VERB_FORMS } from "@/data/irregularForms";
@@ -29,6 +29,79 @@ import { FULL_VERB_FORMS, IRREGULAR_PLURALS, IRREGULAR_VERB_FORMS } from "@/data
  */
 export function calculateRetrievability(srs: Partial<SRSReview>, now: Date = new Date()): number {
   return getCardRetrievability(srs, now);
+}
+
+/** A word counts as known when its recognition card is in Review with at least this stability (days) */
+export const KNOWN_WORD_MIN_STABILITY = 7;
+
+/** Maximum unmastered words allowed before learning extra new words is gated */
+export const MAX_UNMASTERED_WORDS = 20;
+
+/**
+ * A word marked "Đã biết" and not reviewed since: its recognition card still has the schedule markWordKnown
+ * gave it (Review after a single rep, no lapse; a real first answer leaves a new card in Learning, since
+ * recognition answers are never graded Easy). The learner's claim is not evidence yet: such a word is not
+ * counted as remembered, known or being learnt until its first real review.
+ */
+export function isKnownOnly(srs: Partial<SRSReview> | null | undefined): boolean {
+  return !!srs && srs.state === 2 && (srs.reps ?? 0) === 1 && (srs.lapses ?? 0) === 0;
+}
+
+/**
+ * Check if a word is classified as "Đã biết" (mastered/known word: stability >= 7 or interval >= 7).
+ * A word only marked "Đã biết" (isKnownOnly) is not, until a real review confirms it.
+ */
+export function isWordKnown(w: WordDetail): boolean {
+  if (!w.srs || isKnownOnly(w.srs)) return false;
+  return (
+    (w.srs.state === 2 && (w.srs.stability ?? 0) >= KNOWN_WORD_MIN_STABILITY) ||
+    (w.srs.interval ?? 0) >= KNOWN_WORD_MIN_STABILITY
+  );
+}
+
+/**
+ * Studied words in the user's active vocabulary (excluding catalog words never introduced/studied).
+ */
+export function getStudiedWords(words: WordDetail[]): WordDetail[] {
+  return words.filter(
+    (w) =>
+      !w.catalog_id ||
+      (w.srs?.reps ?? 0) > 0 ||
+      (w.srs?.state ?? 0) > 0 ||
+      Boolean(w.srs?.last_review)
+  );
+}
+
+/**
+ * Words being learnt: started but not "Đã biết" yet (suspended leeches are left out: they would otherwise
+ * hold the count up for good; words only marked "Đã biết" are not being learnt either).
+ */
+export function getUnmasteredWords(words: WordDetail[]): WordDetail[] {
+  return getStudiedWords(words).filter((w) => !isWordKnown(w) && !isSuspended(w) && !isKnownOnly(w.srs));
+}
+
+/** How many words may be in learning at once before extra new words ("Học thêm") are held back */
+export function youngWordCap(newCardsPerDay: number = getStudyLimits().newCardsPerDay): number {
+  return Math.max(MAX_UNMASTERED_WORDS, newCardsPerDay * 3);
+}
+
+/**
+ * Extra new words beyond today's budget, when the learner asks for more after finishing today's work.
+ * The daily budget itself is never blocked (the scheduler and the backlog check already pace it). Extras:
+ * at most one more day's budget per day, a batch of 5 at a time, and only while the words being learnt stay
+ * under youngWordCap, so tomorrow's reviews do not snowball.
+ */
+export function extraNewWordAllowance(
+  words: WordDetail[],
+  introducedToday: NewCardCounts,
+  newCardsPerDay: number = getStudyLimits().newCardsPerDay
+): { allowed: number; young: number; cap: number; reason: "young" | "daily" | null } {
+  const young = getUnmasteredWords(words).length;
+  const cap = youngWordCap(newCardsPerDay);
+  const dailyLeft = Math.max(0, newCardsPerDay * 2 - introducedToday.recognition - introducedToday.production);
+  const allowed = Math.max(0, Math.min(5, dailyLeft, cap - young));
+  const reason = allowed > 0 ? null : young >= cap ? "young" : "daily";
+  return { allowed, young, cap, reason };
 }
 
 /**
@@ -124,13 +197,15 @@ export function saveLeechSettings(settings: Partial<LeechSettings>): void {
 }
 
 /**
- * Check if a word qualifies as a "leech" (chronically forgotten)
+ * Check if a word qualifies as a "leech" (chronically forgotten): forgotten `threshold` times and still
+ * unstable. Lapses never go down, so a word that has settled again (stability back to
+ * TYPING_STABILITY_DAYS) leaves the label and the easy formats, and goes back to the normal ladder.
  */
 export function isLeech(srs: Partial<SRSReview>, settings?: LeechSettings): boolean {
   const { threshold, enabled } = settings || getLeechSettings();
   if (!enabled) return false;
   const lapses = srs.lapses ?? 0;
-  return lapses >= threshold;
+  return lapses >= threshold && (srs.stability ?? 0) < TYPING_STABILITY_DAYS;
 }
 
 /** A word is a leech when either of its cards is (recall cards are forgotten more often). */
@@ -195,7 +270,7 @@ export function calculateUrgencyScore(word: WordDetail, now: Date = new Date()):
   const srs = word.srs;
   const state = srs.state ?? 0;
   const isNew = state === 0 && (srs.reps ?? 0) === 0;
-  const isDue = srs.next_review_date ? new Date(srs.next_review_date).getTime() <= now.getTime() : true;
+  const isDue = srs.next_review_date ? isDueSrs(srs, now) : true;
   const shortTerm = state === 1 || state === 3;
   const R = isNew ? 0 : calculateRetrievability(srs, now);
   const dailyLoss = isNew || shortTerm ? 0 : Math.max(0, R - calculateRetrievability(srs, new Date(now.getTime() + DAY_MS)));
@@ -257,7 +332,19 @@ export function isNewCard(word: WordDetail): boolean {
 export interface NewCardCounts {
   recognition: number; // brand-new words introduced today
   production: number; // recall cards started today
+  /**
+   * Cards introduced in the last 24 hours (today, or yesterday evening) that are still new: the first quiz
+   * came too soon and was postponed, or the session ended first. "wordId:direction" -> next review (ms).
+   * Their budget was spent on the day of the introduction: they come first among new cards, outside
+   * today's budget, and are still today's work. Absent when there are none.
+   */
+  pending?: Map<string, number>;
+  /** When each card's introduction was last shown, last 24 hours (getRecentIntros). Absent when none. */
+  intros?: Map<string, number>;
 }
+
+/** Key of a card in NewCardCounts.pending (same as getRecentIntros) */
+const cardKey = (c: ReviewCard) => `${c.id}:${c.direction}`;
 
 /**
  * Cards started today (local day), per direction: their first scheduled review, or the introduction
@@ -265,25 +352,66 @@ export interface NewCardCounts {
  */
 export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const db = await getDatabase();
+  // Dynamic import: reviewRecorder imports this module
+  const introsLoading = import("./reviewRecorder")
+    .then((m) => m.getRecentIntros())
+    .catch(() => new Map<string, number>());
   // A word marked "already known" never uses the budget for recognition (neither the day it is marked nor
   // the day of its first real review). Its recall card, started later, is a new card like any other.
-  const rows = await db.select<Array<{ direction: string | null; cnt: number }>>(
-    `SELECT COALESCE(direction, 'recognition') AS direction, COUNT(*) AS cnt FROM (
+  const rows = await db.select<
+    Array<{ word_id: string; direction: string; state: number | null; reps: number | null; next_review_date: string | null; suspended: number | null }>
+  >(
+    `SELECT t.word_id, t.direction,
+            CASE WHEN t.direction = 'production' THEN p.state ELSE s.state END AS state,
+            CASE WHEN t.direction = 'production' THEN p.reps ELSE s.reps END AS reps,
+            CASE WHEN t.direction = 'production' THEN p.next_review_date ELSE s.next_review_date END AS next_review_date,
+            w.suspended
+     FROM (
        SELECT word_id, COALESCE(direction, 'recognition') AS direction, MIN(timestamp) AS first_seen
        FROM review_logs
        WHERE (is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro')
          AND NOT (COALESCE(direction, 'recognition') = 'recognition'
                   AND word_id IN (SELECT word_id FROM review_logs WHERE exercise_type = 'known'))
        GROUP BY word_id, COALESCE(direction, 'recognition')
-     ) WHERE first_seen >= $1
-     GROUP BY direction`,
+     ) t
+     LEFT JOIN srs_reviews s ON s.word_id = t.word_id
+     LEFT JOIN srs_production p ON p.word_id = t.word_id
+     LEFT JOIN words w ON w.id = t.word_id
+     WHERE t.first_seen >= $1`,
     [getLocalStartOfDayIso()]
   );
   const counts: NewCardCounts = { recognition: 0, production: 0 };
+  const pending = new Map<string, number>();
   for (const r of rows) {
-    if (r.direction === "production") counts.production = r.cnt;
-    else counts.recognition = r.cnt;
+    if (r.direction === "production") counts.production++;
+    else counts.recognition++;
+    // Introduced, first quiz not graded yet (postponed after the intro): still a new card
+    if (r.next_review_date && (r.state ?? 0) === 0 && (r.reps ?? 0) === 0 && !r.suspended) {
+      pending.set(`${r.word_id}:${r.direction}`, new Date(r.next_review_date).getTime());
+    }
   }
+  // Introduced since yesterday evening and still new: pending as well (introductions are recognition cards)
+  const intros = await introsLoading;
+  const earlier = [...intros.keys()]
+    .filter((k) => k.endsWith(":recognition") && !pending.has(k))
+    .map((k) => k.slice(0, -":recognition".length));
+  if (earlier.length > 0) {
+    const left = await db.select<
+      Array<{ word_id: string; state: number | null; reps: number | null; next_review_date: string | null; suspended: number | null }>
+    >(
+      `SELECT s.word_id, s.state, s.reps, s.next_review_date, w.suspended
+       FROM srs_reviews s JOIN words w ON w.id = s.word_id
+       WHERE s.word_id IN (${earlier.map((_, i) => `$${i + 1}`).join(", ")})`,
+      earlier
+    );
+    for (const r of left) {
+      if (r.next_review_date && (r.state ?? 0) === 0 && (r.reps ?? 0) === 0 && !r.suspended) {
+        pending.set(`${r.word_id}:recognition`, new Date(r.next_review_date).getTime());
+      }
+    }
+  }
+  if (pending.size > 0) counts.pending = pending;
+  if (intros.size > 0) counts.intros = intros;
   return counts;
 }
 
@@ -314,37 +442,76 @@ export function splitNewCardBudget(
 }
 
 /**
+ * Today's work from reviews and new cards waiting (pending introductions not included), the way a session
+ * takes them: pending introductions first, then the daily budget, all limited by the review backlog
+ * (newCardAllowance), as in buildReviewSession.
+ */
+function todayWorkFrom(
+  reviews: number,
+  waiting: { recognition: number; production: number },
+  introduced: NewCardCounts,
+  newCardsPerDay: number,
+  maxSessionSize: number
+): TodayWork {
+  const split = splitNewCardBudget(newCardsPerDay, introduced, waiting);
+  const newToday = Math.min(
+    split.recognition + split.production + (introduced.pending?.size ?? 0),
+    newCardAllowance(reviews, maxSessionSize)
+  );
+  return { reviews, newToday, total: reviews + newToday };
+}
+
+/**
  * What is left to study today. Counting every new word as "due" made the number never reach 0; new
- * words only count up to what the daily new-card budget still allows.
+ * words only count up to what the daily new-card budget and the review backlog (newCardAllowance) still
+ * allow. Cards introduced recently whose quiz was postponed (introduced.pending) are still to do, outside
+ * the budget; the waiting counts (countDueCards) include the ones due now.
  */
 export function todayWorkFromCounts(
   counts: { reviews: number; newWaiting: number; newRecallWaiting?: number },
   introduced: NewCardCounts,
-  newCardsPerDay: number = getStudyLimits().newCardsPerDay
+  newCardsPerDay: number = getStudyLimits().newCardsPerDay,
+  now: Date = new Date(),
+  maxSessionSize: number = getStudyLimits().maxSessionSize
 ): TodayWork {
-  const split = splitNewCardBudget(newCardsPerDay, introduced, {
-    recognition: counts.newWaiting,
-    production: counts.newRecallWaiting ?? 0,
-  });
-  const newToday = split.recognition + split.production;
-  return { reviews: counts.reviews, newToday, total: counts.reviews + newToday };
+  const pendingDue = { recognition: 0, production: 0 };
+  for (const [key, dueAt] of introduced.pending ?? []) {
+    if (dueAt <= now.getTime()) pendingDue[key.endsWith(":production") ? "production" : "recognition"]++;
+  }
+  const waiting = {
+    recognition: Math.max(0, counts.newWaiting - pendingDue.recognition),
+    production: Math.max(0, (counts.newRecallWaiting ?? 0) - pendingDue.production),
+  };
+  return todayWorkFrom(counts.reviews, waiting, introduced, newCardsPerDay, maxSessionSize);
 }
 
-/** Same as todayWorkFromCounts, from words already loaded in memory. */
-export function summarizeTodayWork(words: WordDetail[], introduced: NewCardCounts, now: Date = new Date()): TodayWork {
+/**
+ * Same as todayWorkFromCounts, from words already loaded in memory, counted the way sessions take cards
+ * (askableCards): a word's two due review cards count once (the other is buried once its sibling is
+ * reviewed today); a new or learning card is never buried, so it counts as well. Used by Today, the tray
+ * and the popup (countTodayWork).
+ */
+export function summarizeTodayWork(
+  words: WordDetail[],
+  introduced: NewCardCounts,
+  now: Date = new Date(),
+  limits: { newCardsPerDay: number; maxSessionSize: number } = getStudyLimits()
+): TodayWork {
   let reviews = 0;
-  let newWaiting = 0;
-  let newRecallWaiting = 0;
+  const waiting = { recognition: 0, production: 0 };
+  const count = (c: ReviewCard) => {
+    if (!isNewCard(c)) reviews++;
+    else if (!introduced.pending?.has(cardKey(c))) waiting[c.direction]++; // pending: counted apart
+  };
   for (const w of words) {
     if (isPlaceholderMeaning(w.meaning_vn) || isSuspended(w)) continue;
-    for (const c of getDueCards(w, now)) {
-      if (isBuriedBySibling(c, now)) continue;
-      if (!isNewCard(c)) reviews++;
-      else if (c.direction === "recognition") newWaiting++;
-      else newRecallWaiting++;
-    }
+    const due = askableCards(w, now, introduced);
+    if (due.length === 0) continue;
+    const first = pickSessionCard(due, now);
+    count(first);
+    for (const other of due) if (other !== first && (other.srs.state ?? 0) !== 2) count(other);
   }
-  return todayWorkFromCounts({ reviews, newWaiting, newRecallWaiting }, introduced);
+  return todayWorkFrom(reviews, waiting, introduced, limits.newCardsPerDay, limits.maxSessionSize);
 }
 
 /** Leeches allowed in one session: more of them makes a session discouraging and slow */
@@ -365,6 +532,24 @@ export function isBuriedBySibling(card: ReviewCard, now: Date = new Date()): boo
   if ((card.srs.state ?? 0) !== 2) return false;
   const sibling = card.direction === "recognition" ? card.srsProduction : card.srsRecognition;
   return !!sibling && isSameLocalDay(sibling.last_review, now);
+}
+
+/**
+ * Due cards of a word that a session may ask now (see isDueSrs): a review card whose sibling was reviewed
+ * today waits until tomorrow, and a new card whose introduction was shown less than INTRO_READY_MS ago (in
+ * any window, introduced.intros) waits for its quiz to be a real retrieval.
+ */
+export function askableCards(word: WordDetail, now: Date = new Date(), introduced?: NewCardCounts): ReviewCard[] {
+  return getDueCards(word, now).filter((c) => {
+    if (isBuriedBySibling(c, now)) return false;
+    const introAt = isNewCard(c) ? introduced?.intros?.get(cardKey(c)) : undefined;
+    return introAt == null || now.getTime() - introAt >= INTRO_READY_MS;
+  });
+}
+
+/** The one card of a word a session takes: the higher-priority one (see calculateUrgencyScore) */
+function pickSessionCard(due: ReviewCard[], now: Date): ReviewCard {
+  return due.reduce((a, b) => (calculateUrgencyScore(b, now).urgencyScore > calculateUrgencyScore(a, now).urgencyScore ? b : a));
 }
 
 /**
@@ -389,19 +574,25 @@ export function newCardAllowance(dueReviewCount: number, maxSessionSize: number)
  *    MAX_LEECHES_PER_SESSION leeches, spread through the session
  *  - cards never reviewed are a separate, budgeted stage: one daily budget for both directions
  *    (splitNewCardBudget), limited further by the review backlog (newCardAllowance), oldest first,
- *    new words and new recall cards alternating, spread evenly through the session
+ *    new words and new recall cards alternating, spread evenly through the session; cards introduced
+ *    in the last 24 hours that are still new (NewCardCounts.pending) go first, outside the budget, once
+ *    their introduction is a minute old even when their postponed quiz is not due yet (see isDueSrs)
  *  - whole session capped at maxSessionSize (or `options.maxCards`, today's share after a break)
- *  - `options.noNewCards`: reviews only (while a comeback plan clears the backlog)
+ *  - `options.noNewCards`: reviews only
+ *  - `options.comebackNewCards`: while a comeback plan runs, exactly this many new cards a day (minus the
+ *    ones already introduced today) replace the daily budget, and the backlog does not cut them
+ *    (newCardAllowance would be 0 with such a backlog); introductions still new come first, outside it
  */
 export function buildReviewSession(
   dueWords: WordDetail[],
   alreadyToday: NewCardCounts | number,
   now: Date = new Date(),
-  options: { maxCards?: number; noNewCards?: boolean } = {}
+  options: { maxCards?: number; noNewCards?: boolean; comebackNewCards?: number } = {}
 ): ReviewCard[] {
   const stored = getStudyLimits();
+  const comebackNew = options.noNewCards ? undefined : options.comebackNewCards;
   const limits = {
-    newCardsPerDay: options.noNewCards ? 0 : stored.newCardsPerDay,
+    newCardsPerDay: options.noNewCards ? 0 : comebackNew != null ? Math.max(0, comebackNew) : stored.newCardsPerDay,
     maxSessionSize: Math.max(1, Math.min(stored.maxSessionSize, options.maxCards ?? stored.maxSessionSize)),
   };
   const leechSettings = getLeechSettings();
@@ -410,11 +601,8 @@ export function buildReviewSession(
   // Words still waiting for AI analysis have no real meaning to review yet
   const ready = dueWords.filter((w) => !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w));
   const cards = ready.flatMap((w) => {
-    const due = getDueCards(w, now).filter((c) => !isBuriedBySibling(c, now));
-    if (due.length <= 1) return due;
-    return [due.reduce((a, b) =>
-      calculateUrgencyScore(b, now).urgencyScore > calculateUrgencyScore(a, now).urgencyScore ? b : a
-    )];
+    const due = askableCards(w, now, introduced);
+    return due.length <= 1 ? due : [pickSessionCard(due, now)];
   });
 
   // Review cards by priority, leeches capped
@@ -436,22 +624,26 @@ export function buildReviewSession(
   const oldestFirst = (a: ReviewCard, b: ReviewCard) =>
     new Date(a.srs.next_review_date).getTime() - new Date(b.srs.next_review_date).getTime() ||
     new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+  const isPending = (c: ReviewCard) => !!introduced.pending?.has(cardKey(c));
   const waitingOf = (direction: ReviewCard["direction"]) =>
-    cards.filter((c) => isNewCard(c) && c.direction === direction).sort(oldestFirst);
+    cards.filter((c) => isNewCard(c) && !isPending(c) && c.direction === direction).sort(oldestFirst);
   const newWords = waitingOf("recognition");
   const newRecall = waitingOf("production");
   const split = splitNewCardBudget(limits.newCardsPerDay, introduced, {
     recognition: newWords.length,
     production: newRecall.length,
   });
+  // Introduced in the last 24 hours, still new: their budget is spent, so they come first
+  const started = options.noNewCards ? [] : cards.filter((c) => isNewCard(c) && isPending(c)).sort(oldestFirst);
   // Alternate, so a backlog cut (newCardAllowance) keeps both kinds
-  const newCards: ReviewCard[] = [];
+  const newCards: ReviewCard[] = [...started];
   for (let i = 0; i < Math.max(split.recognition, split.production); i++) {
     if (i < split.recognition) newCards.push(newWords[i]);
     if (i < split.production) newCards.push(newRecall[i]);
   }
 
-  const newSlice = newCards.slice(0, Math.min(limits.maxSessionSize, newCardAllowance(reviewCards.length, limits.maxSessionSize)));
+  const allowance = comebackNew != null ? limits.maxSessionSize : newCardAllowance(reviewCards.length, limits.maxSessionSize);
+  const newSlice = newCards.slice(0, Math.min(limits.maxSessionSize, allowance));
   const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, limits.maxSessionSize - newSlice.length), leechSettings));
   if (newSlice.length === 0) return reviewSlice;
   if (reviewSlice.length === 0) return newSlice;
@@ -469,6 +661,14 @@ export function buildReviewSession(
   }
   while (newIdx < newSlice.length) result.push(newSlice[newIdx++]);
   return result;
+}
+
+/**
+ * Where a card comes back in the session queue (a forgotten card, a new word after its introduction): with
+ * at least `gap` other cards before it, or at the end when fewer cards are left (M18).
+ */
+export function requeuePosition(queueLength: number, currentIndex: number, gap: number): number {
+  return Math.max(currentIndex + 1, Math.min(queueLength, currentIndex + 1 + gap));
 }
 
 /** Keep the priority order but move leeches so they are evenly spaced instead of bunched together */
@@ -614,6 +814,8 @@ export interface AnswerOutcome {
  *  - picked a synonym of the target, hint, small typo -> Hard
  *  - correct on first try -> Good
  *  - a correct but very slow answer (relative to the learner's own speed) -> Hard
+ *  - letter tiles built correctly -> Hard at most: picking the word's own letters is a cued step, not the
+ *    recall typing proves (M9)
  *  - automatic grading never gives Easy (Easy stays a manual choice on recall flip cards).
  *    Speed-based Easy was tried twice: in simulation G,G,E,E schedules 19 -> 136 days against
  *    11 -> 46 for G,G,G,G, far beyond what a 2-second multiple-choice answer proves.
@@ -621,6 +823,7 @@ export interface AnswerOutcome {
 export function deriveRating(outcome: AnswerOutcome): Rating {
   // A wrong answer is a memory failure, even after a synonym was tried first
   if (outcome.wrongAttempts > 0) return Rating.Again;
+  if (outcome.exerciseType === "letter_tiles") return Rating.Hard;
   if (outcome.confusedWithSynonym || outcome.usedHint || outcome.nearMiss) return Rating.Hard;
   // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
   const slowMs = slowThresholdMs(outcome.exerciseType);
@@ -651,12 +854,45 @@ function editDistance(a: string, b: string, max: number): number {
 export type TypedAnswerMatch = "exact" | "near" | "wrong";
 
 /**
+ * Vietnamese senses of every word of the vocabulary deck (lowercased word -> senses), registered once by
+ * vocabCatalog.loadCatalogMeanings (like registerWordForms). Lets grading tell another real word, or a word
+ * with the same meaning, from a typo.
+ */
+const catalogSenses = new Map<string, string[]>();
+
+export function registerCatalogMeanings(entries: Iterable<{ word: string; vn: string }>): void {
+  for (const { word, vn } of entries) {
+    const key = word.trim().toLowerCase();
+    if (!key) continue;
+    const senses = meaningSenses(vn);
+    const prev = catalogSenses.get(key);
+    catalogSenses.set(key, prev ? [...new Set([...prev, ...senses])] : senses);
+  }
+}
+
+/**
+ * A typed answer that is another word of the deck sharing a sense with the target ("him" for "he",
+ * "telephone" for "phone"): the meaning was recalled, the exact word was not. Handled like a synonym:
+ * typed again, graded Hard at most (M8). Needs the deck's meanings (registerCatalogMeanings).
+ */
+export function isCatalogSynonym(typed: string, target: Pick<WordDetail, "word" | "meaning_vn">): boolean {
+  const guess = typed.trim().toLowerCase().replace(/\s+/g, " ");
+  const answer = target.word.trim().toLowerCase();
+  if (!guess || guess === answer || wordForms(answer).some((f) => f.toLowerCase() === guess)) return false;
+  const theirs = catalogSenses.get(guess);
+  if (!theirs || theirs.length === 0) return false;
+  const ours = new Set([...meaningSenses(target.meaning_vn), ...(catalogSenses.get(answer) ?? [])]);
+  return theirs.some((x) => ours.has(x));
+}
+
+/**
  * A typed word that is a real word other than the target ("effect" for "affect", "date" for "data"):
- * a different word, not a typo, so it never counts as a near miss.
+ * a different word, not a typo, so it never counts as a near miss. Real words: common English words,
+ * the vocabulary deck (M12) and the learner's own words.
  */
 function isOtherRealWord(guess: string, targetForms: string[], knownWords: Iterable<string>): boolean {
   if (targetForms.includes(guess)) return false;
-  if (COMMON_WORDS.has(guess)) return true;
+  if (COMMON_WORDS.has(guess) || catalogSenses.has(guess)) return true;
   for (const w of knownWords) {
     const key = w.trim().toLowerCase();
     if (key && wordForms(key).some((f) => f.toLowerCase() === guess)) return true;
@@ -682,16 +918,21 @@ export function matchTypedAnswer(
   if (!guess) return "wrong";
   if (guess === answer) return "exact";
   // Symbols matter for terms like "c++" / "c#", so only loosen the match for plain words:
-  // case, curly quotes, contractions ("don't" = "do not"), punctuation and spacing
+  // case, curly quotes, contractions ("don't" = "do not"), punctuation, spacing and hyphens
+  // ("long term" / "longterm" = "long-term")
   const isPlainWord = /^[a-z\s'\u2019-]+$/i.test(target.trim());
-  const normGuess = normalizeTypedText(input);
-  if (isPlainWord && normGuess === normalizeTypedText(target)) return "exact";
+  if (isPlainWord && sameTypedText(input, target)) return "exact";
   // The learner retyped the whole context sentence (which contains the word) instead of the blank
-  if (sentence && new RegExp(wordFormsPattern(target), "i").test(sentence) && normGuess === normalizeTypedText(sentence)) {
+  if (sentence && new RegExp(wordFormsPattern(target), "i").test(sentence) && sameTypedText(input, sentence)) {
     return "exact";
   }
   const forms = wordForms(answer).map((f) => f.toLowerCase());
   if (forms.includes(guess)) return "exact";
+  // A hyphenated compound inflects like a phrase: "t-shirts", "t shirts" for "t-shirt"
+  if (isPlainWord && answer.includes("-")) {
+    const guesses = hyphenReadings(input);
+    if (hyphenReadings(target).some((t) => wordForms(t).some((f) => guesses.includes(f.toLowerCase())))) return "exact";
+  }
   if (
     answer.length >= 4 &&
     forms.some((f) => editDistance(guess, f, 1) <= 1) &&
@@ -720,7 +961,8 @@ export type ExerciseType =
 
 /**
  * "intro" = a new (or relearned) word was shown before its first quiz; not a graded answer.
- * "known" = the learner said they already know a new word: scheduled as Easy, outside the daily budget.
+ * "known" = the learner said they already know a new word: put in Review without a quiz (markWordKnown),
+ * outside the daily budget.
  */
 export type LoggedExerciseType = ExerciseType | "intro" | "known";
 
@@ -1013,7 +1255,7 @@ export interface XPInput {
   /** The answer moved the FSRS schedule (practice and retries only earn a token amount) */
   scheduled: boolean;
   direction: CardDirection;
-  /** Retrievability just before the answer (null for new cards) */
+  /** Retrievability just before the answer (null for new cards). No longer changes the XP (S12). */
   retrievabilityBefore?: number | null;
   isLeechWord?: boolean;
 }
@@ -1025,29 +1267,25 @@ export const PRACTICE_XP = 1;
  * XP rewards remembering, not volume or speed:
  *  - nothing for a forgotten card or a skip (Again)
  *  - practice answers (not due, retries, practice-only exercises) earn PRACTICE_XP when correct
- *  - scheduled answers: Hard 6, Good 10, Easy 12; +4 for recall (producing the word is harder)
- *  - "desirable difficulty" bonus: remembering a word FSRS expected to be fading (R < 80%) is worth +5,
- *    because those are the reviews that strengthen memory the most
+ *  - scheduled answers: Hard 6, Good and Easy 10 (Easy is a self-rating: a higher reward would invite
+ *    pressing it); +4 for recall (producing the word is harder)
+ *  - no bonus for a late review (low retrievability): it would reward letting reviews pile up
  *  - remembering a leech +5
  * No speed bonus and no combo multiplier: both reward fast guessing.
  */
 export function calculateXPReward(input: XPInput): XPReward {
-  const { rating, scheduled, direction, retrievabilityBefore, isLeechWord } = input;
+  const { rating, scheduled, direction, isLeechWord } = input;
   const bonusReasons: string[] = [];
   if (rating === Rating.Again) return { baseXP: 0, bonusXP: 0, totalXP: 0, bonusReasons };
   if (!scheduled) {
     return { baseXP: PRACTICE_XP, bonusXP: 0, totalXP: PRACTICE_XP, bonusReasons: ["Luyện thêm"] };
   }
 
-  const baseXP = rating === Rating.Hard ? 6 : rating === Rating.Easy ? 12 : 10;
+  const baseXP = rating === Rating.Hard ? 6 : 10;
   let bonusXP = 0;
   if (direction === "production") {
     bonusXP += 4;
     bonusReasons.push("Tự nhớ ra từ +4");
-  }
-  if (retrievabilityBefore != null && retrievabilityBefore < 0.8) {
-    bonusXP += 5;
-    bonusReasons.push("🧠 Cứu từ sắp quên +5");
   }
   if (isLeechWord) {
     bonusXP += 5;
@@ -1187,7 +1425,9 @@ export const TYPING_STABILITY_DAYS = 7;
  *  - S 3–21d: multiple choice, listening (audio → meaning), reading in context
  *  - S >= 21d: listening, reading in context, matching
  * Production (produce the English word): a ladder, each step with less help
- *  - new / learning / relearning / leech / S < 2d: letter tiles (build the word from shuffled letters)
+ *  - new / leech / S < 2d: letter tiles (build the word from shuffled letters, graded Hard at most)
+ *  - learning / relearning: cloze, spelling without a usable sentence. Hard repeats a learning step, so a
+ *    step passed only through letter tiles would never graduate
  *  - S 2–7d: cloze (the sentence is a cue), spelling when the word has no usable sentence
  *  - S 7–21d: cloze and spelling in turn
  *  - S >= 21d: spelling from the meaning alone
@@ -1200,9 +1440,8 @@ export function selectExerciseType(card: WordDetail & { direction?: CardDirectio
   const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
 
   if ((card.direction ?? "recognition") === "production") {
-    if (state === 0 || reps === 0 || state === 1 || state === 3 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) {
-      return "letter_tiles";
-    }
+    if (state === 1 || state === 3) return hasExamples ? "cloze" : "spelling";
+    if (state === 0 || reps === 0 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) return "letter_tiles";
     if (stability < TYPING_STABILITY_DAYS) return hasExamples ? "cloze" : "spelling";
     if (stability < MATURE_STABILITY_DAYS) return hasExamples ? rotate<ExerciseType>(["cloze", "spelling"], reps) : "spelling";
     return "spelling";
@@ -1276,13 +1515,30 @@ export function pickExample(word: WordDetail, rotation: number = word.srs?.reps 
   return ordered[Math.abs(Math.floor(rotation)) % ordered.length];
 }
 
-/** Comma / "hoặc" separated senses of a Vietnamese meaning, lowercased, without explanations in brackets */
-function meaningSenses(meaning: string): string[] {
-  const first = (meaning || "").split(/[;\n.]/)[0].replace(/\([^)]*\)/g, " ").toLowerCase();
-  return first
-    .split(/,|\/|\bhoặc\b/)
-    .map((x) => x.replace(/["'“”‘’]/g, "").replace(/\s+/g, " ").trim())
-    .filter((x) => x.length > 0 && x.split(" ").length <= 6);
+const sensesCache = new Map<string, string[]>();
+
+/**
+ * Every sense of a Vietnamese meaning, lowercased and normalised, without explanations in brackets: senses
+ * are separated by ";", line breaks, ",", "/" and "hoặc" ("ánh sáng; nhẹ; sáng, nhạt (màu)" -> "ánh sáng",
+ * "nhẹ", "sáng", "nhạt"). Deck words list several senses; options show only the first, but a question is
+ * ambiguous when an option matches any of them (M4).
+ */
+export function meaningSenses(meaning: string): string[] {
+  const key = meaning || "";
+  const cached = sensesCache.get(key);
+  if (cached) return cached;
+  const text = key.normalize("NFC").replace(/\([^)]*\)/g, " ").toLowerCase();
+  const senses = [
+    ...new Set(
+      text
+        .split(/[;\n.]/)
+        .flatMap((part) => part.split(/,|\/|\bhoặc\b/))
+        .map((x) => x.replace(/["'“”‘’]/g, "").replace(/\s+/g, " ").trim())
+        .filter((x) => x.length > 0 && x.split(" ").length <= 6)
+    ),
+  ];
+  sensesCache.set(key, senses);
+  return senses;
 }
 
 function syllables(text: string): Set<string> {
@@ -1291,8 +1547,9 @@ function syllables(text: string): Set<string> {
 
 /**
  * Whether two words are too close in meaning to be told apart from the meaning alone: listed as
- * synonyms of each other, or sharing a sense ("nhanh" / "nhanh chóng"). Such a word must not be a
- * distractor: the question would have two right answers and the learner would be graded Again unfairly.
+ * synonyms of each other, or sharing a sense ("nhanh" / "nhanh chóng"), any sense of either word
+ * ("get" = "nhận; mua; trở nên; lấy" and "become" = "trở nên"). Such a word must not be a distractor, in
+ * either direction: the question would have two right answers and the learner would be graded Again unfairly.
  */
 export function areConfusable(a: WordDetail, b: WordDetail): boolean {
   const aw = a.word.trim().toLowerCase();
@@ -1339,9 +1596,12 @@ export function generateMultipleChoiceQuestion(
   const similarity = (w: WordDetail) =>
     ((w.topic || "").toLowerCase() === targetTopic ? 2 : 0) +
     (targetPos && (w.part_of_speech || "").toLowerCase() === targetPos ? 1 : 0);
+  // Vietnamese -> English: words the learner has studied come first, otherwise the answer is the one
+  // familiar word among words never seen (M7); deck words not studied yet only fill what is missing
+  const studied = (w: WordDetail) => (promptType === "vn_to_en" && (w.srs?.reps ?? 0) > 0 ? 1 : 0);
   const ranked = [...otherWords]
     .sort(() => 0.5 - Math.random())
-    .sort((x, y) => similarity(y) - similarity(x));
+    .sort((x, y) => studied(y) - studied(x) || similarity(y) - similarity(x));
 
   // Displayed text of an option; options that look identical to another one are skipped
   const displayKey = (w: WordDetail) =>
@@ -1586,8 +1846,19 @@ export function prepareContextMatch(
   // The card being reviewed must be part of the set
   if (!tryAdd(primaryWord)) return [];
 
+  // Only words already met: a word still waiting in the buffer (never introduced) would be shown, with its
+  // meaning given away, before its own introduction (M16)
+  const met = (w: WordDetail) => (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || Boolean(w.srs?.last_review);
   const shuffledOthers = allWords
-    .filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id) && !isPlaceholderMeaning(w.meaning_vn) && w.examples && w.examples.length > 0)
+    .filter(
+      (w) =>
+        w.id !== primaryWord.id &&
+        !excludeIds.has(w.id) &&
+        met(w) &&
+        !isPlaceholderMeaning(w.meaning_vn) &&
+        w.examples &&
+        w.examples.length > 0
+    )
     .sort(() => 0.5 - Math.random());
   for (const other of shuffledOthers) {
     if (pairs.length >= 3) break;
@@ -1725,7 +1996,8 @@ export function maskWordInSentence(sentence: string, word: string, blank = "____
 
 /**
  * Normalize a typed answer for comparison: case, curly quotes, common contractions, punctuation, whitespace.
- * "'s" and "'d" are ambiguous (is/has, had/would) so they are left alone.
+ * "'s" and "'d" are ambiguous (is/has, had/would) so they are left alone. Hyphens and dashes become spaces
+ * ("long-term" -> "long term"); see hyphenReadings for the joined spelling.
  */
 export function normalizeTypedText(text: string): string {
   return text
@@ -1741,9 +2013,27 @@ export function normalizeTypedText(text: string): string {
     .replace(/'ll\b/g, " will")
     .replace(/'ve\b/g, " have")
     .replace(/\bi'm\b/g, "i am")
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()?'"]/g, "")
+    .replace(/[-‐‑‒–—―−]/g, " ")
+    .replace(/[.,\/#!$%\^&\*;:{}=_`~()?'"]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/**
+ * Normalized readings of a text, a hyphenated compound read both spaced and joined: "long-term" gives
+ * "long term" and "longterm", so all three spellings match ("e-mail" = "email"). Only a hyphen joins:
+ * "every day" never matches "everyday".
+ */
+export function hyphenReadings(text: string): string[] {
+  const spaced = normalizeTypedText(text);
+  const joined = normalizeTypedText(text.replace(/(\w)[-‐‑‒–—―−](?=\w)/g, "$1"));
+  return spaced === joined ? [spaced] : [spaced, joined];
+}
+
+/** normalizeTypedText equality where a hyphen in either text also matches a space or nothing */
+export function sameTypedText(a: string, b: string): boolean {
+  const readings = hyphenReadings(b);
+  return hyphenReadings(a).some((r) => readings.includes(r));
 }
 
 /** A blank in a grammar prompt: "[not work]" or "_____" with an optional "(verb)" hint */
@@ -1772,9 +2062,9 @@ interface GradableExercise {
 /**
  * Every normalized reading of a text. "'s" can be "is", "has" or a possessive and "'d" can be "would"
  * or "had", so "Someone's knocking" matches "Someone is knocking". The possessive keeps its apostrophe,
- * so "it's" never matches "its".
+ * so "it's" never matches "its". A hyphenated compound is read spaced and joined (hyphenReadings).
  */
-function answerReadings(text: string): string[] {
+export function answerReadings(text: string): string[] {
   const t = text.toLowerCase().replace(/[‘’ʼ´`]/g, "'");
   const sForms = /'s\b/.test(t) ? [" is", " has", "qpossq"] : [null];
   const dForms = /'d\b/.test(t) ? [" would", " had"] : [null];
@@ -1784,7 +2074,7 @@ function answerReadings(text: string): string[] {
       let v = t;
       if (sf) v = v.replace(/'s\b/g, sf);
       if (df) v = v.replace(/'d\b/g, df);
-      out.add(normalizeTypedText(v).replace(/qpossq/g, "'s"));
+      for (const r of hyphenReadings(v)) out.add(r.replace(/qpossq/g, "'s"));
     }
   }
   return [...out];
@@ -1793,7 +2083,7 @@ function answerReadings(text: string): string[] {
 /**
  * Whether a typed or picked answer solves a grammar exercise. Accepts the answer alone or the whole
  * sentence with it filled in ("She does not work on Sunday." for "She [not work] on Sunday."),
- * with contractions (incl. 's and 'd), case, curly quotes, punctuation and spacing ignored.
+ * with contractions (incl. 's and 'd), case, curly quotes, punctuation, spacing and hyphens ignored.
  */
 export function isGrammarAnswerCorrect(input: string, ex: GradableExercise): boolean {
   const user = answerReadings(input).filter(Boolean);

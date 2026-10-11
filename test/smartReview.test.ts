@@ -15,6 +15,11 @@ import {
   fillPromptBlanks,
   isGrammarAnswerCorrect,
   prepareSentenceBuilder,
+  isWordKnown,
+  getStudiedWords,
+  getUnmasteredWords,
+  MAX_UNMASTERED_WORDS,
+  KNOWN_WORD_MIN_STABILITY,
 } from "@/services/smartReview";
 import { saveStudyLimits } from "@/services/srs";
 import { makeWord, reviewSrs, freshServices } from "./helpers";
@@ -256,7 +261,8 @@ describe("text helpers", () => {
   it("builds context-match pairs without leaking the answer", async () => {
     await freshServices();
     const mk = (word: string, sentence: string, meaning: string) =>
-      makeWord(word, { meaning_vn: meaning, examples: [{ id: word, word_id: word, sentence_en: sentence, grammar_analysis: "" }] });
+      // Words already studied: words never introduced are left out of the pairs (M16)
+      makeWord(word, { meaning_vn: meaning, srs: reviewSrs(5, 2), examples: [{ id: word, word_id: word, sentence_en: sentence, grammar_analysis: "" }] });
     const pairs = prepareContextMatch(mk("cache", "We cache the result.", "bộ nhớ đệm"), [
       mk("queue", "Jobs wait in a queue.", "hàng đợi"),
       mk("mutex", "Lock the mutex first.", "khóa"),
@@ -393,3 +399,39 @@ describe("prepareSentenceBuilder", () => {
     ).toBeNull();
   });
 });
+
+describe("word mastery & unmastered limit helpers", () => {
+  it("determines whether a word is known (stability or interval >= 7 days)", () => {
+    const brandNew = makeWord("alpha", { srs: { reps: 0, state: 0, stability: 0, interval: 0 } });
+    const learning = makeWord("beta", { srs: { reps: 2, state: 1, stability: 3, interval: 3 } });
+    const earlyReview = makeWord("gamma", { srs: { reps: 3, state: 2, stability: 5, interval: 5 } });
+    const knownFSRS = makeWord("delta", { srs: { reps: 4, state: 2, stability: 7.5, interval: 7 } });
+    const knownInterval = makeWord("epsilon", { srs: { reps: 3, state: 2, stability: 4, interval: 8 } });
+
+    expect(isWordKnown(brandNew)).toBe(false);
+    expect(isWordKnown(learning)).toBe(false);
+    expect(isWordKnown(earlyReview)).toBe(false);
+    expect(isWordKnown(knownFSRS)).toBe(true);
+    expect(isWordKnown(knownInterval)).toBe(true);
+  });
+
+  it("filters studied words and unmastered words correctly", () => {
+    const unreadCatalog = makeWord("cat1", { catalog_id: "c1", srs: { reps: 0, state: 0, last_review: null } });
+    const introCatalog = makeWord("cat2", { catalog_id: "c2", srs: { reps: 0, state: 0, last_review: new Date().toISOString() } });
+    const userAdded = makeWord("user1", { catalog_id: null, srs: { reps: 0, state: 0, last_review: null } });
+    const knownWord = makeWord("known1", { srs: { reps: 5, state: 2, stability: 12 } });
+
+    const words = [unreadCatalog, introCatalog, userAdded, knownWord];
+    const studied = getStudiedWords(words);
+    expect(studied.map((w) => w.id)).toEqual(["cat2", "user1", "known1"]);
+
+    const unmastered = getUnmasteredWords(words);
+    expect(unmastered.map((w) => w.id)).toEqual(["cat2", "user1"]);
+  });
+
+  it("verifies MAX_UNMASTERED_WORDS constant is set to 20", () => {
+    expect(MAX_UNMASTERED_WORDS).toBe(20);
+    expect(KNOWN_WORD_MIN_STABILITY).toBe(7);
+  });
+});
+

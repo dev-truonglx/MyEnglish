@@ -6,8 +6,8 @@
 import { Rating, type Grade } from "ts-fsrs";
 import { getDatabase } from "./db";
 import { getGrammarScheduler, srsRowToCard } from "./srs";
-import { normalizeTypedText } from "./smartReview";
 import type { MistakeCategory } from "./ai";
+import { BOOK_CHAPTERS, getAllBookChapters, getKnownLessonIds } from "./grammarBook";
 
 export interface Mistake {
   id: string;
@@ -32,7 +32,7 @@ export interface Mistake {
   learning_steps: number;
 }
 
-export type MistakeSource = "free_writing" | "standup";
+export type MistakeSource = "free_writing" | "standup" | "grammar";
 
 export interface NewMistake {
   wrong: string;
@@ -54,17 +54,110 @@ export const MISTAKE_CATEGORY_LABEL: Record<MistakeCategory, string> = {
   other: "Khác",
 };
 
-/** Grammar lesson that covers a category, when the app has one (ids from src/data/grammarData.ts) */
-export const CATEGORY_LESSON: Partial<Record<MistakeCategory, { id: string; title: string }>> = {
-  article: { id: "a1-nouns-articles", title: "Mạo từ" },
-  tense: { id: "a1-past-simple", title: "Quá khứ đơn" },
-  agreement: { id: "a1-present-simple", title: "Hiện tại đơn" },
+/**
+ * Grammar lesson that covers a category, looked up in the imported book (lesson ids are the import's own):
+ * the first lesson of the book's chapter on it, or a lesson whose title names it. Nothing found: no link.
+ */
+const CATEGORY_LESSON_RULES: Partial<Record<MistakeCategory, { chapter?: RegExp; lesson: RegExp; label: string }>> = {
+  article: { chapter: /^articles$/i, lesson: /\barticles?\b|mạo từ/i, label: "Mạo từ" },
+  tense: { chapter: /^tenses$/i, lesson: /\btenses?\b|các thì/i, label: "Các thì" },
+  agreement: { lesson: /\bagreement\b|subject[- ]verb|hòa hợp|hoà hợp/i, label: "Hòa hợp chủ vị" },
+  preposition: { chapter: /^prepositions$/i, lesson: /\bprepositions?\b|giới từ/i, label: "Giới từ" },
+  word_form: { chapter: /^word formations and word forms$/i, lesson: /\bword forms?\b|dạng từ/i, label: "Dạng từ" },
 };
+
+type CategoryBookLesson = { id: string; title: string; titleVn: string; chapterId: string };
+let categoryBook: { key: string; lessons: CategoryBookLesson[] } | null = null;
+let categoryBookLoading: Promise<void> | null = null;
+
+/** The book's lessons with their titles and chapters, read again when the imported lesson list changed */
+function refreshCategoryBook(): Promise<void> {
+  if (categoryBook && categoryBook.key === getKnownLessonIds().join("|")) return Promise.resolve();
+  if (!categoryBookLoading) {
+    categoryBookLoading = getAllBookChapters()
+      .then((chapters) => {
+        categoryBook = {
+          key: getKnownLessonIds().join("|"),
+          lessons: chapters.flatMap((c) =>
+            (c.lessons || []).map((l) => ({ id: l.id, title: l.title || "", titleVn: l.titleVn || "", chapterId: c.chapterId }))
+          ),
+        };
+      })
+      .catch(() => {})
+      .finally(() => {
+        categoryBookLoading = null;
+      });
+  }
+  return categoryBookLoading;
+}
+
+function findCategoryLesson(category: MistakeCategory): { id: string; title: string } | undefined {
+  const rule = CATEGORY_LESSON_RULES[category];
+  const known = getKnownLessonIds();
+  if (!rule || known.length === 0) return undefined;
+  const knownSet = new Set(known);
+  const meta = rule.chapter ? BOOK_CHAPTERS.find((c) => rule.chapter!.test(c.title)) : undefined;
+  const chapterId = meta ? `ch${String(meta.order).padStart(2, "0")}` : undefined;
+  const lessons = (categoryBook?.lessons ?? []).filter((l) => knownSet.has(l.id));
+  const found =
+    (chapterId ? lessons.find((l) => l.chapterId === chapterId) : undefined) ??
+    lessons.find((l) => rule.lesson.test(l.title) || rule.lesson.test(l.titleVn));
+  const label = (chId: string) => `${rule.label} (Ch.${chId.replace(/^ch/, "")})`;
+  if (found) return { id: found.id, title: label(found.chapterId) };
+  // Titles not read yet: the chapter's first lesson by its id prefix, when the import used one
+  const byPrefix = chapterId && !categoryBook ? known.find((id) => id.startsWith(`${chapterId}-`)) : undefined;
+  return byPrefix && chapterId ? { id: byPrefix, title: label(chapterId) } : undefined;
+}
+
+/** The lesson for a category, once the book's titles are read (undefined when the book has none on it) */
+export async function getCategoryLesson(category: MistakeCategory): Promise<{ id: string; title: string } | undefined> {
+  await refreshCategoryBook();
+  return findCategoryLesson(category);
+}
+
+/** Synchronous lookup (same as getCategoryLesson): only lessons that exist in the imported book */
+export const CATEGORY_LESSON: Partial<Record<MistakeCategory, { id: string; title: string }>> = Object.defineProperties(
+  {},
+  Object.fromEntries(
+    (Object.keys(CATEGORY_LESSON_RULES) as MistakeCategory[]).map((category) => [
+      category,
+      {
+        enumerable: true,
+        get: () => {
+          void refreshCategoryBook();
+          return findCategoryLesson(category);
+        },
+      },
+    ])
+  )
+);
 
 /** First review of a new mistake: the next day (the correction was just read) */
 const FIRST_REVIEW_DELAY_MS = 20 * 60 * 60 * 1000;
 
-const sameText = (a: string, b: string) => normalizeTypedText(a) === normalizeTypedText(b);
+/**
+ * Mistake text for comparison: case, extra spaces and end punctuation ignored, unambiguous contractions
+ * expanded ("don't" = "do not"), other apostrophes kept (curly -> straight). "its" / "it's" and
+ * "user's" / "users'" are exactly the mistakes the notebook trains.
+ */
+export function normalizeMistakeText(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[‘’ʼ]/g, "'")
+    .replace(/\bwon't\b/g, "will not")
+    .replace(/\bcan't\b/g, "can not")
+    .replace(/\bcannot\b/g, "can not")
+    .replace(/n't\b/g, " not")
+    .replace(/'re\b/g, " are")
+    .replace(/'ll\b/g, " will")
+    .replace(/'ve\b/g, " have")
+    .replace(/\bi'm\b/g, "i am")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\s.,!?;:…]+$/, "");
+}
+
+const sameText = (a: string, b: string) => normalizeMistakeText(a) === normalizeMistakeText(b);
 
 /**
  * Save the corrections of one piece of writing. A mistake already in the notebook is counted again and
@@ -170,9 +263,9 @@ export function mistakePrompt(m: Pick<Mistake, "sentence" | "right_text" | "wron
 }
 
 /**
- * Typed fix -> grade: the same text (case, punctuation, contractions ignored) -> Good, anything else ->
- * Again. No "close enough": a different ending (fix / fixed) is often the very mistake being trained.
- * The review screen lets the learner turn a pure typo into Hard.
+ * Typed fix -> grade: the same text (case, spacing, end punctuation ignored; see normalizeMistakeText) ->
+ * Good, anything else -> Again. No "close enough": a different ending (fix / fixed) or a missing apostrophe
+ * is often the very mistake being trained. The review screen lets the learner turn a pure typo into Hard.
  */
 export function gradeMistakeAnswer(input: string, right: string): Grade {
   return input.trim() && sameText(input, right) ? Rating.Good : Rating.Again;

@@ -8,3 +8,4 @@
  * exercises and memory aids are not affected.
  */
 export const AI_VOCAB_ENABLED = false;
+export const AI_GRAMMAR_ENABLED = false;

@@ -7,6 +7,7 @@
  */
 import type { WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
+import { registerCatalogMeanings } from "./smartReview";
 
 export const STUDY_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 export type StudyLevel = (typeof STUDY_LEVELS)[number];
@@ -182,11 +183,35 @@ export async function searchCatalog(prefix: string, limit = 40): Promise<Catalog
   return rows.map(rowToEntry);
 }
 
+let meaningsLoading: Promise<number> | null = null;
+
+/**
+ * Register the Vietnamese meaning of every deck word for grading (smartReview.registerCatalogMeanings, like
+ * registerWordForms): a typed answer that is another deck word is a different word, not a typo (M12), and
+ * one sharing a meaning with the target is handled like a synonym (M8). Loaded once per window (later calls
+ * share the first load; retried while the deck is not in SQLite yet). Returns how many words were registered.
+ */
+export function loadCatalogMeanings(): Promise<number> {
+  meaningsLoading ??= (async () => {
+    const db = await getDatabase();
+    const rows = await db.select<Array<{ word: string; vn: string }>>(`SELECT word, vn FROM vocab_catalog`);
+    registerCatalogMeanings(rows);
+    if (rows.length === 0) meaningsLoading = null;
+    return rows.length;
+  })().catch((err) => {
+    meaningsLoading = null;
+    throw err;
+  });
+  return meaningsLoading;
+}
+
 /**
  * Plausible wrong options for multiple choice, from the deck: words of the given levels the learner has
  * not met yet (met words are already in the session's pool). Light objects: only what option building reads.
+ * Also registers the deck's meanings for grading (both the main window and the popup load options here).
  */
 export async function loadCatalogDistractors(levels: readonly string[], limit = 1200): Promise<WordDetail[]> {
+  loadCatalogMeanings().catch(() => {});
   if (levels.length === 0) return [];
   const db = await getDatabase();
   const rows = await db.select<Array<{ id: string; word: string; cefr: string; pos: string; vn: string }>>(

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Keyboard, Loader2 } from "lucide-react";
+import { Keyboard, Loader2, BookOpen, CheckCircle2, FileUp } from "lucide-react";
 import type { StudyLevel } from "@/services/vocabCatalog";
 import { defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import {
@@ -11,6 +11,8 @@ import {
   type LevelChoice,
 } from "@/services/onboarding";
 import { ANCHOR_TIMES, type ReminderAnchor } from "@/services/reminderMoments";
+import { getAllBookChapters } from "@/services/grammarBook";
+import GrammarImportDialog from "./grammar/GrammarImportDialog";
 import PlacementTest from "./PlacementTest";
 import { LevelPicker, mixDescription } from "./dashboard/VocabTab";
 
@@ -23,6 +25,12 @@ const LEVELS: Array<{ level: LevelChoice; label: string; hint: string }> = [
   { level: "C1", label: "Thành thạo", hint: "Đọc, viết, họp khá tự nhiên" },
 ];
 
+/** Shortcut for "add a word from anywhere": Cmd on macOS, Ctrl elsewhere */
+const ADD_WORD_KEYS =
+  typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+    ? "⌘⇧E"
+    : "Ctrl+Shift+E";
+
 interface OnboardingFlowProps {
   /** startNow = open the first session right after the words are added */
   onFinish: (startNow: boolean) => void;
@@ -32,8 +40,8 @@ interface OnboardingFlowProps {
  * First run, in the order a teacher would ask:
  *  1. level (quick adaptive test, or pick one; "mất gốc" = A0)
  *  2. vocabulary levels: the Oxford deck from A1, mixed with the next levels up to the learner's own
- *  3. minutes per day and WHEN to study (a fixed moment of the day builds the habit better than reminders
- *     every N minutes)
+ *  3. grammar: the learner's own grammar book, imported from JSON files (optional, can be done later)
+ *  4. minutes per day and WHEN to study
  * then the first session right away.
  */
 export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
@@ -42,6 +50,9 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const [level, setLevel] = useState<LevelChoice | null>(null);
   const [placementOpen, setPlacementOpen] = useState(false);
   const [placementDone, setPlacementDone] = useState(false);
+  const [grammarModalOpen, setGrammarModalOpen] = useState(false);
+  const [grammarStatus, setGrammarStatus] = useState<string | null>(null);
+  const [grammarSuccess, setGrammarSuccess] = useState(false);
   const [minutes, setMinutes] = useState<DailyMinutes>(10);
   const [reminders, setReminders] = useState(true);
   const [anchors, setAnchors] = useState<ReminderAnchor[]>(["after_lunch"]);
@@ -56,6 +67,18 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
     // Up to the learner's own level (A0 = A1): words they may know are skipped with "Đã biết"
     setStudyLevelsState(defaultStudyLevelsFor(level === "A0" ? "A1" : level));
     setStep(2);
+  };
+
+  // After an import: say how much of the book is now in the app
+  const handleGrammarImported = async () => {
+    setGrammarSuccess(true);
+    try {
+      const chapters = await getAllBookChapters();
+      const lessons = chapters.reduce((n, c) => n + (c.lessons?.length ?? 0), 0);
+      setGrammarStatus(`Đã có ${chapters.length} chương, ${lessons} bài ngữ pháp trong app.`);
+    } catch {
+      setGrammarStatus("Đã nhập dữ liệu sách ngữ pháp.");
+    }
   };
 
   const finish = async (startNow: boolean) => {
@@ -77,6 +100,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const skipAll = async () => {
     // Defaults: A1 words, 10 minutes a day
     setStudyLevels(["A1"]);
+    applyDailyPlan(10, reminders, { anchors, transitions });
     await topUpNewWords().catch(() => {});
     markOnboardingDone();
     onFinish(false);
@@ -87,13 +111,13 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            {[1, 2, 3].map((s) => (
+            {[1, 2, 3, 4].map((s) => (
               <span
                 key={s}
                 className={`h-1.5 rounded-full transition-all ${s === step ? "w-8 bg-cyan-500" : s < step ? "w-4 bg-cyan-300 dark:bg-cyan-700" : "w-4 bg-slate-200 dark:bg-zinc-700"}`}
               />
             ))}
-            <span className="ml-2 text-xs text-slate-500 dark:text-zinc-500">Bước {step}/3</span>
+            <span className="ml-2 text-xs text-slate-500 dark:text-zinc-500">Bước {step}/4</span>
           </div>
           <button onClick={skipAll} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
             Bỏ qua phần thiết lập
@@ -180,6 +204,78 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
         {step === 3 && (
           <div className="space-y-4">
             <div className="space-y-1">
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Ngữ pháp theo sách của bạn</h2>
+              <p className="text-sm text-slate-500 dark:text-zinc-400">
+                Dữ liệu ngữ pháp lấy từ chính cuốn sách của bạn: chuyển các chương sang file JSON (prompt có sẵn trong tab Ngữ pháp), rồi nhập vào đây. File chỉ lưu trên máy này. Chưa có thì để sau cũng được.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={() => setGrammarModalOpen(true)}
+                className="w-full p-4 rounded-xl border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-500/10 text-left flex items-start gap-3.5 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 transition-colors"
+              >
+                <div className="p-2 rounded-lg bg-cyan-600 text-white shrink-0">
+                  <FileUp className="w-5 h-5" />
+                </div>
+                <div className="min-w-0">
+                  <span className="block text-sm font-semibold text-cyan-900 dark:text-cyan-200">
+                    {grammarSuccess ? "Nhập thêm file" : "Nhập dữ liệu sách"}
+                  </span>
+                  <span className="block text-xs text-cyan-700/80 dark:text-cyan-300/80 mt-0.5">
+                    Chọn các file .json đã chuyển từ sách; app kiểm tra rồi mới nhập
+                  </span>
+                </div>
+              </button>
+
+              {grammarStatus && (
+                <div
+                  className={`flex items-center gap-2 p-3 rounded-xl text-xs ${
+                    grammarSuccess
+                      ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
+                      : "bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
+                  }`}
+                >
+                  {grammarSuccess ? (
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  ) : (
+                    <BookOpen className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                  )}
+                  <span>{grammarStatus}</span>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center justify-between pt-1">
+              <button
+                onClick={() => setStep(2)}
+                className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+              >
+                Quay lại
+              </button>
+              <div className="flex items-center gap-3">
+                {!grammarSuccess && (
+                  <button
+                    onClick={() => setStep(4)}
+                    className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                  >
+                    Để sau
+                  </button>
+                )}
+                <button
+                  onClick={() => setStep(4)}
+                  className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold"
+                >
+                  Tiếp
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {step === 4 && (
+          <div className="space-y-4">
+            <div className="space-y-1">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Mỗi ngày bạn học bao lâu, vào lúc nào?</h2>
               <p className="text-sm text-slate-500 dark:text-zinc-400">
                 Ít mà đều đặn nhớ lâu hơn học dồn. Gắn việc học vào một lúc cố định trong ngày giúp tạo thói quen nhanh nhất.
@@ -227,12 +323,12 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/50 text-xs text-slate-600 dark:text-zinc-400">
               <Keyboard className="w-4 h-4 shrink-0 text-slate-400" />
               <span>
-                Gặp từ lạ khi làm việc? Nhấn <b>⌘⇧E</b> và gõ từ đó: nếu có trong 5.000 từ Oxford, nó sẽ là từ mới tiếp theo bạn học.
+                Gặp từ lạ khi làm việc? Nhấn <b>{ADD_WORD_KEYS}</b> và gõ từ đó: nếu có trong 5.000 từ Oxford, nó sẽ là từ mới tiếp theo bạn học.
               </span>
             </div>
             {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex items-center justify-between pt-1">
-              <button onClick={() => setStep(2)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+              <button onClick={() => setStep(3)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                 Quay lại
               </button>
               <div className="flex items-center gap-3">
@@ -261,6 +357,14 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             setLevel(choice);
             setPlacementDone(true);
           }}
+        />
+      )}
+
+      {grammarModalOpen && (
+        <GrammarImportDialog
+          isOpen={grammarModalOpen}
+          onClose={() => setGrammarModalOpen(false)}
+          onImportComplete={() => void handleGrammarImported()}
         />
       )}
     </div>

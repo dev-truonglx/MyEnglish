@@ -77,22 +77,91 @@ export const MIN_GAP_AFTER_REMINDER_MS = 20 * 60 * 1000;
 /**
  * The transition between two readings of the computer's state (null = nothing worth a reminder).
  * `gapMs` = time since the previous reading (a long gap means the computer was asleep).
+ * `firstToday` = first reading of the day (defaults to "no previous reading": the app just started).
+ * "after_fullscreen" here is the raw transition; FullscreenExitTracker decides whether it counts (N11).
  */
 export function detectMoment(
   prev: PopupBlockers | null,
   cur: PopupBlockers | null,
   gapMs: number,
-  opts: { hour: number; studiedToday: boolean }
+  opts: { hour: number; studiedToday: boolean; firstToday?: boolean }
 ): ReminderMoment | null {
   if (!cur) return null;
   if (prev?.screen_sharing_app && !cur.screen_sharing_app) return "after_share";
   if (prev?.fullscreen_app && !cur.fullscreen_app && !cur.screen_sharing_app) return "after_fullscreen";
   const activeNow = cur.idle_seconds != null && cur.idle_seconds < BACK_ACTIVE_SECONDS;
+  const morning = !opts.studiedToday && opts.hour >= 5 && opts.hour < 11;
+  // Launched at login / autostart: nothing to compare with, but the learner has just sat down (N12).
+  // Where idle time can't be measured (not macOS), assume they are there.
+  const firstToday = opts.firstToday ?? prev === null;
+  if (firstToday && morning && (activeNow || cur.idle_seconds == null) && !cur.fullscreen_app && !cur.screen_sharing_app) {
+    return "morning";
+  }
   const wasAway = (prev?.idle_seconds != null && prev.idle_seconds >= AWAY_SECONDS) || gapMs >= AWAY_SECONDS * 1000;
   if (prev !== null && activeNow && wasAway) {
-    return !opts.studiedToday && opts.hour >= 5 && opts.hour < 11 ? "morning" : "back";
+    return morning ? "morning" : "back";
   }
   return null;
+}
+
+/** A full-screen app must have been in front this long before leaving it counts as work done (N11) */
+export const FULLSCREEN_MIN_STRETCH_MS = 20 * 60 * 1000;
+/** ...and stay out of full screen for this many readings after leaving it (a quick Cmd+Tab is not "done") */
+export const FULLSCREEN_EXIT_CONFIRM_READINGS = 2;
+/** At most one "after_fullscreen" moment this often */
+export const FULLSCREEN_MOMENT_GAP_MS = 60 * 60 * 1000;
+
+/**
+ * Tells a finished stretch of full-screen work from a Cmd+Tab out of a full-screen IDE (N11): the app
+ * must have been in front for FULLSCREEN_MIN_STRETCH_MS, full screen must not come back within the next
+ * FULLSCREEN_EXIT_CONFIRM_READINGS readings, and the moment fires at most once per FULLSCREEN_MOMENT_GAP_MS.
+ * A quick return to full screen keeps the same stretch going.
+ */
+export class FullscreenExitTracker {
+  /** Start of the current full-screen stretch (null = not in full screen) */
+  private since: number | null = null;
+  /** First reading out of full screen, while waiting to see whether it comes back */
+  private exitAt: number | null = null;
+  private readingsOut = 0;
+  private lastReadingAt: number | null = null;
+  private lastMomentAt = Number.NEGATIVE_INFINITY;
+
+  /** Feed one reading; true when a long full-screen stretch has just ended for good */
+  observe(b: PopupBlockers | null, now: number): boolean {
+    if (!b) return false;
+    // A long gap between readings (asleep, worker stopped): the stretch is not known to be continuous
+    if (this.lastReadingAt !== null && now - this.lastReadingAt > AWAY_SECONDS * 1000) this.reset();
+    this.lastReadingAt = now;
+
+    if (b.fullscreen_app) {
+      this.exitAt = null;
+      this.readingsOut = 0;
+      if (this.since === null) this.since = now;
+      return false;
+    }
+    if (this.since === null) return false;
+    if (this.exitAt === null) {
+      this.exitAt = now;
+      return false;
+    }
+    if (++this.readingsOut < FULLSCREEN_EXIT_CONFIRM_READINGS) return false;
+
+    const stretchMs = this.exitAt - this.since;
+    this.since = null;
+    this.exitAt = null;
+    this.readingsOut = 0;
+    // Still sharing the screen: "after_share" will come when the share ends
+    if (b.screen_sharing_app || stretchMs < FULLSCREEN_MIN_STRETCH_MS) return false;
+    if (now - this.lastMomentAt < FULLSCREEN_MOMENT_GAP_MS) return false;
+    this.lastMomentAt = now;
+    return true;
+  }
+
+  private reset() {
+    this.since = null;
+    this.exitAt = null;
+    this.readingsOut = 0;
+  }
 }
 
 // ─── Hours to avoid ──────────────────────────────────────────────────────────

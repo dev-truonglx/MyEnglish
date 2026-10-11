@@ -10,6 +10,8 @@ import {
 
 interface HeatmapProps {
   words: WordDetail[];
+  /** Words still due today, as the dashboard counts them: lets "every due word reviewed" count as the goal */
+  dueRemaining?: number | null;
 }
 
 interface DayData {
@@ -18,7 +20,7 @@ interface DayData {
   formattedDate: string;
 }
 
-export default function Heatmap({ words }: HeatmapProps) {
+export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
   const [logsVersion, setLogsVersion] = useState(0);
   const [isEditingGoal, setIsEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState("10");
@@ -30,29 +32,21 @@ export default function Heatmap({ words }: HeatmapProps) {
   }, []);
 
   const streakStats = useMemo(() => {
-    return calculateStreakAndGoal(words);
-  }, [words, logsVersion]);
+    return calculateStreakAndGoal(words, dueRemaining);
+  }, [words, logsVersion, dueRemaining]);
 
-  // Compute activity per day (words created + study sessions)
+  // Days a streak freeze covered (missed days that kept the streak alive)
+  const frozenDays = useMemo(() => new Set(streakStats.frozenDates), [streakStats.frozenDates]);
+
+  // Compute activity per day (study sessions)
   const { weeks, totalActivity, activeDays } = useMemo(() => {
     const activityMap = new Map<string, number>();
 
-    // 1. Study logs from localStorage
+    // Study logs from localStorage
     const logs = getActivityLogs();
     for (const [dateStr, count] of Object.entries(logs)) {
       activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + count);
     }
-
-    // 2. Words created in SQLite
-    words.forEach((w) => {
-      if (w.created_at) {
-        try {
-          const d = new Date(w.created_at);
-          const dateStr = getLocalDateString(d);
-          activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + 1);
-        } catch {}
-      }
-    });
 
     // Generate past 20 weeks (140 days) ending today
     const days: DayData[] = [];
@@ -104,14 +98,15 @@ export default function Heatmap({ words }: HeatmapProps) {
       totalActivity: sumTotal,
       activeDays: uniqueActive,
     };
-  }, [words, logsVersion]);
+  }, [logsVersion]);
 
-  // Color intensity helper (clean contrast in both light and dark modes)
-  const getColorClass = (count: number) => {
+  // Color intensity follows the daily goal: reaching it is the darkest step (clean contrast in both modes)
+  const getColorClass = (count: number, goal: number) => {
     if (count === 0) return "bg-slate-100 dark:bg-zinc-900 border-slate-200 dark:border-zinc-800/80";
-    if (count === 1) return "bg-emerald-100 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300";
-    if (count === 2) return "bg-emerald-300 dark:bg-emerald-800 border-emerald-400 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200";
-    if (count <= 4) return "bg-emerald-500 dark:bg-emerald-600 border-emerald-600 dark:border-emerald-500 text-white";
+    const share = count / Math.max(1, goal);
+    if (share < 0.25) return "bg-emerald-100 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300";
+    if (share < 0.5) return "bg-emerald-300 dark:bg-emerald-800 border-emerald-400 dark:border-emerald-700 text-emerald-950 dark:text-emerald-200";
+    if (share < 1) return "bg-emerald-500 dark:bg-emerald-600 border-emerald-600 dark:border-emerald-500 text-white";
     return "bg-emerald-600 dark:bg-emerald-400 border-emerald-700 dark:border-emerald-300 text-white dark:text-zinc-950 font-bold";
   };
 
@@ -192,7 +187,7 @@ export default function Heatmap({ words }: HeatmapProps) {
 
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-slate-500 dark:text-zinc-400">
-              <span className="text-slate-900 dark:text-white font-bold">{streakStats.todayCount}</span> / {streakStats.dailyGoal} từ
+              <span className="text-slate-900 dark:text-white font-bold">{streakStats.todayCount}</span> / {streakStats.dailyGoal} câu
             </span>
             <button
               onClick={() => {
@@ -222,7 +217,7 @@ export default function Heatmap({ words }: HeatmapProps) {
         {/* Goal Edit Inline Form */}
         {isEditingGoal && (
           <form onSubmit={handleSaveGoal} className="pt-2 flex items-center gap-2 text-xs">
-            <span className="text-slate-600 dark:text-zinc-400">Đặt mục tiêu số từ/ngày:</span>
+            <span className="text-slate-600 dark:text-zinc-400">Đặt mục tiêu số câu/ngày:</span>
             <input
               type="number"
               min="1"
@@ -261,7 +256,12 @@ export default function Heatmap({ words }: HeatmapProps) {
               <span className="w-2.5 h-2.5 rounded-sm bg-emerald-500 dark:bg-emerald-600 border border-emerald-600 dark:border-emerald-500" />
               <span className="w-2.5 h-2.5 rounded-sm bg-emerald-600 dark:bg-emerald-400 border border-emerald-700 dark:border-emerald-300" />
             </div>
-            <span>Nhiều</span>
+            <span>Đạt mục tiêu</span>
+            {frozenDays.size > 0 && (
+              <span className="ml-2" title="Ngày này dùng 1 lượt đóng băng để giữ chuỗi">
+                🧊 đóng băng
+              </span>
+            )}
           </div>
         </div>
 
@@ -279,15 +279,30 @@ export default function Heatmap({ words }: HeatmapProps) {
             {/* Weeks columns */}
             {weeks.map((week, wIdx) => (
               <div key={wIdx} className="flex flex-col gap-1.5">
-                {week.map((day, dIdx) => (
-                  <div
-                    key={dIdx}
-                    title={`${day.count} hoạt động vào ngày ${day.formattedDate}`}
-                    className={`w-3 h-3 rounded-sm border transition-transform hover:scale-125 cursor-pointer ${getColorClass(
-                      day.count
-                    )}`}
-                  />
-                ))}
+                {week.map((day, dIdx) => {
+                  const frozen = frozenDays.has(day.dateStr);
+                  return (
+                    <div
+                      key={dIdx}
+                      title={
+                        frozen
+                          ? `${day.formattedDate}: Ngày này dùng 1 lượt đóng băng để giữ chuỗi`
+                          : `${day.count} câu vào ngày ${day.formattedDate}`
+                      }
+                      className={`w-3 h-3 rounded-sm border transition-transform hover:scale-125 cursor-pointer ${
+                        frozen
+                          ? "bg-sky-100 dark:bg-sky-950 border-sky-300 dark:border-sky-700"
+                          : getColorClass(day.count, streakStats.dailyGoal)
+                      }`}
+                    >
+                      {frozen && (
+                        <span className="flex h-full w-full items-center justify-center text-[8px] leading-none select-none" aria-hidden="true">
+                          🧊
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>

@@ -44,6 +44,8 @@ export default function MeaningMatchExercise({
   const [wrongFlash, setWrongFlash] = useState<{ wordId: string; meaningId: string } | null>(null);
   const [targetMistakes, setTargetMistakes] = useState(0);
   const [done, setDone] = useState(false);
+  // The target's pair was the last one left: found by elimination, so not a clean recall
+  const [byElimination, setByElimination] = useState(false);
 
   const onFallbackRef = useRef(onFallback);
   useEffect(() => {
@@ -72,11 +74,15 @@ export default function MeaningMatchExercise({
       setSelectedWordId(null);
       if (next.size === pairs.length) {
         setDone(true);
+        // If the target's pair is the one made last, every other pair was already made: found by elimination
+        const eliminated = wordId === word.id;
+        setByElimination(eliminated);
         onSpeak(word.word);
-        // The exercise reports Good; the session derives the real grade from the mistakes on the target
+        // Hard with 0 wrong attempts is read by the session as a hint, so an eliminated target grades Hard.
+        // The session derives the real grade from the mistakes on the target
         // Reported at once: the session keeps this card on screen until the learner continues
         if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-        onComplete(targetMistakes === 0, targetMistakes, Rating.Good);
+        onComplete(targetMistakes === 0 && !eliminated, targetMistakes, eliminated ? Rating.Hard : Rating.Good);
       }
       return;
     }
@@ -166,7 +172,11 @@ export default function MeaningMatchExercise({
         {done ? (
           <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
             <CheckCircle2 className="w-4 h-4" />
-            {targetMistakes === 0 ? `Chính xác! "${word.word}" đã được nối đúng ngay.` : `Đã nối xong. "${word.word}" cần ôn lại sớm.`}
+            {targetMistakes === 0 && !byElimination
+              ? `Chính xác! "${word.word}" đã được nối đúng ngay.`
+              : targetMistakes === 0
+              ? `Đã nối xong. "${word.word}" là cặp cuối còn lại nên nối theo loại trừ, chưa tính là nhớ chắc.`
+              : `Đã nối xong. "${word.word}" cần ôn lại sớm.`}
           </span>
         ) : (
           <span className="text-slate-400 dark:text-zinc-500">

@@ -89,25 +89,25 @@ describe("#3 popup answers are graded like flashcards", () => {
 });
 
 describe("#6 ignored reminders back off", () => {
-  it("doubles the snooze, capped by the reminder interval", () => {
-    expect([0, 1, 2, 3, 4].map((n) => ignoredNudgeSnoozeMinutes(n, 10, 60))).toEqual([10, 20, 40, 60, 60]);
-    expect(ignoredNudgeSnoozeMinutes(5, 10, 0)).toBe(10); // reminders disabled: plain snooze
-    expect(ignoredNudgeSnoozeMinutes(50, 5, 30)).toBe(30); // no overflow on long streaks
+  it("doubles the wait from the reminder interval, and stays under 4 hours", () => {
+    expect([0, 1, 2, 3, 4].map((n) => ignoredNudgeSnoozeMinutes(n, 10, 60))).toEqual([60, 120, 240, 240, 240]);
+    expect([0, 1, 2, 3, 4].map((n) => ignoredNudgeSnoozeMinutes(n, 10, 0))).toEqual([10, 20, 40, 80, 80]); // reminders disabled: the snooze is the base
+    expect(ignoredNudgeSnoozeMinutes(5, 10, 120)).toBe(240); // no overflow on long streaks
   });
 
   it("grows while ignored and resets once the user answers", () => {
     saveReminderSettings({ snoozeMinutes: 10, intervalMinutes: 30 });
     const t0 = Date.now();
-    expect(snoozeIgnoredNudge()).toBe(10);
-    expect(snoozeIgnoredNudge()).toBe(20);
     expect(snoozeIgnoredNudge()).toBe(30);
+    expect(snoozeIgnoredNudge()).toBe(60);
+    expect(snoozeIgnoredNudge()).toBe(120);
     expect(getIgnoredNudgeCount()).toBe(3);
     const until = getReminderSettings().snoozedUntil!;
-    expect(until - t0).toBeGreaterThanOrEqual(30 * 60 * 1000);
-    expect(until - t0).toBeLessThan(31 * 60 * 1000);
+    expect(until - t0).toBeGreaterThanOrEqual(120 * 60 * 1000);
+    expect(until - t0).toBeLessThan(121 * 60 * 1000);
 
     resetIgnoredNudges();
     expect(getIgnoredNudgeCount()).toBe(0);
-    expect(snoozeIgnoredNudge()).toBe(10);
+    expect(snoozeIgnoredNudge()).toBe(30);
   });
 });

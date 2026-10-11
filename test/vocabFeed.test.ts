@@ -158,7 +158,8 @@ describe("words the learner already knows", () => {
     expect(await recorder.markWordKnown(first.id)).toBe(false); // already scheduled
     const known = (await db.getWordsByIds([first.id]))[0];
     expect(known.srs.state).toBe(2);
-    expect(known.srs.stability).toBeGreaterThan(5);
+    // Stability = the wait before its first check, spread over 4-21 days by word id (P8)
+    expect(known.srs.stability).toBeGreaterThanOrEqual(4);
     expect(known.srsProduction ?? null).toBeNull();
     expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 0, production: 0 });
 

@@ -22,6 +22,7 @@ import {
   Sunrise,
   AudioLines,
   Layers,
+  Dumbbell,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PipelineItem } from "@/services/pipeline";
@@ -32,7 +33,11 @@ import { getXPState, type XPState } from "@/services/smartReview";
 import { getDueGrammarLessons } from "@/services/grammarService";
 import { useWordsStore } from "@/stores/wordsStore";
 import { AI_VOCAB_ENABLED } from "@/services/features";
-import type { DashboardTab, LibraryStats } from "./shared";
+import { SIMPLE_NAV_GROUPS, type DashboardTab, type LibraryStats, type NavGroupId } from "./shared";
+
+/** The Quick Input shortcut as the learner's keyboard shows it */
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const QUICK_INPUT_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
 
 interface SidebarProps {
   activeTab: DashboardTab;
@@ -42,6 +47,8 @@ interface SidebarProps {
   streakStats: ReturnType<typeof calculateStreakAndGoal>;
   libraryStats: LibraryStats;
   onOpenQuickInputPreview?: () => void;
+  /** Simple mode: five entries (Hôm nay · Từ vựng · Ngữ pháp · Luyện thêm · Cài đặt) instead of ten tabs */
+  simpleMode?: boolean;
 }
 
 /** LEFT SIDEBAR: logo + update badge, navigation, learning stats, Quick Input & theme switcher */
@@ -53,6 +60,7 @@ export default function Sidebar({
   streakStats,
   libraryStats,
   onOpenQuickInputPreview,
+  simpleMode = false,
 }: SidebarProps) {
   const words = useWordsStore((s) => s.words);
   const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
@@ -118,7 +126,20 @@ export default function Sidebar({
     { tab: "today", label: "Hôm nay", icon: Sunrise, iconClass: "text-amber-500" },
     { tab: "review", label: "Ôn tập", icon: Flame, iconClass: "text-orange-400", badge: countBadge(dueCount, true) },
     // Words met so far (the words waiting to be introduced are not the learner's yet)
-    { tab: "library", label: "Sổ từ", icon: BookOpen, badge: countBadge(words.filter((w) => (w.srs?.reps ?? 0) > 0).length) },
+    {
+      tab: "library",
+      label: "Sổ từ",
+      icon: BookOpen,
+      badge: countBadge(
+        words.filter(
+          (w) =>
+            !w.catalog_id ||
+            (w.srs?.reps ?? 0) > 0 ||
+            (w.srs?.state ?? 0) > 0 ||
+            Boolean(w.srs?.last_review)
+        ).length
+      ),
+    },
     { tab: "grammar", label: "Ngữ pháp", icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     { tab: "pronunciation", label: "Phát âm", icon: AudioLines, iconClass: "text-violet-500" },
     { tab: "reading", label: "Đọc", icon: BookOpenText },
@@ -137,6 +158,34 @@ export default function Sidebar({
     { tab: "guide", label: "Cài đặt", icon: Terminal, iconClass: "text-cyan-500" },
   ];
 
+  // Simple mode: one entry per group of tabs; an entry opens its first tab
+  const groupLook: Record<NavGroupId, { icon: typeof BookOpen; iconClass?: string; badge?: ReactNode }> = {
+    today: { icon: Sunrise, iconClass: "text-amber-500" },
+    vocab: { icon: BookOpen, iconClass: "text-orange-400", badge: countBadge(dueCount, true) },
+    grammar: { icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
+    practice: { icon: Dumbbell, iconClass: "text-violet-500" },
+    settings: { icon: Terminal, iconClass: "text-cyan-500" },
+  };
+  const visibleItems: Array<{ key: string; label: string; icon: typeof BookOpen; iconClass?: string; badge?: ReactNode; active: boolean; onClick: () => void }> =
+    simpleMode
+      ? SIMPLE_NAV_GROUPS.map((g) => {
+          const active = g.tabs.some((t) => t.tab === activeTab);
+          return {
+            key: g.id,
+            label: g.label,
+            ...groupLook[g.id],
+            active,
+            // Already on one of its tabs: stay there
+            onClick: () => !active && setActiveTab(g.tabs[0].tab),
+          };
+        })
+      : navItems.map((item) => ({ ...item, key: item.tab, active: activeTab === item.tab, onClick: () => setActiveTab(item.tab) }));
+
+  const goalText =
+    streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
+      ? "Đã ôn hết ✓"
+      : `${streakStats.todayCount}/${streakStats.dailyGoal} câu`;
+
   const handleToggleQuickInput = async () => {
     try {
       await invoke("toggle_quick_input");
@@ -148,10 +197,9 @@ export default function Sidebar({
   };
 
   return (
-    <aside className="w-64 border-r border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/50 flex flex-col justify-between shrink-0 select-none">
-      {/* Top Header */}
-      <div className="p-4 space-y-6">
-        {/* Logo & App title */}
+    <aside className="w-64 min-h-0 border-r border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/50 flex flex-col shrink-0 select-none">
+      {/* Logo & App title (always visible) */}
+      <div className="px-4 pt-4 pb-3 shrink-0">
         <div className="flex items-center gap-3">
           <div className="w-9 h-9 shrink-0 rounded-xl bg-gradient-to-tr from-cyan-500 via-blue-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-cyan-500/20 text-white font-bold">
             <Code2 className="w-5 h-5 text-white" />
@@ -240,7 +288,10 @@ export default function Sidebar({
             <p className="text-[11px] text-slate-500 dark:text-zinc-400">Tiếng Anh cho dân IT</p>
           </div>
         </div>
+      </div>
 
+      {/* Navigation + stats: scrolls when the window is short, so nothing below is ever cut off */}
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 pb-3 space-y-3">
         {/* In-App Auto-Update Widget */}
         {!updateDismissed &&
           (updateStatus === "available" ||
@@ -320,14 +371,14 @@ export default function Sidebar({
 
         {/* Navigation Links: Vietnamese labels, today first */}
         <nav className="space-y-1">
-          {navItems.map((item) => {
+          {visibleItems.map((item) => {
             const Icon = item.icon;
-            const active = activeTab === item.tab;
             return (
               <button
-                key={item.tab}
-                onClick={() => setActiveTab(item.tab)}
-                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${active
+                key={item.key}
+                onClick={item.onClick}
+                aria-current={item.active ? "page" : undefined}
+                className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium transition-all ${item.active
                   ? "bg-cyan-50 dark:bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border border-cyan-200 dark:border-cyan-500/20 shadow-sm"
                   : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/50"
                   }`}
@@ -342,147 +393,98 @@ export default function Sidebar({
           })}
         </nav>
 
-        {/* Quick Learning Stats Widget */}
-        <div className="rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 p-3.5 space-y-2.5 shadow-sm">
-          <div className="flex items-center justify-between text-xs font-medium text-slate-800 dark:text-zinc-300">
-            <span className="flex items-center gap-1.5">
-              <Flame className="w-3.5 h-3.5 text-orange-400" />
-              <span>Chuỗi & hôm nay</span>
-            </span>
-            <span className="font-mono text-orange-600 dark:text-orange-400 text-xs font-bold flex items-center gap-1.5">
-              <span>🔥 {streakStats.currentStreak} ngày</span>
+        {/* Compact stats: streak + today's goal, then the two word tiers (click: Tiến độ) */}
+        <button
+          type="button"
+          onClick={() => setActiveTab("analytics")}
+          title={`${streakStats.todayCount > 0 ? "Hôm nay đã giữ chuỗi ✓" : "Hôm nay chưa học: chỉ cần 1 câu là giữ được chuỗi"}${
+            streakStats.freezesAvailable > 0
+              ? ` • ${streakStats.freezesAvailable} lượt giữ chuỗi: nếu lỡ 1 ngày, chuỗi vẫn được giữ`
+              : ""
+          } • Bấm để xem tiến độ`}
+          className="w-full text-left rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 hover:bg-slate-50 dark:hover:bg-zinc-800/50 px-3 py-2.5 space-y-1.5 shadow-sm transition-colors"
+        >
+          <div className="flex items-center justify-between gap-2 text-xs">
+            <span className="font-mono font-bold text-orange-600 dark:text-orange-400 whitespace-nowrap">
+              🔥 {streakStats.currentStreak} ngày
+              {streakStats.todayCount > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">✓</span>}
               {streakStats.freezesAvailable > 0 && (
-                <span
-                  className="text-sky-600 dark:text-sky-400"
-                  title={`${streakStats.freezesAvailable} lượt giữ chuỗi: nếu lỡ 1 ngày, chuỗi vẫn được giữ. Học 7 ngày liên tục để nhận thêm (tối đa 2).`}
-                >
-                  🧊{streakStats.freezesAvailable}
-                </span>
+                <span className="ml-1 text-sky-600 dark:text-sky-400">🧊{streakStats.freezesAvailable}</span>
               )}
             </span>
+            <span
+              className={`font-mono whitespace-nowrap ${streakStats.goalReached ? "text-emerald-600 dark:text-emerald-400 font-semibold" : "text-slate-600 dark:text-zinc-300"}`}
+            >
+              {goalText}
+            </span>
           </div>
-
-          {/* Minimum day (1 answer keeps the streak) + daily goal */}
-          <div className="space-y-1">
-            <div className="flex items-center justify-between text-[11px] text-slate-600 dark:text-zinc-400">
-              <span>Tối thiểu 1 câu</span>
-              <span className={streakStats.todayCount > 0 ? "text-emerald-600 dark:text-emerald-400 font-semibold" : ""}>
-                {streakStats.todayCount > 0 ? "✓ Đã giữ chuỗi" : "Chưa học hôm nay"}
+          <div className="w-full h-1 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+            <div
+              className={`h-full transition-all duration-300 rounded-full ${streakStats.goalReached ? "bg-emerald-500" : "bg-cyan-500"}`}
+              style={{ width: `${streakStats.goalPercentage}%` }}
+            />
+          </div>
+          <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400">
+            <span className="truncate">
+              Đang học <span className="font-semibold text-slate-800 dark:text-zinc-200">{libraryStats.learningCount}</span>
+              {" · "}
+              Nhớ lâu <span className="font-semibold text-emerald-600 dark:text-emerald-400">{libraryStats.rememberedLongCount}</span>
+            </span>
+            {!simpleMode && (
+              <span className="shrink-0 font-mono text-amber-700 dark:text-amber-300" title={`${xpState.rank} • ${xpState.totalXP} XP`}>
+                {xpState.rankEmoji} Lv.{xpState.level}
               </span>
-            </div>
-            <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-400">
-              <span>Mục tiêu</span>
-              <span>
-                {streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
-                  ? "Đã ôn hết từ đến hạn ✓"
-                  : `${streakStats.todayCount}/${streakStats.dailyGoal} câu`}
-              </span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
-              <div
-                className={`h-full transition-all duration-300 rounded-full ${streakStats.goalReached ? "bg-emerald-500 shadow-sm shadow-emerald-500/50" : "bg-cyan-500"
-                  }`}
-                style={{ width: `${streakStats.goalPercentage}%` }}
-              />
-            </div>
+            )}
           </div>
-
-          {/* XP Level Progress */}
-          <div className="space-y-1 pt-1 border-t border-slate-100 dark:border-zinc-800/50">
-            <div className="flex items-center justify-between text-[10px] font-mono text-slate-500 dark:text-zinc-400">
-              <span className="flex items-center gap-1">
-                <span>{xpState.rankEmoji}</span>
-                <span className="font-semibold text-amber-700 dark:text-amber-300">Lv.{xpState.level} {xpState.rank}</span>
-              </span>
-              <span className="text-amber-600 dark:text-amber-400 font-semibold">{xpState.totalXP} XP</span>
-            </div>
-            <div className="w-full h-1.5 rounded-full bg-amber-200/40 dark:bg-amber-900/30 overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-amber-500 to-yellow-500 rounded-full transition-all duration-500"
-                style={{ width: `${xpState.progressPercent}%` }}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 text-center pt-1">
-            <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-              <div className="text-base font-bold text-slate-900 dark:text-white font-mono">{dueCount}</div>
-              <div className="text-[10px] text-slate-500 dark:text-zinc-400">Cần ôn</div>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-              <div className="text-base font-bold text-emerald-600 dark:text-emerald-400 font-mono">
-                {libraryStats.learnedCount}
-              </div>
-              <div className="text-[10px] text-slate-500 dark:text-zinc-400">Đã thuộc</div>
-            </div>
-            <div className="p-2 rounded-lg bg-slate-50 dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-              <div className={`text-base font-bold font-mono ${libraryStats.leechCount > 0 ? "text-rose-600 dark:text-rose-400" : "text-slate-400 dark:text-zinc-500"}`}>
-                {libraryStats.leechCount}
-              </div>
-              <div className="text-[10px] text-slate-500 dark:text-zinc-400" title="Từ đã quên nhiều lần">Hay quên</div>
-            </div>
-          </div>
-        </div>
+        </button>
       </div>
 
-      {/* Bottom OS Shortcut Tip & Theme Switcher */}
-      <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 space-y-2.5">
+      {/* Quick Input & theme switcher (always visible) */}
+      <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 space-y-2 shrink-0">
         <button
           onClick={handleToggleQuickInput}
-          className="w-full flex items-center justify-between p-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/80 hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors text-left shadow-sm"
+          title="Mở ô nhập nhanh: dùng được cả khi đang ở ứng dụng khác"
+          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/80 hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors text-left shadow-sm"
         >
-          <div>
-            <div className="text-xs font-medium text-slate-800 dark:text-zinc-200">Quick Input</div>
-            <div className="text-[11px] text-slate-500 dark:text-zinc-400">Phím tắt toàn cục</div>
-          </div>
-          <kbd className="px-2 py-1 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
-            ⌘⇧E
+          <span className="text-xs font-medium text-slate-800 dark:text-zinc-200 truncate">Quick Input</span>
+          <kbd className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
+            {QUICK_INPUT_SHORTCUT}
           </kbd>
         </button>
 
-        {/* Theme Selector */}
-        <div className="flex items-center justify-between p-2 rounded-xl bg-white dark:bg-zinc-950/80 border border-slate-200 dark:border-zinc-800 shadow-sm">
-          {/* Segmented Control */}
-          <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800/80">
-            <button
-              type="button"
-              onClick={() => handleThemeChange("light")}
-              title="Giao diện sáng (Light)"
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "light"
-                ? "bg-white text-amber-700 border border-slate-200 shadow-sm"
-                : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
-            >
-              <Sun className="w-3 h-3" />
-              <span>Sáng</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleThemeChange("dark")}
-              title="Giao diện tối (Dark)"
-              className={`flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "dark"
-                ? "bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 shadow-sm"
-                : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
-            >
-              <Moon className="w-3 h-3" />
-              <span>Tối</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleThemeChange("system")}
-              title="Theo hệ thống (System)"
-              className={`flex items-center gap-1 px-1.5 py-1 rounded-md text-[11px] font-medium transition-all ${currentTheme === "system"
-                ? "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm"
-                : "text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
-            >
-              <Laptop className="w-3 h-3" />
-              <span>Hệ thống</span>
-            </button>
-          </div>
+        {/* Theme Selector (segmented control) */}
+        <div role="group" aria-label="Giao diện" className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800/80">
+          {(
+            [
+              { mode: "light", label: "Sáng", title: "Giao diện sáng", icon: Sun, on: "bg-white text-amber-700 border border-slate-200 shadow-sm" },
+              { mode: "dark", label: "Tối", title: "Giao diện tối", icon: Moon, on: "bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 shadow-sm" },
+              {
+                mode: "system",
+                label: "Hệ thống",
+                title: "Theo cài đặt của máy",
+                icon: Laptop,
+                on: "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm",
+              },
+            ] as const
+          ).map((t) => {
+            const Icon = t.icon;
+            return (
+              <button
+                key={t.mode}
+                type="button"
+                onClick={() => handleThemeChange(t.mode)}
+                title={t.title}
+                aria-pressed={currentTheme === t.mode}
+                className={`flex-1 flex items-center justify-center gap-1 px-1 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-all ${currentTheme === t.mode
+                  ? t.on
+                  : "border border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
+                  }`}
+              >
+                <Icon className="w-3 h-3" />
+                <span>{t.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </aside>

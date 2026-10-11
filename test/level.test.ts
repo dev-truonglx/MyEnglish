@@ -70,12 +70,11 @@ describe("assessUserProficiency", () => {
       makeWord(`${cefr ?? "x"}-${i}`, { cefr_level: cefr, srs: reviewSrs(15, 3) })
     );
 
-  async function masterGrammar(level: string) {
-    const { GRAMMAR_LESSONS } = await import("@/data/grammarData");
+  async function masterGrammar(lessonIds: string[]) {
     const g = await import("@/services/grammarService");
-    for (const lesson of GRAMMAR_LESSONS.filter((l) => l.level === level)) {
+    for (const id of lessonIds) {
       await g.saveLessonProgress({
-        lessonId: lesson.id,
+        lessonId: id,
         diagnosticStatus: "passed_first_try",
         score: 100,
         mastery: 100,
@@ -87,17 +86,24 @@ describe("assessUserProficiency", () => {
     }
   }
 
-  it("stays at A1 until A1 grammar AND A1 vocabulary are both done", async () => {
+  it("stays at A1 until A1 vocabulary target is reached", async () => {
     vi.resetModules();
     const { assessUserProficiency } = await import("@/services/userProficiency");
-    // Plenty of A1 words but no grammar yet
-    expect(assessUserProficiency(knownWords(A1_TARGET + 5, "A1")).assessedLevel).toBe("A1");
-
-    await masterGrammar("A1");
-    // Grammar done but only 10 known A1 words (+ tagged words of other levels)
+    // Only 10 known A1 words (+ tagged words of other levels) -> stays A1
     expect(assessUserProficiency([...knownWords(10, "A1"), ...knownWords(20, "B2")]).assessedLevel).toBe("A1");
-    // Both done -> working on A2
+    // Target reached -> working on A2
     expect(assessUserProficiency(knownWords(A1_TARGET, "A1")).assessedLevel).toBe("A2");
+  });
+
+  it("calculates grammarScore based on percentage of selected lessons mastered", async () => {
+    vi.resetModules();
+    const { saveSelectedLessonIds } = await import("@/services/grammarPath");
+    const { assessUserProficiency } = await import("@/services/userProficiency");
+    saveSelectedLessonIds(["ch01-l01", "ch01-l02"]);
+    await masterGrammar(["ch01-l01"]);
+
+    const prof = assessUserProficiency([]);
+    expect(prof.grammarScore).toBe(50); // 1 of 2 mastered
   });
 
   it("does not let XP or streak raise the level", async () => {
@@ -112,7 +118,6 @@ describe("assessUserProficiency", () => {
   it("counts untagged words toward the lowest unfinished levels", async () => {
     vi.resetModules();
     const { assessUserProficiency } = await import("@/services/userProficiency");
-    await masterGrammar("A1");
     expect(assessUserProficiency(knownWords(35, null)).levelVocab.A1).toEqual({ known: 35, target: A1_TARGET });
     const profile = assessUserProficiency([...knownWords(10, "A1"), ...knownWords(A1_TARGET - 10 + 5, null)]);
     expect(profile.levelVocab.A1).toEqual({ known: A1_TARGET, target: A1_TARGET });
@@ -120,22 +125,17 @@ describe("assessUserProficiency", () => {
     expect(profile.assessedLevel).toBe("A2");
   });
 
-  it("does not pass a lesson from a single lucky popup answer", async () => {
+  it("does not pass a lesson from a single lucky practice answer", async () => {
     vi.resetModules();
-    const { GRAMMAR_LESSONS } = await import("@/data/grammarData");
     const g = await import("@/services/grammarService");
-    const { assessUserProficiency } = await import("@/services/userProficiency");
-    for (const lesson of GRAMMAR_LESSONS.filter((l) => l.level === "A1")) {
-      await g.recordPracticeResult(lesson.id, 100);
-    }
-    const lesson = g.getLessonProgress(GRAMMAR_LESSONS[0].id);
+    await g.recordPracticeResult("ch01-l01", 100);
+    const lesson = g.getLessonProgress("ch01-l01");
     expect(lesson.diagnosticStatus).toBe("unattempted");
     expect(lesson.mastery).toBe(50);
-    expect(assessUserProficiency(knownWords(A1_TARGET, "A1")).assessedLevel).toBe("A1");
     // Practiced lessons still get scheduled reviews
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date(Date.now() + 30 * 86400000));
-    expect(g.getDueGrammarLessons()).toContain(GRAMMAR_LESSONS[0].id);
+    expect(g.getDueGrammarLessons()).toContain("ch01-l01");
     vi.useRealTimers();
   });
 });

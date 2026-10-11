@@ -23,6 +23,7 @@ import { pipeline } from "@/services/pipeline";
 import { handleSpeak, type DashboardTab } from "./shared";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 import { pullMessage, pullWordFromDeck } from "@/services/vocabFeed";
+import { WORD_STATUS_LABELS, wordStatus } from "@/services/wordStatus";
 
 interface WordInspectorProps {
   requestDeleteWord: (wordId: string, wordText: string, e?: React.MouseEvent) => void;
@@ -34,7 +35,10 @@ interface WordInspectorProps {
   setMessage: (msg: string | null) => void;
 }
 
-/** RIGHT SLIDE-OVER WORD DETAIL INSPECTOR (renders nothing when no word is selected) */
+/**
+ * RIGHT SLIDE-OVER WORD DETAIL INSPECTOR (renders nothing when no word is selected). An overlay above the
+ * page, so it never squeezes the main content; MainDashboard closes it on a tab change or a session start.
+ */
 export default function WordInspector({
   requestDeleteWord,
   expandedTerms,
@@ -83,9 +87,17 @@ export default function WordInspector({
   };
 
   if (!selectedWord) return null;
+  const status = wordStatus(selectedWord);
 
   return (
-    <aside className="w-full max-w-[540px] md:w-[500px] lg:w-[540px] xl:w-[580px] border-l border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950/95 backdrop-blur-2xl flex flex-col justify-between shrink-0 animate-in slide-in-from-right duration-200 z-30 shadow-2xl">
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={`Chi tiết từ ${selectedWord.word}`}>
+    {/* Dimmed page behind: a click closes the panel */}
+    <div
+      aria-hidden="true"
+      onClick={() => setSelectedWord(null)}
+      className="absolute inset-0 bg-slate-900/25 dark:bg-black/55 animate-in fade-in duration-150"
+    />
+    <aside className="relative h-full w-full max-w-[540px] md:w-[500px] lg:w-[540px] border-l border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 flex flex-col animate-in slide-in-from-right duration-200 shadow-2xl">
       {/* Header */}
       <div className="p-5 border-b border-slate-200 dark:border-zinc-800 flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -114,8 +126,8 @@ export default function WordInspector({
         </div>
       </div>
 
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+      {/* Content: meanings, examples and messages can be selected and copied */}
+      <div className="flex-1 min-h-0 overflow-y-auto p-5 space-y-6 select-text">
         {/* Word & Pronunciation */}
         <div className="space-y-4">
           <div className="flex items-center justify-between flex-wrap gap-2">
@@ -669,13 +681,7 @@ export default function WordInspector({
               Trí nhớ (FSRS)
             </span>
             <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-100 dark:bg-cyan-950/60 border border-cyan-200 dark:border-cyan-800/40 text-cyan-800 dark:text-cyan-300 font-mono font-medium">
-              {selectedWord.srs.state === 2
-                ? "Đã thuộc"
-                : selectedWord.srs.state === 1
-                  ? "Đang học"
-                  : selectedWord.srs.state === 3
-                    ? "Cần củng cố"
-                    : "Từ mới"}
+              {WORD_STATUS_LABELS[status]}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-2 text-center text-xs">
@@ -705,6 +711,7 @@ export default function WordInspector({
         </div>
       </div>
     </aside>
+    </div>
   );
 }
 

@@ -102,7 +102,7 @@ const WordCard = memo(function WordCard({
             {leech && (
               <span
                 className="text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-300 border border-rose-200 dark:border-rose-700/60 animate-pulse"
-                title={`Leech: ${item.srs.lapses ?? 0} lần quên`}
+                title={`Hay quên: ${item.srs.lapses ?? 0} lần`}
               >
                 🐛
               </span>
@@ -111,7 +111,7 @@ const WordCard = memo(function WordCard({
             {rInfo.level !== "new" && (
               <span
                 className={`text-[9px] font-mono px-1.5 py-0.5 rounded-full border flex items-center gap-1 ${rInfo.bgColorClass} ${rInfo.textColorClass}`}
-                title={`Retrievability: ${rInfo.percent}% — ${rInfo.label}`}
+                title={`Khả năng nhớ: ${rInfo.percent}% — ${rInfo.label}`}
               >
                 <span className="w-5 h-1 rounded-full bg-slate-200 dark:bg-zinc-700 overflow-hidden inline-block">
                   <span

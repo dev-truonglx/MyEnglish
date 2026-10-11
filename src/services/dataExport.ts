@@ -17,6 +17,10 @@ const EXPORT_TABLES = [
   "grammar_custom_exercises",
   "mistakes",
   "app_kv",
+  "grammar_book_chapters",
+  "grammar_book_lessons",
+  "grammar_book_sets",
+  "grammar_book_items",
 ] as const;
 type ExportTable = (typeof EXPORT_TABLES)[number];
 
@@ -31,6 +35,10 @@ const PRIMARY_KEY: Record<ExportTable, string> = {
   grammar_custom_exercises: "id",
   mistakes: "id",
   app_kv: "key",
+  grammar_book_chapters: "id",
+  grammar_book_lessons: "id",
+  grammar_book_sets: "id",
+  grammar_book_items: "id",
 };
 
 export interface BackupFile {

@@ -9,12 +9,15 @@ import {
   type StudyLevel,
 } from "@/services/vocabCatalog";
 import {
+  UNLOCK_MET_SHARE,
+  UNLOCK_REMEMBERED_SHARE,
   changeStudyLevels,
   getStudyLevels,
   learnEarly,
   loadLevelProgress,
   markCatalogWordsKnown,
   nextUnstudiedEntries,
+  suggestNextLevel,
   type LevelProgress,
 } from "@/services/vocabFeed";
 import { useWordsStore } from "@/stores/wordsStore";
@@ -99,7 +102,12 @@ function ProgressBars({ progress, levels }: { progress: LevelProgress[]; levels:
                 <span className="font-semibold text-slate-800 dark:text-zinc-200">
                   {p.level} · {LEVEL_NAMES[p.level]}
                 </span>
-                <span className="text-slate-500 dark:text-zinc-400">
+                <span
+                  className="text-slate-500 dark:text-zinc-400"
+                  title={`Nhớ lâu: đã ôn thật và sẽ không quên trong ít nhất 3 tuần. Gợi ý mở cấp mới khi gặp ${Math.round(
+                    UNLOCK_MET_SHARE * 100
+                  )}% số từ và nhớ lâu ${Math.round(UNLOCK_REMEMBERED_SHARE * 100)}%.`}
+                >
                   {p.met}/{p.total} đã gặp · {p.remembered} nhớ lâu{p.known > 0 ? ` · ${p.known} đã biết` : ""}
                 </span>
               </div>
@@ -114,21 +122,69 @@ function ProgressBars({ progress, levels }: { progress: LevelProgress[]; levels:
   );
 }
 
-/** The next level to open once the chosen ones have nothing left */
-function finishedAll(progress: LevelProgress[], levels: StudyLevel[]): boolean {
-  return levels.every((l) => {
-    const p = progress.find((x) => x.level === l);
-    return p ? p.met >= p.total : false;
-  });
+/**
+ * Offer the next level: when the chosen levels are met (80%) and remembered for the long run (50%), or when
+ * they have no new word left to give (the daily new words would stop).
+ */
+function NextLevelNotice({
+  progress,
+  levels,
+  onOpen,
+  busy,
+}: {
+  progress: LevelProgress[];
+  levels: StudyLevel[];
+  onOpen: (next: StudyLevel) => void;
+  busy?: boolean;
+}) {
+  const suggestion = suggestNextLevel(progress, levels);
+  if (!suggestion) return null;
+  const { next, reason } = suggestion;
+  const names = levels.join(", ");
+  const text =
+    reason === "exhausted"
+      ? next
+        ? `Bạn đã nhận hết từ mới của ${names}. Các từ đã nhận vẫn được ôn như bình thường, nhưng sẽ không có từ mới nữa cho đến khi mở thêm ${next}.`
+        : "Bạn đã nhận hết 5.004 từ của bộ Oxford. Các từ đã nhận vẫn được ôn như bình thường."
+      : `Bạn đã gặp hơn ${Math.round(UNLOCK_MET_SHARE * 100)}% số từ ${names} và nhớ lâu được hơn một nửa. Sẵn sàng học thêm cấp ${next}.`;
+  return (
+    <div
+      className={`rounded-lg border p-3 space-y-2 text-xs ${
+        reason === "exhausted"
+          ? "border-amber-200 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200"
+          : "border-emerald-200 dark:border-emerald-500/30 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+      }`}
+    >
+      <p>{text}</p>
+      {next && (
+        <button
+          onClick={() => onOpen(next)}
+          disabled={busy}
+          className="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-sm font-semibold"
+        >
+          Mở thêm {next} · {LEVEL_NAMES[next]}
+        </button>
+      )}
+    </div>
+  );
 }
 
-/** Today screen: progress of the chosen levels, and the next level once they are all met */
+/** Today screen: progress of the chosen levels, and the next level when it is time */
 export function TodayLevelCard({ onOpen }: { onOpen: () => void }) {
   const { progress } = useLevelProgress();
+  const refreshWords = useWordsStore((s) => s.refreshWords);
+  const [busy, setBusy] = useState(false);
   const levels = getStudyLevels();
   if (!progress) return null;
-  const next = STUDY_LEVELS[levels.length];
-  const done = finishedAll(progress, levels);
+  const openNext = async (next: StudyLevel) => {
+    setBusy(true);
+    try {
+      await changeStudyLevels([...levels, next]);
+      refreshWords();
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3">
       <div className="flex items-center justify-between text-sm">
@@ -140,14 +196,7 @@ export function TodayLevelCard({ onOpen }: { onOpen: () => void }) {
         </button>
       </div>
       <ProgressBars progress={progress} levels={levels} />
-      {done && next && (
-        <button
-          onClick={() => changeStudyLevels([...levels, next])}
-          className="w-full px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold"
-        >
-          Bạn đã học hết {levels.join(", ")} 🎉 Mở thêm {next}
-        </button>
-      )}
+      <NextLevelNotice progress={progress} levels={levels} onOpen={openNext} busy={busy} />
     </div>
   );
 }
@@ -385,6 +434,9 @@ export default function VocabTab() {
         <LevelPicker value={levels} onChange={choose} disabled={saving} />
         <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(levels)}</p>
         {progress && <ProgressBars progress={progress} levels={levels} />}
+        {progress && (
+          <NextLevelNotice progress={progress} levels={levels} onOpen={(next) => choose([...levels, next])} busy={saving} />
+        )}
       </section>
 
       <section className="space-y-3">

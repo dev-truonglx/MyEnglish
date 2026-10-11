@@ -3,15 +3,14 @@ import { Target, Gauge, CalendarClock, AlertTriangle } from "lucide-react";
 import {
   loadLearningInsights,
   loadWorkloadForecast,
+  MIN_RETENTION_SAMPLE,
   type LearningInsights,
   type WorkloadForecast,
 } from "@/services/progress";
 import { saveStudyLimits } from "@/services/srs";
+import { isComebackRunning } from "@/services/comeback";
 
 const pct = (x: number | null | undefined) => (x == null ? "—" : `${Math.round(x * 100)}%`);
-
-/** Retention needs this many review answers before it means anything */
-const MIN_RETENTION_SAMPLE = 20;
 
 function RetentionTile({ label, value, count, target }: { label: string; value: number | null; count: number; target: number }) {
   const enough = count >= MIN_RETENTION_SAMPLE && value != null;
@@ -59,6 +58,9 @@ export default function LearningInsightsCard() {
   const r = insights.retention;
   const maxDay = Math.max(1, forecast.maxSessionSize, ...forecast.days.map((d) => d.reviews));
   const suggestedNew = Math.max(2, Math.round(forecast.newCardsPerDay / 2));
+  // Overload is judged on the days after today (not the pile a break leaves on today), and the comeback plan
+  // already spreads that pile and pauses new words: no lasting cut is offered while it runs
+  const offerFewerNew = forecast.overloaded && !isComebackRunning() && forecast.newCardsPerDay > suggestedNew;
 
   let advice: string | null = null;
   if (r.count >= MIN_RETENTION_SAMPLE && r.trueRetention != null) {
@@ -76,7 +78,7 @@ export default function LearningInsightsCard() {
         <Target className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
         <h3 className="text-sm font-bold text-slate-900 dark:text-white">Hiệu quả ghi nhớ (30 ngày)</h3>
         <span className="ml-auto text-[11px] text-slate-400 dark:text-zinc-500">
-          Mục tiêu: {pct(r.targetRetention)} · {insights.minutesPerActiveDay.toFixed(1)} phút/ngày học
+          Mục tiêu: {pct(r.targetRetention)} · {insights.minutesPerActiveDay.toFixed(1)} phút trả lời/ngày học
         </span>
       </div>
 
@@ -134,7 +136,7 @@ export default function LearningInsightsCard() {
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-zinc-300">
           <CalendarClock className="w-3.5 h-3.5" /> Lượt ôn đến hạn 30 ngày tới
           <span className="ml-auto font-normal text-slate-500 dark:text-zinc-400">
-            TB 7 ngày tới: {forecast.averagePerDay.toFixed(1)}/ngày · 1 phiên = {forecast.maxSessionSize} thẻ
+            TB 7 ngày tới: {forecast.upcomingPerDay.toFixed(1)}/ngày · 1 phiên = {forecast.maxSessionSize} thẻ
           </span>
         </div>
         <div className="relative h-28 flex items-end gap-[2px]" onMouseLeave={() => setHovered(null)}>
@@ -171,7 +173,7 @@ export default function LearningInsightsCard() {
           <span>+15 ngày</span>
           <span>+30 ngày</span>
         </div>
-        {forecast.overloaded && (
+        {offerFewerNew && (
           <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-800/60 text-xs text-rose-800 dark:text-rose-200">
             <span>
               Trung bình mỗi ngày cần ôn nhiều hơn một phiên. Từ mới sẽ làm tải tăng thêm — nên giảm còn {suggestedNew} từ mới/ngày cho tới khi

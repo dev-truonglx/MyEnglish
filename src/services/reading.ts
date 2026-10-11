@@ -8,7 +8,7 @@ import type { WordDetail } from "@/types/database";
 import { COMMON_WORDS } from "@/data/commonWords";
 import { wordForms, wordFormsPattern } from "./smartReview";
 import { logLearningEvent } from "./learningEvents";
-import { MASTERED_STABILITY_DAYS } from "./progress";
+import { isRememberedLong } from "./wordStatus";
 
 export type BankStatus = "mastered" | "learning" | "new";
 
@@ -45,10 +45,10 @@ export interface ReadingAnalysis {
   totalWords: number;
 }
 
+/** "mastered" is the shared "Nhớ lâu" (wordStatus.ts): a word only marked "Đã biết" is not, until reviewed */
 export function bankStatus(word: WordDetail): BankStatus {
-  const srs = word.srs;
-  if ((srs?.state ?? 0) === 2 && (srs?.stability ?? 0) >= MASTERED_STABILITY_DAYS) return "mastered";
-  return (srs?.reps ?? 0) > 0 ? "learning" : "new";
+  if (isRememberedLong(word)) return "mastered";
+  return (word.srs?.reps ?? 0) > 0 ? "learning" : "new";
 }
 
 /** Possible base forms of an inflected token ("deployed" -> deploy, deploye; "queries" -> query) */

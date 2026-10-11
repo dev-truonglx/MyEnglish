@@ -2,8 +2,9 @@
  * Gamification & Achievement Badges System — Phase 3
  */
 
-import { awardXP } from "./smartReview";
+import { awardXP, isKnownOnly } from "./smartReview";
 import { triggerConfetti } from "@/utils/confetti";
+import type { SRSReview } from "@/types/database";
 
 export interface AchievementBadge {
   id: string;
@@ -159,8 +160,8 @@ export const BADGE_DEFINITIONS: Array<{
   },
   {
     id: "topic_master",
-    title: "Chuyên Gia Chủ Đề",
-    description: "Làm chủ ít nhất 10 từ trong một chủ đề chuyên môn",
+    title: "Chuyên Gia Cấp Độ",
+    description: "Làm chủ ít nhất 10 từ trong cùng một cấp độ (A1 đến C1)",
     emoji: "🎓",
     category: "mastery",
     xpBonus: 200,
@@ -170,6 +171,44 @@ export const BADGE_DEFINITIONS: Array<{
 
 interface StoredAchievement {
   unlockedAt: string;
+}
+
+/** Same bar as "Đã khắc sâu" (stability in days) */
+const MASTERED_DAYS = 21;
+
+/** The srs fields a word is counted by (a WordDetail, or a ReviewCard with its recognition card) */
+export interface BadgeWord {
+  topic?: string | null;
+  srs?: Partial<SRSReview> | null;
+  srsRecognition?: Partial<SRSReview> | null;
+}
+
+export interface BadgeWordCounts {
+  rememberedWords: number;
+  masteredWords: number;
+  /** Most mastered words within one level (topic field = CEFR level): the "Chuyên Gia Cấp Độ" count */
+  topicMasterCount: number;
+}
+
+/**
+ * Word counts behind the badges. A word only marked "Đã biết" (isKnownOnly) is the learner's claim, not
+ * memory, so it is left out until a real review confirms it. Same rules as the session's collection stats.
+ */
+export function countBadgeWords(words: readonly BadgeWord[]): BadgeWordCounts {
+  const perLevel = new Map<string, number>();
+  let rememberedWords = 0;
+  let masteredWords = 0;
+  for (const w of words) {
+    if (!w.srs || isKnownOnly(w.srsRecognition ?? w.srs)) continue;
+    if ((w.srs.state ?? 0) !== 2) continue;
+    rememberedWords++;
+    if ((w.srs.stability ?? 0) >= MASTERED_DAYS) {
+      masteredWords++;
+      const level = (w.topic || "General Tech").toLowerCase();
+      perLevel.set(level, (perLevel.get(level) ?? 0) + 1);
+    }
+  }
+  return { rememberedWords, masteredWords, topicMasterCount: Math.max(0, ...perLevel.values()) };
 }
 
 export function getAchievements(context?: {
@@ -242,7 +281,8 @@ export function getAchievements(context?: {
 
     return {
       ...def,
-      isUnlocked: isAlreadyUnlocked || progress >= 100,
+      // Only a badge that was actually saved (and so rewarded) counts as unlocked, not a full progress bar
+      isUnlocked: isAlreadyUnlocked,
       unlockedAt: stored[def.id]?.unlockedAt,
       currentValue,
       progress,
@@ -260,7 +300,7 @@ export interface AchievementCheckContext {
   leechesSlain?: number;
   responseTimeMs?: number;
   isCorrect?: boolean;
-  topicMasterCount?: number;  // max mastered words within a single topic
+  topicMasterCount?: number;  // max mastered words within a single level (see countBadgeWords)
   /** Words whose recognition card graduated to Review (remembered at a later review) */
   rememberedWords?: number;
   /** A study session was completed */

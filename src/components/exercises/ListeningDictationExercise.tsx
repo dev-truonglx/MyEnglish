@@ -3,6 +3,7 @@ import { Volume2, CheckCircle2, Snail, Music, XCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { generateMultipleChoiceQuestion, type MultipleChoiceOption } from "@/services/smartReview";
+import { samePronunciation } from "@/utils/exerciseHints";
 
 interface ListeningDictationExerciseProps {
   word: WordDetail;
@@ -22,8 +23,9 @@ export default function ListeningDictationExercise({
   onComplete,
   onSpeak,
 }: ListeningDictationExerciseProps) {
+  // A word that sounds the same as the target (right / write) would be a right answer by ear: never a distractor
   const question = useMemo(
-    () => generateMultipleChoiceQuestion(word, allWords, "en_to_vn"),
+    () => generateMultipleChoiceQuestion(word, allWords.filter((w) => !samePronunciation(w.phonetic, word.phonetic)), "en_to_vn"),
     // Options must not reshuffle while answering
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [word.id]

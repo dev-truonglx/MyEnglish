@@ -8,7 +8,8 @@
  *  - "pronunciation_quiz": a pronunciation lesson's listening quiz finished (meta.lessonId, correct, total)
  *  - "say_aloud": the learner repeated a word aloud and rated themselves (meta.ok), never graded
  *  - "grammar_intro": first meeting with a grammar point in the popup (meta.lessonId, correct)
- *  - "known": a new word the learner said they already know (scheduled as Easy, no quiz)
+ *  - "known": a new word the learner said they already know (a Review card due in KNOWN_CHECK_MIN_DAYS to
+ *    KNOWN_CHECK_MAX_DAYS days, no quiz; it counts as known only after a real review confirms it)
  * Used to celebrate progress that matters and to show when the learner actually studies.
  */
 import { getDatabase } from "./db";

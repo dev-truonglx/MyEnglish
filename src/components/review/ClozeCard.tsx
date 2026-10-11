@@ -5,6 +5,7 @@ import type { FeedbackMessage } from "@/hooks/useReviewSession";
 import RevealedWordContent from "./RevealedWordContent";
 import { highlightWord } from "./highlightWord";
 import { handleSpeak } from "./speech";
+import { maskTargetInMeaning } from "@/utils/exerciseHints";
 
 interface ClozeCardProps {
   currentWord: ReviewCard;
@@ -49,6 +50,8 @@ export default function ClozeCard({
   clozeDisplaySentence,
   answerForm,
 }: ClozeCardProps) {
+  // The length of the word is shown only after the learner asks for a hint
+  const lengthRevealed = showHint || wrongAttempts >= 2;
   return (
     <div className="flex-1 min-h-0 flex flex-col justify-between">
       {!hasCheckedAnswer ? (
@@ -77,7 +80,7 @@ export default function ClozeCard({
               {/* Vietnamese Meaning Hint */}
               <div className="pt-2.5 border-t border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 flex items-start gap-2">
                 <span className="text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">Nghĩa tiếng Việt:</span>
-                <span className="font-medium">{currentWord.meaning_vn}</span>
+                <span className="font-medium">{maskTargetInMeaning(currentWord.meaning_vn, currentWord.word)}</span>
               </div>
             </div>
 
@@ -101,7 +104,7 @@ export default function ClozeCard({
                   data-gramm="false"
                   data-enable-grammarly="false"
                   data-lpignore="true"
-                  placeholder={`Gõ từ còn thiếu (${answerForm.length} ký tự) và nhấn Enter ↵`}
+                  placeholder={lengthRevealed ? `Gõ từ còn thiếu (${answerForm.length} ký tự) và nhấn Enter ↵` : "Gõ từ còn thiếu và nhấn Enter ↵"}
                   className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-xl px-4 py-3 text-base font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-wide shadow-sm transition-all ${
                     isCorrect
                       ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-100 ring-4 ring-emerald-500/10 font-bold"

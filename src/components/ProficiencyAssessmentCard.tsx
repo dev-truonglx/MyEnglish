@@ -67,7 +67,7 @@ export default function ProficiencyAssessmentCard({
       syncProficiencyWithReminderSettings(profile.assessedLevel);
       setActionNotice({
         type: "info",
-        text: `Đã chuyển về chế độ tự động đánh giá linh hoạt theo AI (Hiện tại: [${profile.assessedLevel}]).`,
+        text: `Đã chuyển về chế độ tự động xếp trình độ theo số từ bạn đã thuộc (hiện tại: [${profile.assessedLevel}]).`,
       });
     }
     setShowOverrideMenu(false);
@@ -156,7 +156,7 @@ export default function ProficiencyAssessmentCard({
               )}
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
-              Đánh giá dựa trên phân tích đa chiều: Điểm ngữ pháp thực tế, độ bền trí nhớ FSRS và tần suất luyện tập.
+              Cấp độ tính theo số từ bạn đã thuộc ở từng cấp. Ngữ pháp và thói quen học hiển thị riêng bên dưới.
             </p>
           </div>
         </div>
@@ -219,7 +219,7 @@ export default function ProficiencyAssessmentCard({
                   }`}
                 >
                   <span className="flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5" /> Tự động (AI đánh giá)
+                    <Sparkles className="w-3.5 h-3.5" /> Tự động (theo tiến độ)
                   </span>
                   {!profile.userOverrideLevel && <CheckCircle2 className="w-3.5 h-3.5" />}
                 </button>
@@ -264,7 +264,7 @@ export default function ProficiencyAssessmentCard({
             />
           </div>
           <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-            Dựa trên điểm chẩn đoán & mức độ làm chủ các chủ đề ngữ pháp từ A1 đến C1.
+            Tỉ lệ bài ngữ pháp trong lộ trình của bạn đã nắm vững. Không tính vào cấp độ CEFR.
           </p>
         </div>
 
@@ -317,7 +317,7 @@ export default function ProficiencyAssessmentCard({
             <TrendingUp className="w-4 h-4 text-cyan-500" />
             <span>Tiến Trình Cụ Thể Từng Cấp Bậc CEFR</span>
           </h4>
-          <span className="text-[11px] text-slate-400">Hoàn thành một cấp độ = nắm ngữ pháp + thuộc đủ từ của cấp độ đó</span>
+          <span className="text-[11px] text-slate-400">Hoàn thành một cấp độ = thuộc 80% số từ của cấp độ đó</span>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
@@ -347,7 +347,7 @@ export default function ProficiencyAssessmentCard({
                   </span>
                   {isMastered ? (
                     <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-0.5">
-                      <CheckCircle2 className="w-3 h-3" /> Đạt
+                      <CheckCircle2 className="w-3 h-3" /> Đã qua
                     </span>
                   ) : isLearning ? (
                     <span className="text-[10px] font-bold text-cyan-600 dark:text-cyan-400">Đang rèn</span>
@@ -367,19 +367,18 @@ export default function ProficiencyAssessmentCard({
                     className={`h-full rounded-full ${
                       isMastered ? "bg-emerald-500" : isLearning ? "bg-cyan-500" : "bg-slate-400"
                     }`}
-                    style={{ width: `${data.averageMastery}%` }}
+                    style={{ width: `${isMastered ? 100 : data.vocabPercent}%` }}
                   />
                 </div>
 
-                <div className="flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500">
-                  <span>Pass: {data.passedLessons}/{data.totalLessons}</span>
-                  <span>{data.averageMastery}%</span>
-                </div>
                 <div
-                  className="mt-1 text-[10px] text-slate-400 dark:text-zinc-500"
+                  className="flex items-center justify-between text-[10px] text-slate-400 dark:text-zinc-500"
                   title="Số từ của cấp độ này bạn đã thuộc / số từ cần để hoàn thành cấp độ"
                 >
-                  Từ vựng: {profile.levelVocab[lvl].known}/{profile.levelVocab[lvl].target}
+                  <span>
+                    Từ vựng: {profile.levelVocab[lvl].known}/{profile.levelVocab[lvl].target}
+                  </span>
+                  <span>{data.vocabPercent}%</span>
                 </div>
               </div>
             );
@@ -484,7 +483,7 @@ export default function ProficiencyAssessmentCard({
         <div className="bg-slate-50/60 dark:bg-zinc-800/30 rounded-2xl p-4 border border-slate-100 dark:border-zinc-800 space-y-2">
           <div className="text-xs font-bold text-slate-700 dark:text-zinc-300 flex items-center gap-1.5">
             <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
-            <span>Định Hướng Học Tập Từ AI Theo Cấp Độ {profile.effectiveLevel}</span>
+            <span>Gợi ý học tiếp ở cấp độ {profile.effectiveLevel}</span>
           </div>
           <ul className="space-y-1.5">
             {profile.recommendations.map((rec, i) => (

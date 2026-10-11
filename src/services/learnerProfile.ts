@@ -35,12 +35,6 @@ export function chosenLevel(): string | null {
   return read(LEVEL_OVERRIDE_KEY);
 }
 
-/** Foundation grammar (to be, pronouns, plurals…) is part of the curriculum for A0/A1 learners only */
-export function includesFoundationGrammar(): boolean {
-  const level = chosenLevel();
-  return isFoundationMode() || level === null || level === "A1";
-}
-
 export function isFoundationMode(): boolean {
   return read(FOUNDATION_KEY) === "1";
 }
@@ -88,6 +82,8 @@ export function setUiScale(scale: UiScale): void {
 /**
  * Bigger text for the main window. Most labels use fixed pixel sizes (text-[11px]), which a root font
  * size would not change, so the whole page is zoomed instead (WebKit and WebView2 both support `zoom`).
+ * The main window must size itself with percentages (html, body, #root at height 100%, then h-full), never
+ * with 100vh / h-screen: under zoom, 100vh is the window height times the scale and the bottom gets cut off.
  */
 export function applyUiScale(): void {
   try {

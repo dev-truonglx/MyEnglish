@@ -10,7 +10,8 @@ import {
   GenSeedStrategyWithCardId,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getAllWords, getDueWordsFromDb, countDueCards, SRS_COLUMNS } from "./db";
+import { getDatabase, getAllWords, getDueWordsFromDb, SRS_COLUMNS } from "./db";
+import { isWordDue, nextLocalDayStart } from "./cards";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import { getStoredWeights } from "./fsrsOptimizer";
 import { applyComebackToWork, resolveComeback, type ComebackStatus } from "./comeback";
@@ -279,10 +280,11 @@ export function getNextIntervalPreviews(
 }
 
 /**
- * Fetch all words currently due for repetition (next_review_date <= now)
+ * Fetch all words with a card due now (see cards.isDueSrs: a review card is due for its whole due day)
  */
-export async function getDueWords(): Promise<WordDetail[]> {
-  return getDueWordsFromDb(new Date());
+export async function getDueWords(now: Date = new Date()): Promise<WordDetail[]> {
+  const words = await getDueWordsFromDb(new Date(nextLocalDayStart(now) - 1));
+  return words.filter((w) => isWordDue(w, now));
 }
 
 /**
@@ -455,8 +457,52 @@ export async function triggerDesktopNotification(title: string, body: string): P
 }
 
 /**
- * What is left to study today (reviews due + new cards the daily budget still allows). Also shows it on
- * the menu-bar / tray icon.
+ * Words that may have a card due today, with both schedules but no examples: enough to count today's work
+ * with the same rules as a session (summarizeTodayWork), cheaply enough for the tray's refresh.
+ */
+export async function loadTodaySchedules(now: Date = new Date()): Promise<WordDetail[]> {
+  const db = await getDatabase();
+  const cols = SRS_COLUMNS.split(", ");
+  const pick = (alias: string, prefix: string) => cols.map((c) => `${alias}.${c} AS ${prefix}${c}`).join(", ");
+  const rows = await db.select<Array<Record<string, unknown>>>(
+    `SELECT w.id, w.word, w.meaning_vn, w.topic, w.created_at, w.suspended, ${pick("s", "r_")}, ${pick("p", "p_")}
+     FROM words w
+     LEFT JOIN srs_reviews s ON s.word_id = w.id
+     LEFT JOIN srs_production p ON p.word_id = w.id
+     WHERE COALESCE(w.suspended, 0) = 0
+       AND (s.word_id IS NULL OR s.next_review_date < $1 OR p.next_review_date < $1
+            OR (COALESCE(s.state, 0) = 0 AND COALESCE(s.reps, 0) = 0 AND s.last_review IS NOT NULL))`,
+    [new Date(nextLocalDayStart(now)).toISOString()]
+  );
+  const srsOf = (r: Record<string, unknown>, prefix: string): SRSReview | null => {
+    if (r[`${prefix}word_id`] == null) return null;
+    return Object.fromEntries(cols.map((c) => [c, r[`${prefix}${c}`]])) as unknown as SRSReview;
+  };
+  return rows.map((r) => {
+    const id = String(r.id);
+    const createdAt = String(r.created_at ?? now.toISOString());
+    return {
+      id,
+      word: String(r.word ?? ""),
+      meaning_vn: String(r.meaning_vn ?? ""),
+      topic: (r.topic as string | null) ?? undefined,
+      created_at: createdAt,
+      suspended: Number(r.suspended ?? 0),
+      image_url: null,
+      synonyms: "[]",
+      antonyms: "[]",
+      examples: [],
+      // A word without a schedule row is a new word, due since it was added (as in getAllWords)
+      srs: srsOf(r, "r_") ?? { word_id: id, ease_factor: 2.5, interval: 0, repetitions: 0, next_review_date: createdAt, state: 0, reps: 0 },
+      srsProduction: srsOf(r, "p_"),
+    } as WordDetail;
+  });
+}
+
+/**
+ * What is left to study today (reviews due + new cards the daily budget still allows), counted the way a
+ * session takes cards (summarizeTodayWork: same due rule, one review per word, the backlog limit on new
+ * cards), so Today, the tray and the popup agree with the session. Also shows it on the menu-bar / tray icon.
  */
 export async function countTodayWork(): Promise<{
   reviews: number;
@@ -464,19 +510,26 @@ export async function countTodayWork(): Promise<{
   total: number;
   comeback: ComebackStatus | null;
 }> {
-  const { todayWorkFromCounts, getNewCardsIntroducedToday } = await import("./smartReview");
+  const { summarizeTodayWork, getNewCardsIntroducedToday } = await import("./smartReview");
   // A new day may need new words of the chosen levels in the buffer (cheap when it is full)
   await import("./vocabFeed").then((m) => m.topUpNewWords()).catch(() => {});
-  const [counts, introduced] = await Promise.all([
-    countDueCards(),
+  const now = new Date();
+  const [words, introduced] = await Promise.all([
+    loadTodaySchedules(now),
     getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 })),
   ]);
   const limits = getStudyLimits();
-  const full = todayWorkFromCounts(counts, introduced, limits.newCardsPerDay);
-  // After a break, only today's share of the backlog is counted (see comeback.ts)
-  const comeback = resolveComeback(full.reviews, limits.maxSessionSize);
-  const work = applyComebackToWork(full, comeback);
-  invoke("set_tray_due_count", { reviews: work.reviews, newCards: work.newToday }).catch(() => {});
+  const full = summarizeTodayWork(words, introduced, now, limits);
+  // After a break, only today's share of the backlog is counted (see comeback.ts), with the plan's new
+  // words instead of the daily budget, not cut by the backlog (as buildReviewSession's comebackNewCards):
+  // no session size limit, so newCardAllowance lets them all through
+  const comeback = resolveComeback(full.reviews, limits.maxSessionSize, now);
+  const base = comeback && !comeback.caughtUp
+    ? summarizeTodayWork(words, introduced, now, { newCardsPerDay: comeback.newWordsPerDay, maxSessionSize: Number.MAX_SAFE_INTEGER })
+    : full;
+  const work = applyComebackToWork(base, comeback, introduced);
+  // The tooltip also says when a pause ends (N9)
+  invoke("set_tray_due_count", { reviews: work.reviews, newCards: work.newToday, pausedUntil: snoozedUntilLabel() }).catch(() => {});
   return { ...work, comeback };
 }
 
@@ -591,10 +644,13 @@ export async function markWordDueImmediately(wordId?: string): Promise<string | 
   return targetWord || targetId;
 }
 
-import { listen } from "@tauri-apps/api/event";
+import { listen, type EventCallback } from "@tauri-apps/api/event";
 import {
   getReminderSettings,
   isSnoozed,
+  snoozedUntilLabel,
+  applyTrayReminderAction,
+  TRAY_REMINDER_EVENT,
   triggerReviewPopup,
   triggerReviewNudge,
   getLastPopupDisplayTime,
@@ -621,8 +677,10 @@ import {
   refreshQuietHours,
   MIN_GAP_AFTER_REMINDER_MS,
   MOMENT_WINDOW_MS,
+  FullscreenExitTracker,
   type ReminderMoment,
 } from "./reminderMoments";
+import { isMainSessionActive } from "./activeSession";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -682,31 +740,51 @@ class SRSBackgroundWorker {
   private timerId: number | null = null;
   private unlistenHeartbeat: (() => void) | null = null;
   private unlistenPopupOpened: (() => void) | null = null;
+  private unlistenTrayAction: (() => void) | null = null;
+  /** Bumped by stop(): a start() still awaiting its listeners gives up once a newer start()/stop() ran (N17) */
+  private generation = 0;
   private isTicking = false;
   private lastBlockReason: string | null = null;
   /** When the reminder first became due and started waiting for a good moment */
   private readySince: number | null = null;
 
+  /** Attach a native event listener; null (and removed again) if this start() was superseded meanwhile */
+  private async attach<T>(event: string, handler: EventCallback<T>, gen: number): Promise<(() => void) | null> {
+    try {
+      const unlisten = await listen<T>(event, handler);
+      if (gen !== this.generation) {
+        unlisten();
+        return null;
+      }
+      return unlisten;
+    } catch (err) {
+      console.warn(`Could not attach ${event} listener in srsWorker:`, err);
+      return null;
+    }
+  }
+
   public async start() {
     this.stop();
+    const gen = this.generation;
 
     // Listen to native review-popup-opened event so worker syncs anytime popup is opened
-    try {
-      this.unlistenPopupOpened = await listen("review-popup-opened", () => {
-        recordPopupDisplayed(Date.now());
-      });
-    } catch (err) {
-      console.warn("Could not attach review-popup-opened listener in srsWorker:", err);
-    }
+    const popupOpened = await this.attach("review-popup-opened", () => recordPopupDisplayed(Date.now()), gen);
+    if (gen !== this.generation) return;
+    this.unlistenPopupOpened = popupOpened;
 
     // 1. Lắng nghe heartbeat từ Rust (bắn mỗi 30s)
-    try {
-      this.unlistenHeartbeat = await listen("srs-heartbeat", () => {
-        this.tick();
-      });
-    } catch (err) {
-      console.warn("Could not attach srs-heartbeat listener:", err);
-    }
+    const heartbeat = await this.attach("srs-heartbeat", () => this.tick(), gen);
+    if (gen !== this.generation) return;
+    this.unlistenHeartbeat = heartbeat;
+
+    // Pause / resume picked from the tray menu (N9)
+    const trayAction = await this.attach<{ action?: string }>(
+      TRAY_REMINDER_EVENT,
+      (e) => this.onTrayAction(e.payload?.action),
+      gen
+    );
+    if (gen !== this.generation) return;
+    this.unlistenTrayAction = trayAction;
 
     // 2. Also keep a fallback local timer ticking every 15 seconds
     this.timerId = window.setInterval(() => this.tick(), 15000);
@@ -717,6 +795,7 @@ class SRSBackgroundWorker {
   }
 
   public stop() {
+    this.generation++;
     if (this.timerId) {
       window.clearInterval(this.timerId);
       this.timerId = null;
@@ -729,6 +808,17 @@ class SRSBackgroundWorker {
       this.unlistenPopupOpened();
       this.unlistenPopupOpened = null;
     }
+    if (this.unlistenTrayAction) {
+      this.unlistenTrayAction();
+      this.unlistenTrayAction = null;
+    }
+  }
+
+  /** A reminder action from the tray menu: apply it and show the new state on the tray at once */
+  private onTrayAction(action: unknown) {
+    if (!applyTrayReminderAction(action)) return;
+    this.lastTrayRefresh = Date.now();
+    countTodayWork().catch(() => {});
   }
 
   private lastTrayRefresh = 0;
@@ -740,6 +830,8 @@ class SRSBackgroundWorker {
   /** The moment this tick's reminder is shown for (null = by the clock) */
   private activeMoment: ReminderMoment | null = null;
   private activeAnchor: ReminderAnchor | null = null;
+  /** Created on first use: srs.ts and reminderMoments.ts are in an import cycle (through db -> smartReview) */
+  private fullscreenExit: FullscreenExitTracker | null = null;
 
   /** Read the computer's state (at most every 10 s) and remember the latest transition */
   private async observeMoment(now: number): Promise<ReminderMoment | null> {
@@ -747,14 +839,19 @@ class SRSBackgroundWorker {
     if (!prev || now - prev.at >= 10_000) {
       const blockers = await invoke<PopupBlockers>("get_popup_blockers").catch(() => null);
       this.lastObservation = { at: now, blockers };
-      if (prev) {
-        const logs = getActivityLogs();
-        const kind = detectMoment(prev.blockers, blockers, now - prev.at, {
-          hour: new Date(now).getHours(),
-          studiedToday: (logs[getLocalDateString()] || 0) > 0,
-        });
-        if (kind) this.pendingMoment = { kind, at: now };
-      }
+      // Leaving full screen counts only after a long stretch, for good, at most hourly (N11)
+      this.fullscreenExit ??= new FullscreenExitTracker();
+      const leftFullscreen = this.fullscreenExit.observe(blockers, now);
+      const today = getLocalDateString(new Date(now));
+      let kind = detectMoment(prev?.blockers ?? null, blockers, prev ? now - prev.at : 0, {
+        hour: new Date(now).getHours(),
+        studiedToday: (getActivityLogs()[today] || 0) > 0,
+        // The first reading of the day (launch / autostart, or past midnight) can be the morning one (N12)
+        firstToday: !prev || getLocalDateString(new Date(prev.at)) !== today,
+      });
+      if (kind === "after_fullscreen") kind = null;
+      if (!kind && leftFullscreen) kind = "after_fullscreen";
+      if (kind) this.pendingMoment = { kind, at: now };
     }
     if (this.pendingMoment && now - this.pendingMoment.at > MOMENT_WINDOW_MS) this.pendingMoment = null;
     return this.pendingMoment?.kind ?? null;
@@ -772,26 +869,41 @@ class SRSBackgroundWorker {
       }
       const settings = getReminderSettings();
       this.activeMoment = null;
+      // N1: the wait for a quiet moment survives only a tick that is blocked by the focus checks below.
+      // Any other outcome of this tick (not due, paused, nothing to show...) starts the wait over.
+      const waitingSince = this.readySince;
+      this.readySince = null;
+      // Today's due work, counted at most once per tick (the goal check and the trigger check share it)
+      let work: Awaited<ReturnType<typeof countTodayWork>> | null = null;
       if (!forceTrigger) {
-        if (!settings.enabled || settings.intervalMinutes === 0) return;
+        if (!settings.enabled) return;
 
         const now = Date.now();
         // Natural transitions (back at the computer, screen share over...) may bring the reminder forward
         // A study time the learner chose ("after lunch") counts as a moment too
         const anchor = dueAnchor(new Date(now), settings.anchors ?? []);
+        // Interval 0 turns off the automatic reminders, not the study times the learner chose (N10)
+        const automaticOff = settings.intervalMinutes === 0;
+        if (automaticOff && !anchor) return;
         const moment = anchor ? ANCHOR_TIMES[anchor].moment : settings.contextMoments ? await this.observeMoment(now) : null;
         if (settings.avoidQuietHours && now - this.lastQuietRefresh > 60 * 60 * 1000) {
           this.lastQuietRefresh = now;
           refreshQuietHours().catch(() => {});
         }
         if (isSnoozed()) return;
-        // Night, today's goal done, or enough reminders for one day: wait until tomorrow
+        // The main window is studying: the same card would be graded twice
+        if (isMainSessionActive()) return;
+        // Night, today's goal done, or enough reminders for one day: wait until tomorrow.
+        // The goal counts only once no review is due any more (S5)
+        const goalMet = (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal();
+        if (goalMet && settings.stopAfterGoal) work = await countTodayWork();
         const pause = reminderPause(settings, {
           hour: new Date(now).getHours(),
-          goalReached: (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal(),
+          goalReached: goalMet && work?.reviews === 0,
           shownToday: getNudgesShownToday(),
         });
-        if (pause) return;
+        // A study time the learner chose is not cut by the daily cap (N4)
+        if (pause && !(pause === "daily_cap" && anchor)) return;
 
         const lastDisplay = getLastPopupDisplayTime();
 
@@ -805,8 +917,8 @@ class SRSBackgroundWorker {
         // ĐIỀU KIỆN CỐT LÕI: Thời gian lần tiếp theo hiển thị phải tính từ lần cuối cùng popup hiển thị!
         // A transition moment can come earlier, but never right after the previous reminder.
         const momentReady = !!moment && now - lastDisplay >= MIN_GAP_AFTER_REMINDER_MS;
-        const nextTime = getNextReminderTime();
-        if (now < nextTime && !momentReady) {
+        const nextTime = getNextReminderTime(); // 0 when automatic reminders are off: only the anchor counts
+        if ((automaticOff || now < nextTime) && !momentReady) {
           return; // Chưa đến giờ hiển thị tiếp theo
         }
         // A clock reminder in an hour where reminders are almost always ignored waits for a better hour
@@ -818,7 +930,7 @@ class SRSBackgroundWorker {
       }
 
       if (!forceTrigger) {
-        const work = await countTodayWork();
+        work = work ?? (await countTodayWork());
         if (settings.triggerCondition === "due_only") {
           if (work.total === 0) return;
         } else {
@@ -831,7 +943,7 @@ class SRSBackgroundWorker {
         // The popup stays pending and is retried on the next tick (every 15-30s).
         if (settings.respectFocus) {
           const now = Date.now();
-          if (this.readySince === null) this.readySince = now;
+          this.readySince = waitingSince ?? now;
           const reason = await getPopupBlockReason(now - this.readySince);
           if (reason) {
             if (reason !== this.lastBlockReason) console.info(`[SRS] Hoãn popup ôn tập: ${reason}`);
@@ -851,7 +963,7 @@ class SRSBackgroundWorker {
 
       // Gentle start: a small corner card that doesn't take focus; the user opens the review from it,
       // otherwise it snoozes itself after a countdown (triggerReviewNudge records the display time)
-      const { total: dueCount, comeback } = await countTodayWork();
+      const { total: dueCount, comeback } = work ?? (await countTodayWork());
       let motivation = undefined;
       let microQuiz = undefined;
 
@@ -879,22 +991,23 @@ class SRSBackgroundWorker {
         const allWords = await getAllWords();
         microQuiz = selectMicroQuizQuestion(dueWords, allWords);
 
-        // An OS notification only when the streak is at risk late in the day, at most once a day.
-        // Snoozing / skipping is the learner's choice and is never escalated into more notifications.
-        if (motivation.tone === "level_3_streak_fomo") {
-          const todayKey = `myenglish_streak_notice_${getLocalDateString()}`;
-          try {
-            if (!localStorage.getItem(todayKey)) {
-              localStorage.setItem(todayKey, "1");
-              sendDuoDesktopNotification(motivation, dueCount).catch(() => {});
-            }
-          } catch {}
-        }
       } catch (err) {
         console.warn("Error preparing Duo motivation payload:", err);
       }
 
-      await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
+      const shown = await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
+      // An OS notification only when the streak is at risk late in the day, at most once a day, and never
+      // together with a corner card that just appeared (it already carries the same message, N20).
+      // Snoozing / skipping is the learner's choice and is never escalated into more notifications.
+      if (!shown && motivation?.tone === "level_3_streak_fomo") {
+        const todayKey = `myenglish_streak_notice_${getLocalDateString()}`;
+        try {
+          if (!localStorage.getItem(todayKey)) {
+            localStorage.setItem(todayKey, "1");
+            sendDuoDesktopNotification(motivation, dueCount).catch(() => {});
+          }
+        } catch {}
+      }
       if (this.activeAnchor) markAnchorFired(this.activeAnchor);
       // The moment was used: the next one has to be a new transition
       this.pendingMoment = null;

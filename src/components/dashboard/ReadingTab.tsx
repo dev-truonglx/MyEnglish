@@ -14,6 +14,10 @@ const DRAFT_KEY = "myenglish_reading_draft_v1";
 /** Long texts are cut so highlighting stays instant */
 const MAX_CHARS = 20_000;
 const MAX_CANDIDATES_SHOWN = 15;
+const PASTE_KEYS =
+  typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
+    ? "⌘V"
+    : "Ctrl+V";
 
 const STATUS_STYLE: Record<BankStatus, string> = {
   mastered: "border-b-2 border-emerald-400/70 dark:border-emerald-500/60",
@@ -141,7 +145,7 @@ export default function ReadingTab() {
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Dán văn bản tiếng Anh vào đây (⌘V)…"
+          placeholder={`Dán văn bản tiếng Anh vào đây (${PASTE_KEYS})…`}
           rows={14}
           className="w-full p-4 rounded-2xl border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-y"
         />

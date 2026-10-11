@@ -10,6 +10,18 @@ import { awardXP } from "./smartReview";
 /** A word counts as "nhớ chắc" (known for the long run) from this stability, in days */
 export const MASTERED_STABILITY_DAYS = 21;
 
+/** Retention needs this many review answers before it means anything (colours, advice) */
+export const MIN_RETENTION_SAMPLE = 20;
+
+/**
+ * The word had at least one real answer: a word only marked "Đã biết" (its single log is 'known', which
+ * `stats` leaves out) is not counted as studied in levels, coverage or statistics. Words without `stats`
+ * (built in memory) count as reviewed.
+ */
+export function hasRealReview(w: WordDetail): boolean {
+  return (w.stats?.totalAttempts ?? 1) > 0;
+}
+
 export interface ProgressLog {
   wordId: string;
   rating: number; // FSRS grade, 1 = Again (forgotten)
@@ -38,7 +50,7 @@ export function weekKey(now: Date = new Date()): string {
 
 export async function getReviewLogsSince(since: Date): Promise<ProgressLog[]> {
   const db = await getDatabase();
-  // Introductions and implicit credits (is_scheduled = 2) are not answers the learner gave
+  // Introductions, words marked "Đã biết" and implicit credits (is_scheduled = 2) are not answers the learner gave
   const rows = await db.select<
     Array<{
       word_id: string;
@@ -54,7 +66,7 @@ export async function getReviewLogsSince(since: Date): Promise<ProgressLog[]> {
   >(
     `SELECT word_id, rating, is_scheduled, timestamp, direction, state_before, r_predicted, stability_before, response_time_ms
      FROM review_logs
-     WHERE timestamp >= $1 AND exercise_type != 'intro' AND COALESCE(is_scheduled, 1) != 2
+     WHERE timestamp >= $1 AND exercise_type NOT IN ('intro', 'known') AND COALESCE(is_scheduled, 1) != 2
      ORDER BY timestamp`,
     [since.toISOString()]
   );
@@ -154,7 +166,7 @@ export function computeCalibration(logs: ProgressLog[]): CalibrationBin[] {
 export interface LearningInsights {
   retention: RetentionStats;
   calibration: CalibrationBin[];
-  /** Minutes spent answering per active day over the period */
+  /** Minutes spent answering per active day over the period (answer time only: intros, grammar, sound not counted) */
   minutesPerActiveDay: number;
   activeDays: number;
   days: number;
@@ -185,10 +197,13 @@ export interface WorkloadForecast {
   days: ForecastDay[];
   /** Reviews already due (overdue included) today */
   dueNow: number;
+  /** Average of the next 7 days, today (with its overdue pile) included */
   averagePerDay: number;
+  /** Average of the 7 days after today: the regular load, without a pile left by a break */
+  upcomingPerDay: number;
   maxSessionSize: number;
   newCardsPerDay: number;
-  /** Average load is above one session a day: adding new words will make it worse */
+  /** The regular load (upcomingPerDay) is above one session a day: adding new words will make it worse */
   overloaded: boolean;
 }
 
@@ -230,15 +245,18 @@ export async function loadWorkloadForecast(horizonDays: number = 30, now: Date =
   );
   const days = bucketForecast(rows.map((r) => r.next_review_date), horizonDays, now);
   const limits = getStudyLimits();
-  const week = days.slice(0, 7);
-  const averagePerDay = week.length > 0 ? week.reduce((sum, d) => sum + d.reviews, 0) / week.length : 0;
+  const average = (list: ForecastDay[]) => (list.length > 0 ? list.reduce((sum, d) => sum + d.reviews, 0) / list.length : 0);
+  const averagePerDay = average(days.slice(0, 7));
+  // Overdue reviews all land on today: after a break they would read as a lasting overload
+  const upcomingPerDay = average(days.slice(1, 8));
   return {
     days,
     dueNow: days[0]?.reviews ?? 0,
     averagePerDay,
+    upcomingPerDay,
     maxSessionSize: limits.maxSessionSize,
     newCardsPerDay: limits.newCardsPerDay,
-    overloaded: averagePerDay > limits.maxSessionSize,
+    overloaded: upcomingPerDay > limits.maxSessionSize,
   };
 }
 
@@ -253,7 +271,7 @@ export interface WeeklySummary {
   /** Number of answers the retention is computed from */
   reviewAnswers: number;
   targetRetention: number;
-  masteredWords: number; // stability >= MASTERED_STABILITY_DAYS now
+  masteredWords: number; // stability >= MASTERED_STABILITY_DAYS now, after a real review
 }
 
 export function summarizeWeek(logs: ProgressLog[], words: WordDetail[], targetRetention: number): WeeklySummary {
@@ -277,7 +295,7 @@ export function summarizeWeek(logs: ProgressLog[], words: WordDetail[], targetRe
     })(),
     reviewAnswers: reviewStateAnswers(logs).length || scheduled.filter((l) => l.stateBefore == null).length,
     targetRetention,
-    masteredWords: words.filter((w) => (w.srs.stability ?? 0) >= MASTERED_STABILITY_DAYS).length,
+    masteredWords: words.filter((w) => (w.srs.stability ?? 0) >= MASTERED_STABILITY_DAYS && hasRealReview(w)).length,
   };
 }
 
@@ -413,4 +431,144 @@ export function summarizeSession(results: SessionResult[], now: Date = new Date(
         (a.nextReview ? new Date(a.nextReview).getTime() : Infinity) - (b.nextReview ? new Date(b.nextReview).getTime() : Infinity)
     );
   return { total: results.length, correct: results.filter((r) => r.correct).length, items };
+}
+
+// ─── Today screen: level ETA, last week, the daily goal ──────────────────────
+
+/**
+ * New words a learner really gets per day: the daily budget is shared with new recall cards
+ * (splitNewCardBudget), so after the first week about half of it goes to new words.
+ */
+export function estimateNewWordsPerDay(newCardsPerDay: number): number {
+  return Math.max(1, Math.ceil(Math.max(0, newCardsPerDay) / 2));
+}
+
+/**
+ * Days until every word of a level has been met, at `wordsPerDay` new words a day of which the level gets
+ * `share` (its part of the level mix). 0 = every word met.
+ */
+export function levelEtaDays(remaining: number, wordsPerDay: number, share: number = 1): number {
+  if (remaining <= 0) return 0;
+  const rate = Math.max(0.1, wordsPerDay * Math.min(1, Math.max(0.01, share)));
+  return Math.ceil(remaining / rate);
+}
+
+/** A "mastered" learning event (a card crossing MATURE_STABILITY_DAYS), as learningEvents stores it */
+export interface MasteredEvent {
+  at: string;
+  wordId?: string | null;
+  direction?: CardDirection | null;
+}
+
+export interface LastWeekSummary {
+  /** Monday of last week (YYYY-MM-DD) */
+  week: string;
+  /** Words whose recognition card reached long-term memory ("Nhớ lâu") last week */
+  rememberedLong: number;
+  /** The same, the week before */
+  rememberedLongBefore: number;
+  /** Days of last week with any study (0–7) */
+  activeDays: number;
+  /** Share of Review-state answers remembered; null below MIN_RETENTION_SAMPLE answers */
+  retention: number | null;
+  reviewAnswers: number;
+  /** One piece of advice */
+  suggestion: string;
+}
+
+/** Words (recognition cards, one per word) that reached long-term memory in [from, to) */
+function rememberedLongBetween(events: MasteredEvent[], from: Date, to: Date): number {
+  const ids = new Set<string>();
+  for (const e of events) {
+    if ((e.direction ?? "recognition") !== "recognition") continue;
+    const t = new Date(e.at).getTime();
+    if (t >= from.getTime() && t < to.getTime()) ids.add(e.wordId ?? e.at);
+  }
+  return ids.size;
+}
+
+/** The single piece of advice of the weekly summary */
+export function weeklySuggestion(s: { activeDays: number; retention: number | null; targetRetention: number }): string {
+  if (s.activeDays <= 3) {
+    return "Thử chọn một giờ học cố định, ví dụ sau bữa trưa: mỗi ngày 5 phút đều đặn giữ từ tốt hơn học dồn một buổi.";
+  }
+  if (s.retention !== null && s.retention < s.targetRetention - 0.1) {
+    return "Tuần qua nhớ hơi vất vả, chuyện rất bình thường. Vài ngày tới cứ ôn trước, học ít từ mới hơn một chút là từ sẽ chắc lại.";
+  }
+  if (s.activeDays >= 6 && (s.retention === null || s.retention >= s.targetRetention - 0.03)) {
+    return "Nhịp học rất đều! Nếu thấy nhẹ, bạn có thể tăng thêm vài từ mới mỗi ngày.";
+  }
+  return "Giữ nhịp này nhé: ngày nào cũng một chút là đủ để từ vào trí nhớ dài hạn.";
+}
+
+/**
+ * Last week (Monday to Sunday before the current week) in a few real numbers: words that reached long-term
+ * memory (and the week before, to compare), days studied, true retention when there are enough answers.
+ * null when nothing was studied last week.
+ */
+export function summarizeLastWeek(input: {
+  mastered: MasteredEvent[];
+  logs: ProgressLog[];
+  /** Answers per local day ("YYYY-MM-DD" -> count), as the streak keeps them */
+  activity: Record<string, number>;
+  targetRetention: number;
+  now?: Date;
+}): LastWeekSummary | null {
+  const now = input.now ?? new Date();
+  const thisWeek = startOfWeek(now);
+  const lastWeek = new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate() - 7);
+  const weekBefore = new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate() - 14);
+
+  let activeDays = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(lastWeek.getFullYear(), lastWeek.getMonth(), lastWeek.getDate() + i);
+    if ((input.activity[localKey(d)] ?? 0) > 0) activeDays++;
+  }
+  const lastLogs = input.logs.filter((l) => {
+    const t = new Date(l.timestamp).getTime();
+    return t >= lastWeek.getTime() && t < thisWeek.getTime();
+  });
+  const rememberedLong = rememberedLongBetween(input.mastered, lastWeek, thisWeek);
+  if (activeDays === 0 && lastLogs.length === 0 && rememberedLong === 0) return null;
+
+  const review = reviewStateAnswers(lastLogs);
+  const retention = review.length >= MIN_RETENTION_SAMPLE ? passRate(review) : null;
+  return {
+    week: localKey(lastWeek),
+    rememberedLong,
+    rememberedLongBefore: rememberedLongBetween(input.mastered, weekBefore, lastWeek),
+    activeDays,
+    retention,
+    reviewAnswers: review.length,
+    suggestion: weeklySuggestion({ activeDays, retention, targetRetention: input.targetRetention }),
+  };
+}
+
+export async function loadLastWeekSummary(now: Date = new Date()): Promise<LastWeekSummary | null> {
+  const thisWeek = startOfWeek(now);
+  const weekBefore = new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate() - 14);
+  const lastWeek = new Date(thisWeek.getFullYear(), thisWeek.getMonth(), thisWeek.getDate() - 7);
+  const [{ getLearningEventsSince }, { getActivityLogs }] = await Promise.all([import("./learningEvents"), import("./streak")]);
+  const [mastered, logs] = await Promise.all([getLearningEventsSince(weekBefore, ["mastered"]), getReviewLogsSince(lastWeek)]);
+  return summarizeLastWeek({
+    mastered,
+    logs,
+    activity: getActivityLogs(),
+    targetRetention: getFSRSSettings().requestRetention,
+    now,
+  });
+}
+
+/**
+ * Confetti at the end of a session only when this session made the daily goal reached for the first time
+ * today: not for every session, not for an extra card once the goal was already met.
+ */
+export function shouldCelebrateDailyGoal(s: {
+  reachedAtStart: boolean;
+  reachedNow: boolean;
+  /** Local day (YYYY-MM-DD) of the last celebration, if any */
+  celebratedOn: string | null;
+  today: string;
+}): boolean {
+  return s.reachedNow && !s.reachedAtStart && s.celebratedOn !== s.today;
 }

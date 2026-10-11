@@ -14,6 +14,8 @@ const VOCAB_KEYS = [
   // FSRS weights fitted to the old review history
   "myenglish_fsrs_weights_v1",
   "myenglish_study_levels_v1",
+  // Deck words pulled in early ("Học sớm"): they point at words that were just deleted
+  "myenglish_picked_words_v1",
 ];
 
 /** Words from before the deck (no catalog entry): the learner must go through the switch first */

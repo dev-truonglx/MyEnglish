@@ -6,10 +6,10 @@ import {
   isLessonPassed,
   loadPronunciationLessons,
   recordPronunciationQuiz,
+  recordSayAloud,
   PRONUNCIATION_PASS_RATIO,
   type PronunciationProgress,
 } from "@/services/pronunciation";
-import { logLearningEvent } from "@/services/learningEvents";
 import { handleSpeak, SLOW_RATE } from "../review/speech";
 import { PAGE_CONTAINER } from "./shared";
 
@@ -49,7 +49,7 @@ function SayAloud({ lessonId, items }: { lessonId: string; items: PronunciationI
   const item = items[index % items.length];
   if (!item) return null;
   const rate = (ok: boolean) => {
-    logLearningEvent("say_aloud", { meta: { lessonId, text: item.text, ok } });
+    recordSayAloud(lessonId, item.text, ok);
     setRated((n) => n + 1);
     setIndex((i) => i + 1);
   };

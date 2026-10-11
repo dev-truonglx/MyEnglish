@@ -35,6 +35,47 @@ import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
 import PlacementTest from "@/components/PlacementTest";
 import { calculateStreakAndGoal } from "@/services/streak";
 import GrammarHub from "@/components/grammar/GrammarHub";
+import { mergeChapterParts, saveGrammarBookChapter } from "@/services/grammarBook";
+import type { GrammarBookFile } from "@/types/grammarBook";
+import sampleP1 from "../../test/fixtures/grammarBook/ch01-p1.json";
+import sampleP2 from "../../test/fixtures/grammarBook/ch01-p2.json";
+
+const TENSE_TITLES: Array<[string, string]> = [
+  ["The Present Simple Tense", "Thì hiện tại đơn"], ["The Present Continuous Tense", "Thì hiện tại tiếp diễn"],
+  ["The Present Perfect Tense", "Thì hiện tại hoàn thành"], ["The Present Perfect Continuous Tense", "Thì hiện tại hoàn thành tiếp diễn"],
+  ["The Past Simple Tense", "Thì quá khứ đơn"], ["The Past Continuous Tense", "Thì quá khứ tiếp diễn"],
+  ["The Past Perfect Tense", "Thì quá khứ hoàn thành"], ["The Past Perfect Continuous Tense", "Thì quá khứ hoàn thành tiếp diễn"],
+  ["The simple Future Tense", "Thì tương lai đơn"], ["Near Future", "Tương lai gần"],
+  ["The Future Continuous Tense", "Thì tương lai tiếp diễn"], ["The Future Perfect Tense", "Thì tương lai hoàn thành"],
+  ["The Future Perfect Continuous Tense", "Thì tương lai hoàn thành tiếp diễn"],
+];
+
+/**
+ * The test fixture (sentences written for the tests, not book content) as the imported grammar book.
+ * ?tenses: the chapter has the 13 tense lessons (titles only) to see the tense table, plus a second chapter.
+ */
+async function importSampleGrammar() {
+  const files = [sampleP1, sampleP2] as unknown as GrammarBookFile[];
+  if (new URLSearchParams(location.search).has("tenses")) {
+    const p1 = structuredClone(files[0]);
+    p1.lessons = TENSE_TITLES.map(([title, titleVn], i) => ({
+      id: `ch01-l${String(i + 1).padStart(2, "0")}`, order: i + 1, title, titleVn, page: 1,
+      blocks: [{ type: "formula", label: "Khẳng định", text: "S + …" }],
+    }));
+    files[0] = p1;
+    const ch2: GrammarBookFile = {
+      format: "myenglish-grammar-book", version: 2, chapterId: "ch02", part: 1, parts: 1,
+      chapter: { order: 2, title: "SEQUENCE OF TENSES", titleVn: "SỰ PHỐI HỢP CÁC THÌ" },
+      lessons: [
+        { id: "ch02-l01", order: 1, title: "Main and subordinate clauses", titleVn: "Mệnh đề chính và mệnh đề phụ", blocks: [] },
+        { id: "ch02-l02", order: 2, title: "Adverbial clauses of time", titleVn: "Mệnh đề trạng ngữ chỉ thời gian", blocks: [] },
+      ],
+      exerciseSets: [], practiceGroups: [],
+    };
+    files.push(ch2);
+  }
+  for (const chapter of mergeChapterParts(files).values()) await saveGrammarBookChapter(chapter);
+}
 
 const DAY = 864e5;
 const iso = (ms: number) => new Date(Date.now() + ms).toISOString();
@@ -230,22 +271,95 @@ function Onboarding() {
   );
 }
 
-// ?today: the opening screen with the seeded words
+// ?today: the opening screen with the seeded words. Options (combine freely):
+//   &goal=30   daily goal of the 10-minute plan (3 things; default 10 -> 5-minute plan, 2 things)
+//   &book      the sample grammar book imported (a grammar lesson on the list)
+//   &done      everything done today: nothing due, pronunciation practised, 32 answers, a card back tonight
+//   &late      19:30 (the "Chỉ 1 phút" button stressed when nothing was studied today); &at=9: 9:00
+//   &rich      120 words remembered for the long run (milestone), last week's numbers (weekly card), coverage gain
+//   &empty     no words at all (where words come from, U6)
+//   &simple    simple mode
 function Today() {
+  const q = new URLSearchParams(location.search);
   const [words, setWords] = useState<Awaited<ReturnType<typeof getAllWords>> | null>(null);
-  React.useEffect(() => {
-    getAllWords().then(setWords);
+  const [introduced, setIntroduced] = useState<Awaited<ReturnType<typeof getNewCardsIntroducedToday>> | null>(null);
+  const fixedNow = React.useMemo(() => {
+    const hour = q.has("late") ? 19.5 : q.get("at") ? Number(q.get("at")) : null;
+    if (hour === null) return undefined;
+    const d = new Date();
+    d.setHours(Math.floor(hour), Math.round((hour % 1) * 60), 0, 0);
+    return d;
   }, []);
-  if (!words) return null;
-  const work = summarizeTodayWork(words, { recognition: 0, production: 0 });
+  React.useEffect(() => {
+    (async () => {
+      const db = await getDatabase();
+      // localStorage outlives a reload (the database does not): start each scenario clean
+      for (const k of ["myenglish_pronunciation_last_day_v1", "myenglish_remembered_milestone_v1", "myenglish_weekly_card_v1",
+        "myenglish_coverage_baseline_v1", "myenglish_daily_goal_v1", "myenglish_simple_mode_v1", "myenglish_goal_celebrated_v1"]) localStorage.removeItem(k);
+      const dayStr = (back: number) => { const d = new Date(); d.setDate(d.getDate() - back); return getLocalDateString(d); };
+      const logs: Record<string, number> = {};
+      for (let back = 1; back <= 5; back++) logs[dayStr(back)] = 15;
+      if (q.get("goal")) localStorage.setItem("myenglish_daily_goal_v1", q.get("goal")!);
+      if (q.has("empty")) {
+        await db.execute(`DELETE FROM srs_reviews`);
+        await db.execute(`DELETE FROM words`);
+      }
+      if (q.has("done")) {
+        await db.execute(`UPDATE srs_reviews SET next_review_date = $1 WHERE word_id = 'w-deploy'`, [iso(4 * DAY)]);
+        await db.execute(`DELETE FROM words WHERE id = 'w-new'`);
+        // A learning card back tonight (one minute-step left)
+        await db.execute(`UPDATE srs_reviews SET state = 1, stability = 0.5, scheduled_days = 0, next_review_date = $1 WHERE word_id = 'w-banana'`, [
+          new Date(Math.min(Date.now() + 3 * 3600e3, new Date().setHours(23, 50, 0, 0))).toISOString(),
+        ]);
+        localStorage.setItem("myenglish_pronunciation_last_day_v1", getLocalDateString());
+        logs[getLocalDateString()] = 32;
+      }
+      if (q.has("rich")) {
+        for (let i = 0; i < 120; i++) {
+          const id = `w-long-${i}`;
+          await db.execute(
+            `INSERT OR REPLACE INTO words (id, word, part_of_speech, meaning_vn, synonyms, antonyms, topic, created_at) VALUES ($1,$2,'noun',$3,'[]','[]','DevOps',$4)`,
+            [id, `term${i}`, `nghĩa ${i}`, iso(-60 * DAY)]
+          );
+          await db.execute(
+            `INSERT OR REPLACE INTO srs_reviews (word_id, ease_factor, interval, repetitions, next_review_date, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps)
+             VALUES ($1, 2.5, 30, 5, $2, 30, 4, 10, 30, 5, 0, 2, $3, 0)`,
+            [id, iso(20 * DAY), iso(-10 * DAY)]
+          );
+        }
+        const lastWeek = (k: number) => { const d = new Date(); d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - 7 + k); d.setHours(10, 0, 0, 0); return d; };
+        for (let k = 0; k < 18; k++) await logLearningEvent("mastered", { direction: "recognition", wordId: `w-long-${k}`, at: lastWeek(k % 7) });
+        for (let k = 0; k < 12; k++) await logLearningEvent("mastered", { direction: "recognition", wordId: `w-long-${50 + k}`, at: new Date(lastWeek(k % 7).getTime() - 7 * DAY) });
+        const base = { exerciseType: "multiple_choice" as const, responseTimeMs: 3000, wrongAttempts: 0, xpEarned: 10, direction: "recognition" as const };
+        for (let k = 0; k < 40; k++) {
+          await saveReviewLog({ ...base, wordId: `w-long-${k}`, isCorrect: k % 8 !== 0, rating: k % 8 === 0 ? 1 : 3, isScheduled: true,
+            timestamp: lastWeek(k % 5).toISOString(), before: { state: 2, stability: 12, difficulty: 5, retrievability: 0.9, elapsedDays: 10 } });
+        }
+        for (let k = 0; k < 5; k++) logs[getLocalDateString(lastWeek(k))] = 20;
+        localStorage.setItem("myenglish_coverage_baseline_v1", JSON.stringify({ percent: 41, day: dayStr(14) }));
+      }
+      localStorage.setItem("myenglish_study_logs_v1", JSON.stringify(logs));
+      if (q.has("simple")) localStorage.setItem("myenglish_simple_mode_v1", "1");
+      setStudyLevels(["A1"]);
+      const all = await getAllWords();
+      useWordsStore.setState({ words: all });
+      setIntroduced(await getNewCardsIntroducedToday());
+      setWords(all);
+    })();
+  }, []);
+  if (!words || !introduced) return null;
+  const work = summarizeTodayWork(words, introduced, fixedNow);
   return (
     <TodayTab
       words={words}
       todayWork={work}
       comeback={null}
-      streakStats={calculateStreakAndGoal(words)}
+      streakStats={calculateStreakAndGoal(words, work.total)}
       onStart={() => ((window as any).__started = true)}
+      onQuickStart={() => ((window as any).__quick = true)}
       setActiveTab={(t) => ((window as any).__tab = t)}
+      simpleMode={q.has("simple")}
+      now={fixedNow}
     />
   );
 }
@@ -319,6 +433,9 @@ function App() {
     saveMnemonic("w-deploy", "Deploy = đẩy (ploy) code ra (de) server", "Triển khai");
     seed()
       .then(async () => {
+        // ?grammarhub / ?lesson / ?grammar: the sample chapter is imported (add &empty for a learner without data)
+        const params = new URLSearchParams(location.search);
+        if ((params.has("grammarhub") || params.has("lesson") || params.has("grammar") || params.has("book")) && !params.has("empty")) await importSampleGrammar();
         // ?milestone: "deploy" is fading (seen 80 days ago, stability 15): remembering it now crosses 21 days
         if (new URLSearchParams(location.search).has("milestone")) {
           const db = await getDatabase();
@@ -342,7 +459,8 @@ function App() {
   if (q.has("deckflash")) return <DeckFlash />;
   if (q.has("setup")) return <VocabSetupScreen mode="migrate" onDone={() => ((window as any).__setupDone = true)} />;
   if (q.has("pron")) return <PronunciationTab />;
-  if (q.has("lesson")) return <GrammarHub initialLessonId={q.get("lesson") || "found-to-be"} />;
+  if (q.has("lesson")) return <GrammarHub initialLessonId={q.get("lesson") || "ch01-l01"} />;
+  if (q.has("grammarhub")) return <GrammarHub />;
   if (q.has("tiles")) return <Tiles />;
   if (q.has("placement"))
     return <PlacementTest onClose={() => {}} onDone={(level) => ((window as any).__placement = level)} />;
@@ -373,4 +491,6 @@ function App() {
   }
   return q.has("nudge") ? <ReviewNudge onDone={() => ((window as any).__nudgeDone = true)} /> : <FocusReviewModal isPreview />;
 }
+// The app switches Tailwind's dark mode with a class: follow the (emulated) system theme
+if (window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

@@ -6,6 +6,7 @@ import { Clock, Play, Zap, Flame, Check, X, Sparkles } from "lucide-react";
 import {
   buildNudgePayload,
   hideReviewNudge,
+  NUDGE_AUTO_OPEN_SECONDS,
   resetIgnoredNudges,
   snoozeIgnoredNudge,
   snoozeReminder,
@@ -23,11 +24,16 @@ interface ReviewNudgeProps {
 }
 
 const TICK_MS = 250;
+const QUIZ_COUNTDOWN_SECONDS = 30;
+/** After a wrong quick answer the card stays up to show the right one, then closes by itself (N13) */
+const WRONG_ANSWER_CLOSE_MS = 60 * 1000;
 
 export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const [payload, setPayload] = useState<ReviewNudgePayload>(() => buildNudgePayload(0));
   const [mode, setMode] = useState<"nudge" | "quiz">("nudge");
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
+  // Length of the countdown that is running (the nudge and the quiz wait different times)
+  const [countdownTotal, setCountdownTotal] = useState(NUDGE_AUTO_OPEN_SECONDS);
   const [animationKey, setAnimationKey] = useState(0);
 
   // Micro-Quiz state
@@ -54,6 +60,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     lastTickRef.current = Date.now();
     setPayload(next);
     setSecondsLeft(next.autoOpenSeconds);
+    setCountdownTotal(next.autoOpenSeconds);
     logLearningEvent("nudge_shown", { meta: { dueCount: next.dueCount, quiz: !!next.microQuiz, moment: next.moment ?? null } });
     setFreshBar(true);
     setAnimationKey((k) => k + 1);
@@ -112,8 +119,9 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       setMode("quiz");
       quizStartTimeRef.current = Date.now();
       // Give more time for answering
-      setSecondsLeft(30);
-      deadlineRef.current = Date.now() + 30 * 1000;
+      setSecondsLeft(QUIZ_COUNTDOWN_SECONDS);
+      setCountdownTotal(QUIZ_COUNTDOWN_SECONDS);
+      deadlineRef.current = Date.now() + QUIZ_COUNTDOWN_SECONDS * 1000;
     }
   };
 
@@ -121,6 +129,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const handleAnswerQuiz = async (optionId: string) => {
     if (!payload.microQuiz || selectedOptionId !== null) return;
     setSelectedOptionId(optionId);
+    // Answered (right or wrong): the countdown stops now, so a fast answer is never counted as ignored (N14)
+    setSecondsLeft(null);
     const responseTime = Date.now() - quizStartTimeRef.current;
 
     try {
@@ -134,14 +144,12 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       });
       setQuizResult(res);
 
+      // A right answer dismisses itself after a brief celebration; a wrong one stays on screen
+      // until the learner has read the right one and closes the card
       if (res.isCorrect) {
-        // Auto dismiss after brief celebratory delay
         setTimeout(() => {
           finish("quiz-done");
         }, 1800);
-      } else {
-        // A wrong answer stays on screen until the learner has read the right one and closes the card
-        setSecondsLeft(null);
       }
     } catch (err) {
       console.warn("Error evaluating micro quiz answer:", err);
@@ -151,7 +159,15 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     }
   };
 
-  // Keyboard shortcut support (1, 2, 3 for quiz; Enter to start review; Esc to snooze)
+  // A wrong answer left on screen closes after a while: counted as closed, not as an ignored card (N13)
+  useEffect(() => {
+    if (!quizResult || quizResult.isCorrect) return;
+    const timer = setTimeout(() => finish("quiz-done"), WRONG_ANSWER_CLOSE_MS);
+    return () => clearTimeout(timer);
+  }, [quizResult, finish]);
+
+  // Keys (1, 2, 3 for the quiz; Enter to start; Esc to snooze) only reach the browser preview: the native
+  // card never takes keyboard focus, so no key hints are shown (N13)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (mode === "quiz" && quizResult && !quizResult.isCorrect) {
@@ -242,7 +258,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     if (secondsLeft === 0) finish("timeout");
   }, [secondsLeft, finish]);
 
-  const progress = secondsLeft === null ? 0 : secondsLeft / payload.autoOpenSeconds;
+  const progress = secondsLeft === null ? 0 : secondsLeft / countdownTotal;
 
   // Mascot styling based on Duo emotion
   const mood = payload.motivation?.mascotMood || "happy";
@@ -382,7 +398,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
 
             {/* 3 MCQ Options */}
             <div className="flex flex-col gap-1.5">
-              {payload.microQuiz?.options.map((opt, idx) => {
+              {payload.microQuiz?.options.map((opt) => {
                 const isSelected = selectedOptionId === opt.id;
                 const isAnswered = selectedOptionId !== null;
                 const isCorrect = opt.isCorrect;
@@ -410,9 +426,6 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                     className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-lg border text-[11.5px] transition-all text-left ${btnStyle} active:scale-98`}
                   >
                     <div className="flex items-center gap-1.5 min-w-0">
-                      <span className="shrink-0 w-4 h-4 rounded text-[10px] font-bold flex items-center justify-center bg-slate-200/80 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300">
-                        {idx + 1}
-                      </span>
                       <span className="truncate">{opt.text}</span>
                     </div>
                     {isAnswered && isCorrect && (
@@ -448,7 +461,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                     onClick={() => finish("quiz-done")}
                     className="shrink-0 ml-2 px-2 py-0.5 rounded bg-white/70 dark:bg-zinc-800/80 text-[10px] font-semibold hover:bg-white dark:hover:bg-zinc-700"
                   >
-                    Đóng ↵
+                    Đóng
                   </button>
                 )}
               </div>

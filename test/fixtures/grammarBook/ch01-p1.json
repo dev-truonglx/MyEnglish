@@ -1,0 +1,89 @@
+{
+ "format": "myenglish-grammar-book",
+ "version": 2,
+ "chapterId": "ch01",
+ "part": 1,
+ "parts": 2,
+ "chapter": {
+  "order": 1,
+  "title": "TENSES",
+  "titleVn": "CÁC THÌ",
+  "pages": [
+   1,
+   15
+  ]
+ },
+ "lessons": [
+  {
+   "id": "ch01-l01",
+   "order": 1,
+   "title": "Present simple",
+   "titleVn": "Hiện tại đơn",
+   "page": 1,
+   "blocks": [
+    {
+     "type": "heading",
+     "text": "Cấu trúc"
+    },
+    {
+     "type": "formula",
+     "label": "Khẳng định",
+     "text": "S + V(s/es)"
+    },
+    {
+     "type": "formula",
+     "label": "Phủ định",
+     "text": "S + do/does not + V"
+    },
+    {
+     "type": "example",
+     "en": "My brother drives to work.",
+     "vi": "Anh tôi lái xe đi làm."
+    }
+   ]
+  },
+  {
+   "id": "ch01-l02",
+   "order": 2,
+   "title": "Present continuous",
+   "titleVn": "Hiện tại tiếp diễn",
+   "page": 2,
+   "blocks": [
+    {
+     "type": "formula",
+     "label": "Khẳng định",
+     "text": "S + am/is/are + V-ing"
+    }
+   ]
+  },
+  {
+   "id": "ch01-l03",
+   "order": 3,
+   "title": "Past simple",
+   "titleVn": "Quá khứ đơn",
+   "page": 4,
+   "blocks": [
+    {
+     "type": "formula",
+     "label": "Khẳng định",
+     "text": "S + V2/V-ed"
+    }
+   ]
+  }
+ ],
+ "chapterNotes": [
+  {
+   "type": "note",
+   "text": "Ghi nhớ mẫu."
+  }
+ ],
+ "exerciseSets": [],
+ "practiceGroups": [],
+ "fixes": [],
+ "stats": {
+  "lessons": 3,
+  "sets": 0,
+  "groups": 0,
+  "items": 0
+ }
+}

@@ -21,12 +21,14 @@ import {
   saveLeechSettings,
   getXPState,
   getReviewAnalytics,
+  isKnownOnly,
   type WordStatsSummary,
   type XPState,
   type ReviewAnalyticsData,
   type LeechSettings,
 } from "@/services/smartReview";
-import { getAchievements } from "@/services/achievements";
+import { countBadgeWords, getAchievements } from "@/services/achievements";
+import { loadWorkloadForecast, type WorkloadForecast } from "@/services/progress";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 import Heatmap from "./Heatmap";
@@ -43,12 +45,15 @@ interface AnalyticsViewProps {
   words: WordDetail[];
   onStartReviewWord?: (word: WordDetail) => void;
   onRefreshWords?: () => void;
+  /** Words still due today, as the dashboard counts them (keeps the goal and streak in step with its header) */
+  dueRemaining?: number | null;
 }
 
 export default function AnalyticsView({
   words,
   onStartReviewWord,
   onRefreshWords,
+  dueRemaining = null,
 }: AnalyticsViewProps) {
   const simple = isSimpleMode();
   const beginner = isBeginner();
@@ -72,16 +77,23 @@ export default function AnalyticsView({
   );
   const suspendedWords = useMemo(() => words.filter((w) => !!w.suspended), [words]);
   const [leechMessage, setLeechMessage] = useState<string | null>(null);
-  const streakStats = useMemo(() => calculateStreakAndGoal(words), [words]);
+  const streakStats = useMemo(() => calculateStreakAndGoal(words, dueRemaining), [words, dueRemaining]);
 
-  // Compute Topic Mastery
+  // Reviews coming up: the next days in one line (simple mode), the full calibration card otherwise
+  const [forecast, setForecast] = useState<WorkloadForecast | null>(null);
+  useEffect(() => {
+    loadWorkloadForecast(8).then(setForecast).catch(() => setForecast(null));
+  }, [words]);
+
+  // Compute Level Mastery (the "topic" field holds the CEFR level)
   const topicMastery = useMemo(() => {
     const map: Record<string, { total: number; mastered: number; learning: number }> = {};
     for (const w of words) {
       const topic = w.topic || "General Tech";
       if (!map[topic]) map[topic] = { total: 0, mastered: 0, learning: 0 };
       map[topic].total++;
-      if ((w.srs.stability || 0) >= 21) {
+      // A word only marked "Đã biết" is not mastered until a real review confirms it
+      if ((w.srs.stability || 0) >= 21 && !isKnownOnly(w.srs)) {
         map[topic].mastered++;
       } else if ((w.srs.state || 0) > 0) {
         map[topic].learning++;
@@ -102,15 +114,18 @@ export default function AnalyticsView({
       .catch((err) => console.warn("Failed to load review analytics:", err));
   }, []);
 
+  // Badge counts leave out "Đã biết" words no review has confirmed (the session counts the same way).
+  // Leech badge: no cumulative count is stored outside the session, so only the saved unlock is shown.
+  const badgeCounts = useMemo(() => countBadgeWords(words), [words]);
   const achievements = useMemo(() => {
     return getAchievements({
       totalWords: words.length,
-      masteredWords: words.filter((w) => (w.srs.state ?? 0) === 2 && (w.srs.stability ?? 0) >= 21).length,
+      rememberedWords: badgeCounts.rememberedWords,
+      masteredWords: badgeCounts.masteredWords,
       currentStreak: streakStats.currentStreak,
-      leechesSlain: 0,
-      topicMasterCount: topicMastery.filter((t) => t.mastered >= 10).length,
+      topicMasterCount: badgeCounts.topicMasterCount,
     });
-  }, [words.length, streakStats.currentStreak, topicMastery]);
+  }, [words.length, badgeCounts, streakStats.currentStreak]);
 
   // Latest requested word id; slower generations for other words are discarded
   const activeMnemonicRef = useRef<string | null>(null);
@@ -256,9 +271,20 @@ export default function AnalyticsView({
 
       {/* Calibration of the scheduler: technical, hidden behind a toggle in simple mode */}
       {simple && !showTechnical ? (
-        <button onClick={() => setShowTechnical(true)} className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline">
-          Xem số liệu kỹ thuật của thuật toán ôn tập
-        </button>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm">
+          {forecast && (
+            <p className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-zinc-300">
+              <Calendar className="w-4 h-4 text-cyan-500 shrink-0" />
+              <span>
+                Sắp phải ôn: Mai ~{forecast.days[1]?.reviews ?? 0} thẻ, 7 ngày tới ~
+                {forecast.days.slice(1, 8).reduce((sum, d) => sum + d.reviews, 0)} thẻ
+              </span>
+            </p>
+          )}
+          <button onClick={() => setShowTechnical(true)} className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline self-start sm:self-auto">
+            Xem số liệu kỹ thuật của thuật toán ôn tập
+          </button>
+        </div>
       ) : (
         <LearningInsightsCard />
       )}
@@ -269,7 +295,7 @@ export default function AnalyticsView({
           <Calendar className="w-4 h-4 text-cyan-500" />
           <span>Lịch Sử Học Tập Hàng Ngày</span>
         </h3>
-        <Heatmap words={words} />
+        <Heatmap words={words} dueRemaining={dueRemaining} />
       </div>
 
       {/* Accuracy & Review Logs Summary (if logs exist) */}
@@ -404,12 +430,12 @@ export default function AnalyticsView({
         <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-cyan-500" />
-            <span>Mức Độ Làm Chủ Theo Chủ Đề</span>
+            <span>Mức Độ Làm Chủ Theo Cấp Độ</span>
           </h3>
 
           <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
             {topicMastery.length === 0 ? (
-              <p className="text-xs text-slate-400">Chưa có chủ đề nào.</p>
+              <p className="text-xs text-slate-400">Chưa có cấp độ nào.</p>
             ) : (
               topicMastery.map((item) => (
                 <div key={item.topic} className="space-y-1">

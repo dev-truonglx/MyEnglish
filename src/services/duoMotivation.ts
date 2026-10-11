@@ -411,6 +411,8 @@ export async function evaluateMicroQuizAnswer(params: {
       countsForDailyGoal: true,
     });
     xpEarned = recorded.xp.totalXP;
+    // The recorder downgrades to practice a card graded since it was read
+    scheduled = recorded.scheduled;
     praise = celebrationFor({ ...recorded, direction: "recognition", word: word.word })?.title ?? null;
   }
 

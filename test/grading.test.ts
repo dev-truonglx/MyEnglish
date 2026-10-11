@@ -212,12 +212,14 @@ describe("review priority and new-card allowance", () => {
 });
 
 describe("XP rewards remembering", () => {
-  it("nothing for Again, a token for practice, bonus for recall and for fading memories", () => {
+  it("nothing for Again, a token for practice, no bonus for reviewing late, Easy = Good", () => {
     expect(calculateXPReward({ rating: Rating.Again, exerciseType: "spelling", scheduled: true, direction: "production" }).totalXP).toBe(0);
     expect(calculateXPReward({ rating: Rating.Good, exerciseType: "multiple_choice", scheduled: false, direction: "recognition" }).totalXP).toBe(PRACTICE_XP);
     const plain = calculateXPReward({ rating: Rating.Good, exerciseType: "multiple_choice", scheduled: true, direction: "recognition", retrievabilityBefore: 0.92 });
     const fading = calculateXPReward({ rating: Rating.Good, exerciseType: "multiple_choice", scheduled: true, direction: "recognition", retrievabilityBefore: 0.7 });
-    expect(fading.totalXP).toBeGreaterThan(plain.totalXP);
+    expect(fading.totalXP).toBe(plain.totalXP);
+    const easy = calculateXPReward({ rating: Rating.Easy, exerciseType: "multiple_choice", scheduled: true, direction: "recognition", retrievabilityBefore: 0.92 });
+    expect(easy.totalXP).toBe(plain.totalXP);
   });
 });
 

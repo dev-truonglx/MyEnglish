@@ -2,10 +2,9 @@ import type { WordDetail } from "@/types/database";
 import { isWordDue } from "./cards";
 import { isPlaceholderMeaning } from "./db";
 import type { GrammarLevel } from "@/types/grammar";
-import { GRAMMAR_LESSONS } from "@/data/grammarData";
-import { getAllGrammarProgress, saveCustomGrammarExercises } from "./grammarService";
+import { AI_GRAMMAR_ENABLED } from "./features";
 import { assessUserProficiency } from "./userProficiency";
-import { generateVocabularyRecommendationsAI, generateGrammarExercisesWithGemini, type VocabularyRecommendation } from "./ai";
+import { generateVocabularyRecommendationsAI, type VocabularyRecommendation } from "./ai";
 import { pipeline } from "./pipeline";
 import { triggerDesktopNotification } from "./srs";
 import { calculateStreakAndGoal } from "./streak";
@@ -299,40 +298,12 @@ export async function triggerAutoReplenish(
       addedWords.push(rec.word);
     }
 
-    // 3. Auto-generate grammar exercises for user's weakest or unattempted topic at this level
+    // 3. Auto-generate grammar exercises (disabled via AI_GRAMMAR_ENABLED)
     let grammarTopic: string | undefined;
     let questionsGenerated = 0;
 
-    if (settings.autoGenerateGrammar) {
-      try {
-        const levelLessons = GRAMMAR_LESSONS.filter((l) => l.level === targetLevel && !l.foundation);
-        const grammarProgress = getAllGrammarProgress();
-
-        // Sort lessons: prioritize unattempted or highest lapses
-        const sortedLessons = [...levelLessons].sort((a, b) => {
-          const progA = grammarProgress[a.id];
-          const progB = grammarProgress[b.id];
-          const lapsesA = progA?.lapses || 0;
-          const lapsesB = progB?.lapses || 0;
-          const attemptedA = progA && progA.diagnosticStatus !== "unattempted" ? 1 : 0;
-          const attemptedB = progB && progB.diagnosticStatus !== "unattempted" ? 1 : 0;
-
-          if (attemptedA !== attemptedB) return attemptedA - attemptedB; // Unattempted first
-          return lapsesB - lapsesA; // Higher lapses first
-        });
-
-        const targetLesson = sortedLessons[0] || levelLessons[0];
-        if (targetLesson) {
-          grammarTopic = targetLesson.title;
-          const exercises = await generateGrammarExercisesWithGemini(targetLesson.title, targetLesson.level);
-          if (exercises.length > 0) {
-            await saveCustomGrammarExercises(targetLesson.id, exercises);
-            questionsGenerated = exercises.length;
-          }
-        }
-      } catch (grammarErr) {
-        console.warn("[AutoReplenish] Sinh bài tập ngữ pháp tự động gặp sự cố nhẹ (bỏ qua):", grammarErr);
-      }
+    if (AI_GRAMMAR_ENABLED && settings.autoGenerateGrammar) {
+      // Disabled by default
     }
 
     // 4. Record summary & update date

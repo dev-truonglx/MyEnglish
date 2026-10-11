@@ -439,9 +439,9 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
 
         std::thread::spawn(move || {
             let mut notif = mac_notification_sys::Notification::new();
+            // No sound: it would ring out in meetings and screen shares, which are only partly detected (N20)
             notif.title(&title_c)
                 .message(&body_c)
-                .sound("Glass")
                 .main_button(mac_notification_sys::MainButton::SingleAction("Ôn tập ngay"))
                 .wait_for_click(wait_for_click);
 
@@ -1937,8 +1937,15 @@ async fn generate_memory_aid_ai(
 /// Id of the tray icon created in `setup`, used to update it later.
 const TRAY_ID: &str = "main-tray";
 
-/// Tray tooltip, e.g. "MyEnglish · 12 ôn · 3 mới"; zero counts are left out.
-fn tray_tooltip(reviews: u32, new_cards: u32) -> String {
+/// Event sent to the main window when a reminder action is picked from the tray menu; the
+/// payload is `{ "action": <menu id> }` (see `applyTrayReminderAction` in reminderSettings.ts).
+const TRAY_REMINDER_EVENT: &str = "tray-reminder-action";
+/// Tray menu ids forwarded as `TRAY_REMINDER_EVENT`: pause 1 hour, pause until tomorrow, resume.
+const TRAY_REMINDER_ACTIONS: &[&str] = &["pause_1h", "pause_tomorrow", "resume"];
+
+/// Tray tooltip, e.g. "MyEnglish · 12 ôn · 3 mới"; zero counts are left out. While reminders are
+/// paused, `paused_until` ("HH:MM") is added.
+fn tray_tooltip(reviews: u32, new_cards: u32, paused_until: Option<&str>) -> String {
     let mut text = "MyEnglish".to_string();
     if reviews > 0 {
         text.push_str(&format!(" · {} ôn", reviews));
@@ -1946,15 +1953,19 @@ fn tray_tooltip(reviews: u32, new_cards: u32) -> String {
     if new_cards > 0 {
         text.push_str(&format!(" · {} mới", new_cards));
     }
+    if let Some(until) = paused_until.map(str::trim).filter(|s| !s.is_empty()) {
+        let until: String = until.chars().take(16).collect();
+        text.push_str(&format!(" · Đang tạm dừng nhắc đến {}", until));
+    }
     text
 }
 
 /// Show the due counts on the tray icon: tooltip everywhere, plus the review count as text next
 /// to the menu-bar icon on macOS.
 #[tauri::command]
-fn set_tray_due_count(app: AppHandle, reviews: u32, new_cards: u32) -> Result<(), String> {
+fn set_tray_due_count(app: AppHandle, reviews: u32, new_cards: u32, paused_until: Option<String>) -> Result<(), String> {
     let tray = app.tray_by_id(TRAY_ID).ok_or("Tray icon not found")?;
-    tray.set_tooltip(Some(tray_tooltip(reviews, new_cards)))
+    tray.set_tooltip(Some(tray_tooltip(reviews, new_cards, paused_until.as_deref())))
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     {
@@ -2236,10 +2247,19 @@ pub fn run() {
                 use tauri::menu::{MenuBuilder, MenuItemBuilder};
                 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 
+                let review_item = MenuItemBuilder::with_id("review_now", "Ôn ngay").build(app)?;
                 let show_item = MenuItemBuilder::with_id("show", "Mở Dashboard").build(app)?;
+                let pause_hour_item = MenuItemBuilder::with_id("pause_1h", "Tạm dừng nhắc 1 giờ").build(app)?;
+                let pause_day_item = MenuItemBuilder::with_id("pause_tomorrow", "Tạm dừng nhắc đến mai").build(app)?;
+                let resume_item = MenuItemBuilder::with_id("resume", "Bật lại nhắc").build(app)?;
                 let quit_item = MenuItemBuilder::with_id("quit", "Thoát MyEnglish").build(app)?;
                 let tray_menu = MenuBuilder::new(app)
+                    .item(&review_item)
                     .item(&show_item)
+                    .separator()
+                    .item(&pause_hour_item)
+                    .item(&pause_day_item)
+                    .item(&resume_item)
                     .separator()
                     .item(&quit_item)
                     .build()?;
@@ -2265,8 +2285,19 @@ pub fn run() {
                                 let _ = w.set_focus();
                             }
                         }
+                        "review_now" => {
+                            // Same review popup as "Học ngay" on the reminder card, on the monitor
+                            // under the cursor (where the tray was just clicked)
+                            if let Err(e) = show_review_popup(app.clone(), None) {
+                                eprintln!("[Tray] Failed to open the review: {}", e);
+                            }
+                        }
                         "quit" => {
                             app.exit(0);
+                        }
+                        // Pauses live in the main window's reminder settings (localStorage)
+                        id if TRAY_REMINDER_ACTIONS.contains(&id) => {
+                            let _ = app.emit_to("main", TRAY_REMINDER_EVENT, serde_json::json!({ "action": id }));
                         }
                         _ => {}
                     })
@@ -2719,10 +2750,11 @@ mod tests {
 
     #[test]
     fn tray_tooltip_lists_non_zero_counts() {
-        assert_eq!(tray_tooltip(0, 0), "MyEnglish");
-        assert_eq!(tray_tooltip(12, 3), "MyEnglish · 12 ôn · 3 mới");
-        assert_eq!(tray_tooltip(0, 3), "MyEnglish · 3 mới");
-        assert_eq!(tray_tooltip(5, 0), "MyEnglish · 5 ôn");
+        assert_eq!(tray_tooltip(0, 0, None), "MyEnglish");
+        assert_eq!(tray_tooltip(12, 3, None), "MyEnglish · 12 ôn · 3 mới");
+        assert_eq!(tray_tooltip(0, 3, None), "MyEnglish · 3 mới");
+        assert_eq!(tray_tooltip(5, 0, Some("")), "MyEnglish · 5 ôn");
+        assert_eq!(tray_tooltip(5, 0, Some("07:00")), "MyEnglish · 5 ôn · Đang tạm dừng nhắc đến 07:00");
     }
 
     #[test]

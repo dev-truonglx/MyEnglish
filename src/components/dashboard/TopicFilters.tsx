@@ -1,5 +1,8 @@
 import { Play, Tag, Folder } from "lucide-react";
-import { useWordsStore } from "@/stores/wordsStore";
+import { AI_VOCAB_ENABLED } from "@/services/features";
+
+/** Deck words keep their CEFR level in `topic`: the filter is by level while the Oxford deck is the only source */
+const FILTER_LABEL = AI_VOCAB_ENABLED ? "Chủ đề" : "Cấp độ";
 
 interface TopicFiltersProps {
   selectedTopic: string;
@@ -9,7 +12,7 @@ interface TopicFiltersProps {
   handleStartReview: (onlyDue?: boolean, topicFilter?: string) => void;
 }
 
-/** Topic Filter & Organization Bar */
+/** Level (topic) filter bar of the word library */
 export default function TopicFilters({
   selectedTopic,
   setSelectedTopic,
@@ -17,13 +20,14 @@ export default function TopicFilters({
   topicStats,
   handleStartReview,
 }: TopicFiltersProps) {
-  const words = useWordsStore((s) => s.words);
+  // "Tất cả" counts the same words as the chips (the learner's words, not the deck words still waiting)
+  const totalCount = Object.values(topicStats).reduce((sum, n) => sum + n, 0);
 
   return (
     <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none py-1">
       <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 font-mono shrink-0 pr-1 select-none">
         <Folder className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-        <span>Chủ đề:</span>
+        <span>{FILTER_LABEL}:</span>
       </div>
 
       {/* All Topics */}
@@ -36,7 +40,7 @@ export default function TopicFilters({
       >
         <span>Tất cả</span>
         <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-slate-100 dark:bg-zinc-800/80 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700/50">
-          {words.length}
+          {totalCount}
         </span>
       </button>
 
@@ -66,10 +70,12 @@ export default function TopicFilters({
       {selectedTopic !== "all" && (
         <button
           onClick={() => handleStartReview(false, selectedTopic)}
-          className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/20 text-orange-300 border border-orange-500/40 hover:bg-orange-500/30 text-xs font-medium transition-all shadow-sm"
+          className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-500/40 hover:bg-orange-200 dark:hover:bg-orange-500/30 text-xs font-medium transition-all shadow-sm"
         >
-          <Play className="w-3 h-3 fill-orange-400 text-orange-400" />
-          <span>Ôn tập chủ đề này ({topicStats[selectedTopic] || 0})</span>
+          <Play className="w-3 h-3 fill-orange-500 text-orange-500 dark:fill-orange-400 dark:text-orange-400" />
+          <span>
+            {AI_VOCAB_ENABLED ? "Ôn tập chủ đề này" : `Ôn các từ ${selectedTopic}`} ({topicStats[selectedTopic] || 0})
+          </span>
         </button>
       )}
     </div>

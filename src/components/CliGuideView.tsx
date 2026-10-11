@@ -1,13 +1,15 @@
 import DisplaySettings from "./dashboard/DisplaySettings";
 import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
+import Jargon from "./Jargon";
 import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
-import { getQuietHours } from "@/services/reminderMoments";
+import { ANCHOR_TIMES, getQuietHours, type ReminderAnchor } from "@/services/reminderMoments";
+import { getActivityLogs, getDailyGoal, getLocalDateString } from "@/services/streak";
+import { isMainSessionActive } from "@/services/activeSession";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
   Terminal,
   CheckCircle2,
-  AlertCircle,
   Copy,
   Check,
   RefreshCw,
@@ -49,7 +51,9 @@ import {
   getSnoozeRemainingMinutes,
   getLastPopupDisplayTime,
   getNextReminderTime,
-  getRemainingSecondsToNextReminder,
+  getNudgesShownToday,
+  isSnoozed,
+  reminderPause,
   NIGHT_QUIET_START,
   NIGHT_QUIET_END,
   type ReminderSettings,
@@ -59,6 +63,13 @@ import {
   type GrammarLevel,
 } from "@/services/reminderSettings";
 import { PAGE_CONTAINER } from "./dashboard/shared";
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+
+/** Today's activity has reached the daily goal (the same test the reminder worker makes, minus the due-review check) */
+function isDailyGoalMet(): boolean {
+  return (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal();
+}
 
 interface CliStatus {
   installed: boolean;
@@ -95,7 +106,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [snoozeMinutesRemaining, setSnoozeMinutesRemaining] = useState<number>(getSnoozeRemainingMinutes());
   const [lastDisplayMs, setLastDisplayMs] = useState<number>(getLastPopupDisplayTime());
   const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime());
-  const [remainingSeconds, setRemainingSeconds] = useState<number>(getRemainingSecondsToNextReminder());
+  const [goalMet, setGoalMet] = useState<boolean>(isDailyGoalMet);
 
   const formatDisplayTime = (ms: number) => {
     if (!ms || ms <= 0) return "Chưa từng hiển thị";
@@ -103,22 +114,10 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     return d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   };
 
-  const formatCountdown = (totalSec: number) => {
-    if (totalSec <= 0) return "Đang đến giờ hiển thị!";
-    const m = Math.floor(totalSec / 60);
-    const s = totalSec % 60;
-    if (m === 0) return `${s}s`;
-    return `${m}m ${s < 10 ? "0" : ""}${s}s`;
-  };
-
-  // API Key state (optional fallback)
-
   // Custom CLI Path state
   const [customCliPath, setCustomCliPath] = useState("");
   const [customCliSaved, setCustomCliSaved] = useState(false);
 
-  // Active guide subtab
-  const [activeGuideTab, setActiveGuideTab] = useState<"cli" | "notification" | "apikey">("cli");
   const [selectedOs, setSelectedOs] = useState<"macos" | "windows">(() => {
     if (typeof navigator !== "undefined" && navigator.userAgent.toLowerCase().includes("win")) {
       return "windows";
@@ -167,7 +166,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       setSnoozeMinutesRemaining(getSnoozeRemainingMinutes());
       setLastDisplayMs(getLastPopupDisplayTime());
       setNextReminderMs(getNextReminderTime());
-      setRemainingSeconds(getRemainingSecondsToNextReminder());
+      setGoalMet(isDailyGoalMet());
     };
     syncSettings();
 
@@ -186,11 +185,19 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
     window.addEventListener("myenglish-reminder-settings-updated", syncSettings);
     window.addEventListener("myenglish-popup-displayed", syncSettings);
-    const interval = setInterval(syncSettings, 1000);
+    // Re-read the settings every 5 s, and only while this page is on screen (the countdown ticks by itself)
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") syncSettings();
+    }, 5000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") syncSettings();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.removeEventListener("myenglish-autostart-changed", onAutostartChanged);
       window.removeEventListener("myenglish-reminder-settings-updated", syncSettings);
       window.removeEventListener("myenglish-popup-displayed", syncSettings);
+      document.removeEventListener("visibilitychange", onVisible);
       clearInterval(interval);
     };
   }, []);
@@ -215,7 +222,6 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     const updated = saveReminderSettings(partial);
     setReminderSettings(updated);
     setNextReminderMs(getNextReminderTime());
-    setRemainingSeconds(getRemainingSecondsToNextReminder());
     srsWorker.restart();
     setNotifFeedback("Đã lưu thiết lập nhắc học và cập nhật bộ đếm thời gian!");
   };
@@ -300,175 +306,817 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     checkCli(undefined);
   };
 
+  const anchorsActive = reminderSettings.enabled && reminderSettings.intervalMinutes > 0;
+  // Why the clock reminder is not showing right now, or null
+  const pauseReason =
+    reminderSettings.enabled && reminderSettings.intervalMinutes > 0 ? getPauseReason(reminderSettings, goalMet) : null;
+
   return (
-    <div className={`${PAGE_CONTAINER} space-y-6`}>
+    <div className={`${PAGE_CONTAINER} space-y-8`}>
 
-      {/* Top Header */}
-      <div className="space-y-1">
-        <div className="flex items-center gap-2.5">
-          <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
-            <Terminal className="w-5 h-5" />
-          </div>
-          <div>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">
-              Hướng dẫn CLI & Tính năng Thông báo
-            </h2>
-            <p className="text-xs text-slate-500 dark:text-zinc-400">
-              Kiểm tra trạng thái kết nối AI, cấu hình tài khoản Free/Plus và kiểm thử hệ thống thông báo ôn tập
-            </p>
-          </div>
+      {/* Header */}
+      <div className="flex items-center gap-2.5">
+        <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-500 to-blue-600 flex items-center justify-center text-white shadow-md shadow-cyan-500/20">
+          <Terminal className="w-5 h-5" />
+        </div>
+        <div>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Cài đặt</h2>
+          <p className="text-xs text-slate-500 dark:text-zinc-400">
+            Chỉnh cách học, lịch nhắc và kết nối AI. Mỗi thay đổi được lưu ngay.
+          </p>
         </div>
       </div>
 
-      {/* CLI Live Status Banner */}
-      <div className="p-4 md:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3.5">
-          <div
-            className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
-              cliStatus?.installed
-                ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/60"
-                : "bg-amber-100 dark:bg-amber-950/60 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/60"
-            }`}
-          >
-            {cliStatus?.installed ? (
-              <CheckCircle2 className="w-5 h-5" />
-            ) : (
-              <AlertCircle className="w-5 h-5" />
-            )}
+      {/* Feedback alert message */}
+      {notifFeedback && (
+        <div className="p-4 rounded-2xl bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-xs text-cyan-950 dark:text-cyan-200 flex items-start justify-between gap-3 animate-in fade-in flex-wrap sm:flex-nowrap">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0 mt-0.5" />
+            <span className="leading-relaxed">{notifFeedback}</span>
           </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="text-sm font-bold text-slate-900 dark:text-white">
-                Trạng thái Antigravity CLI:
-              </span>
-              <span
-                className={`text-xs font-semibold font-mono px-2.5 py-0.5 rounded-full ${
-                  cliStatus?.installed
-                    ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                    : "bg-amber-100 dark:bg-amber-950 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
-                }`}
-              >
-                {cliStatus?.installed ? "● ĐÃ KẾT NỐI (Sẵn sàng)" : "○ CHƯA TÌM THẤY"}
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
-              Đường dẫn nhị phân:{" "}
-              <span className="text-slate-800 dark:text-zinc-200 font-bold">
-                {cliStatus?.path || "~/.gemini/antigravity-cli"}
-              </span>
-            </p>
-            {cliStatus?.details && (
-              <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">
-                ✓ {cliStatus.details}
-              </p>
-            )}
-            {cliStatus?.error && (
-              <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-                Chú ý: {cliStatus.error}
-              </p>
-            )}
-          </div>
-        </div>
-
-        <button
-          onClick={() => checkCli()}
-          disabled={checkingCli}
-          className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${checkingCli ? "animate-spin" : ""}`} />
-          <span>Kiểm tra lại kết nối</span>
-        </button>
-      </div>
-
-      {/* Custom CLI Path Configuration (Especially for Windows or custom install paths) */}
-      <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm space-y-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-            <span className="text-xs font-bold text-slate-900 dark:text-white">
-              Đường dẫn CLI tùy chỉnh (Tự động nhận diện hoặc chỉ định thủ công)
-            </span>
-          </div>
-          {customCliPath && (
+          {onNavigateTab && (
             <button
-              type="button"
-              onClick={handleResetCustomPath}
-              className="text-[11px] text-slate-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 transition-colors"
+              onClick={() => onNavigateTab("review")}
+              className="shrink-0 px-3.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs transition-colors shadow-sm flex items-center gap-1.5"
             >
-              Đặt lại mặc định
+              <Flame className="w-3.5 h-3.5" />
+              <span>Mở Daily Review ngay →</span>
             </button>
           )}
         </div>
-        <form onSubmit={handleSaveCustomPath} className="flex flex-col sm:flex-row items-center gap-2">
-          <input
-            type="text"
-            value={customCliPath}
-            onChange={(e) => setCustomCliPath(e.target.value)}
-            placeholder="Ví dụ: C:\Users\longn\.gemini\antigravity-cli (hoặc C:\Users\longn\.gemini\antigravity-cli\agy.exe)"
-            className="flex-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
-          />
-          <button
-            type="submit"
-            disabled={checkingCli}
-            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs transition-colors shrink-0 shadow-sm flex items-center justify-center gap-1.5"
-          >
-            {customCliSaved ? (
-              <>
-                <Check className="w-3.5 h-3.5 text-emerald-300" />
-                <span>Đã lưu!</span>
-              </>
-            ) : (
-              <span>Lưu & Kiểm tra</span>
+      )}
+      {/* 1. HỌC: cách học hằng ngày */}
+      <section className="space-y-3">
+        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Học</h3>
+        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+          <DisplaySettings />
+
+          {/* Daily study limits */}
+          <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
+            {([
+              {
+                key: "newCardsPerDay" as const,
+                title: "Số thẻ mới mỗi ngày",
+                desc: "Gồm từ mới và lượt tập gõ lại từ đã nhớ (thẻ nhớ lại mới). Giữ thấp để lượng ôn các ngày sau không dồn ứ.",
+                options: [3, 5, 8, 10, 20],
+              },
+              {
+                key: "maxSessionSize" as const,
+                title: "Số thẻ tối đa mỗi phiên",
+                desc: "Từ đến hạn được ưu tiên trước, từ mới xen kẽ đều trong phiên.",
+                options: [20, 30, 40, 50, 100],
+              },
+            ]).map((cfg) => (
+              <div key={cfg.key} className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-slate-900 dark:text-white">{cfg.title}</div>
+                    <p className="text-[11px] text-slate-500 dark:text-zinc-400">{cfg.desc}</p>
+                  </div>
+                  <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">
+                    {studyLimits[cfg.key]}
+                  </span>
+                </div>
+                <div className="grid grid-cols-5 gap-2">
+                  {cfg.options.map((val) => (
+                    <button
+                      key={val}
+                      onClick={() => {
+                        saveStudyLimits({ [cfg.key]: val });
+                        setStudyLimits((prev) => ({ ...prev, [cfg.key]: val }));
+                        setNotifFeedback(`Đã cập nhật "${cfg.title}" thành ${val}!`);
+                      }}
+                      className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                        studyLimits[cfg.key] === val
+                          ? "bg-cyan-600 text-white shadow-sm font-bold"
+                          : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
+                      }`}
+                    >
+                      {val}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+            <label className="flex items-start justify-between gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800 cursor-pointer">
+              <div>
+                <div className="text-xs font-bold text-slate-900 dark:text-white">Đoán nghĩa trước khi học từ mới</div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
+                  Trước thẻ giới thiệu, đoán nghĩa từ trong một câu ví dụ (3 lựa chọn). Đoán trước, kể cả đoán sai, giúp nhớ lâu hơn. Không tính điểm.
+                </p>
+              </div>
+              <input
+                type="checkbox"
+                checked={pretestOn}
+                onChange={(e) => {
+                  setPretestEnabled(e.target.checked);
+                  setPretestOn(e.target.checked);
+                }}
+                className="mt-1 accent-cyan-600"
+              />
+            </label>
+          </div>
+        </div>
+      </section>
+
+      {/* 2. NHẮC HỌC: khi nào app nhắc bạn */}
+      <section className="space-y-3">
+        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Nhắc học</h3>
+        <div className="space-y-6">
+          {/* SECTION 0: AUTOSTART SYSTEM SETTING */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between gap-4 flex-wrap">
+              <div className="flex items-center gap-3">
+                <span className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white shadow-md shadow-rose-500/20">
+                  <Power className="w-5 h-5" />
+                </span>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Tự khởi động cùng hệ điều hành
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
+                      Mặc định: Bật
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                    Tự động mở MyEnglish khi khởi động máy tính để không bỏ lỡ lịch nhắc từ vựng và phím tắt tra từ nhanh
+                  </p>
+                </div>
+              </div>
+
+              {/* Autostart Toggle */}
+              <button
+                type="button"
+                disabled={togglingAutostart}
+                onClick={() => handleToggleAutostart(!autostart)}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 ${
+                  autostart
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
+                }`}
+              >
+                <span
+                  className={`w-2 h-2 rounded-full ${
+                    autostart ? "bg-white animate-pulse" : "bg-slate-400"
+                  }`}
+                />
+                <span>
+                  {togglingAutostart
+                    ? "Đang cập nhật..."
+                    : autostart
+                    ? "Tự khởi động: Bật"
+                    : "Tự khởi động: Tắt"}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* SECTION 1: SETTINGS & SCHEDULE CONFIGURATION */}
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 dark:border-zinc-800 pb-4">
+              <div className="flex items-center gap-2.5">
+                <span className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-md shadow-cyan-500/20">
+                  <Sliders className="w-4 h-4" />
+                </span>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Cấu hình Lịch nhắc & Pop-up Quiz (Focus Review)
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">
+                    Tùy chỉnh tần suất nhắc nhở, thời gian hoãn (Snooze), dạng câu hỏi và hiệu ứng mờ màn hình
+                  </p>
+                </div>
+              </div>
+
+              {/* Master Toggle */}
+              <button
+                onClick={() => handleUpdateReminder({ enabled: !reminderSettings.enabled })}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                  reminderSettings.enabled
+                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
+                    : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${reminderSettings.enabled ? "bg-white animate-pulse" : "bg-slate-400"}`} />
+                <span>{reminderSettings.enabled ? "Đang bật Pop-up" : "Đã tạm dừng"}</span>
+              </button>
+            </div>
+
+            {/* Realtime Schedule & Countdown Card */}
+            {reminderSettings.enabled && reminderSettings.intervalMinutes > 0 && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border border-cyan-200/80 dark:border-cyan-800/60 flex items-center justify-between gap-4 flex-wrap">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-bold shrink-0">
+                    <Clock className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    {pauseReason ? (
+                      <div className="text-xs font-semibold text-amber-700 dark:text-amber-300">
+                        Đang tạm dừng: {pauseReason}
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 dark:text-white">Lần hiển thị kế tiếp:</span>
+                        <span className="text-xs font-mono font-bold text-cyan-700 dark:text-cyan-300 bg-cyan-100/80 dark:bg-cyan-950/80 px-2 py-0.5 rounded-md">
+                          {formatDisplayTime(nextReminderMs)}
+                        </span>
+                        <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
+                          (Còn lại: <ReminderCountdown nextMs={nextReminderMs} />)
+                        </span>
+                      </div>
+                    )}
+                    <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
+                      Lần hiển thị gần nhất: <strong className="text-slate-700 dark:text-zinc-300 font-mono">{formatDisplayTime(lastDisplayMs)}</strong>
+                      <span className="ml-2 text-cyan-600 dark:text-cyan-400 font-medium">
+                        • Chu kỳ: {reminderSettings.intervalMinutes} phút (tính từ lần cuối popup hiển thị)
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleTestPopupQuiz}
+                  disabled={testingPopup}
+                  className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+                >
+                  <Sparkles className="w-3.5 h-3.5" />
+                  <span>{testingPopup ? "Đang mở..." : "Hiển thị ngay"}</span>
+                </button>
+              </div>
             )}
-          </button>
-        </form>
-        <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-          Hệ thống tự động tìm trong <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\antigravity-cli</code>, <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\bin</code>, và biến môi trường PATH. Nếu bạn cài đặt ở đường dẫn riêng, hãy dán đường dẫn thư mục hoặc file <code className="font-mono text-cyan-600 dark:text-cyan-400">agy.exe</code> vào ô trên.
-        </p>
-      </div>
 
-      {/* Navigation Subtabs */}
-      <div className="flex items-center gap-2 border-b border-slate-200 dark:border-zinc-800 pb-3">
-        <button
-          onClick={() => setActiveGuideTab("cli")}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-            activeGuideTab === "cli"
-              ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/40 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Terminal className="w-3.5 h-3.5" />
-          <span>1. Cài đặt & Cấu hình CLI (Free & Plus)</span>
-        </button>
+            {/* Active Snooze Alert if currently snoozed */}
+            {snoozeMinutesRemaining > 0 && (
+              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2.5 text-amber-800 dark:text-amber-300 text-xs font-semibold">
+                  <Hourglass className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-spin-slow shrink-0" />
+                  <span>
+                    Đang trong thời gian hoãn (Snooze): Còn khoảng{" "}
+                    <strong>{snoozeMinutesRemaining} phút</strong> trước lần nhắc kế tiếp.
+                  </span>
+                </div>
+                <button
+                  onClick={handleCancelSnooze}
+                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
+                >
+                  Hủy hoãn ngay
+                </button>
+              </div>
+            )}
 
-        <button
-          onClick={() => setActiveGuideTab("notification")}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-            activeGuideTab === "notification"
-              ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/40 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Bell className="w-3.5 h-3.5" />
-          <span>2. Cài đặt Nhắc học & Pop-up Quiz (Focus Review)</span>
-        </button>
+            {/* SETTING FIELDS GRID */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              {/* Field 1: Reminder Interval */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <Clock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    Khoảng thời gian nhắc học:
+                  </span>
+                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
+                    {reminderSettings.intervalMinutes === 0 ? "Chỉ mở thủ công" : `Mỗi ${reminderSettings.intervalMinutes} phút`}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {([15, 30, 45, 60, 120, 0] as ReminderInterval[]).map((val) => {
+                    const isSelected = reminderSettings.intervalMinutes === val;
+                    const label = val === 0 ? "Tắt tự động" : val >= 60 ? `${val / 60} giờ` : `${val} phút`;
+                    return (
+                      <button
+                        key={val}
+                        onClick={() => handleUpdateReminder({ intervalMinutes: val })}
+                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                          isSelected
+                            ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
+                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Khuyên dùng: <strong>30 phút</strong> để vừa tập trung làm việc vừa duy trì nhịp ôn tập đều đặn.
+                </p>
+              </div>
 
-        <button
-          onClick={() => setActiveGuideTab("apikey")}
-          className={`px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all flex items-center gap-1.5 ${
-            activeGuideTab === "apikey"
-              ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/40 shadow-sm"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-          }`}
-        >
-          <Key className="w-3.5 h-3.5" />
-          <span>3. Tùy chọn Gemini API Key (Không cần CLI)</span>
-        </button>
-      </div>
+              {/* Field 2: Snooze Duration */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <Hourglass className="w-3.5 h-3.5 text-amber-500" />
+                    Thời gian Hoãn học (Snooze):
+                  </span>
+                  <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 font-semibold">
+                    {reminderSettings.snoozeMinutes} phút
+                  </span>
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {([5, 10, 15, 30] as SnoozeDuration[]).map((val) => {
+                    const isSelected = reminderSettings.snoozeMinutes === val;
+                    return (
+                      <button
+                        key={val}
+                        onClick={() => handleUpdateReminder({ snoozeMinutes: val })}
+                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                          isSelected
+                            ? "bg-amber-600 text-white shadow-sm shadow-amber-600/30"
+                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-amber-500"
+                        }`}
+                      >
+                        {val} phút
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Khi đang bận, bạn chỉ cần bấm nút <strong>Hoãn [S]</strong> trên pop-up để dời thời điểm ôn.
+                </p>
+              </div>
 
-      {/* TAB 1: CLI INSTALLATION & CONFIGURATION GUIDE */}
-      {activeGuideTab === "cli" && (
-        <div className="space-y-6 animate-in fade-in duration-150">
+              {/* Field: fixed study times, e.g. after lunch (the reminder worker only acts on them when the popup is on) */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                  Giờ học cố định:
+                </span>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug">
+                  Nhắc đúng lúc bạn hay học trong ngày, mỗi mốc một lần mỗi ngày. Mốc này không bị giới hạn số lần nhắc tối đa.
+                </p>
+                <div className="space-y-1.5">
+                  {(Object.keys(ANCHOR_TIMES) as ReminderAnchor[]).map((anchor) => {
+                    const chosen = (reminderSettings.anchors ?? []).includes(anchor);
+                    return (
+                      <label
+                        key={anchor}
+                        className={`flex items-center gap-2 text-xs ${
+                          anchorsActive
+                            ? "cursor-pointer text-slate-700 dark:text-zinc-300"
+                            : "text-slate-400 dark:text-zinc-500"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 accent-cyan-600"
+                          checked={chosen}
+                          disabled={!anchorsActive}
+                          onChange={(e) => {
+                            const current = reminderSettings.anchors ?? [];
+                            handleUpdateReminder({
+                              anchors: e.target.checked ? [...current, anchor] : current.filter((a) => a !== anchor),
+                            });
+                          }}
+                        />
+                        <span>{ANCHOR_TIMES[anchor].label}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                {!anchorsActive && (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug">
+                    Chỉ có tác dụng khi bật pop-up và chọn một khoảng thời gian nhắc (không phải &quot;Tắt tự động&quot;).
+                  </p>
+                )}
+              </div>
+
+              {/* Field 3: Trigger Condition */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                  Điều kiện kích hoạt hiển thị:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    onClick={() => handleUpdateReminder({ triggerCondition: "due_only" })}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                      reminderSettings.triggerCondition === "due_only"
+                        ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                        : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Chỉ khi có từ đến hạn (FSRS)</span>
+                    <span className="text-[10px] opacity-75">Tôn trọng chu kỳ phân bổ khoa học</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleUpdateReminder({ triggerCondition: "all_words" })}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                      reminderSettings.triggerCondition === "all_words"
+                        ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                        : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Luôn nhắc nhở ngẫu nhiên</span>
+                    <span className="text-[10px] opacity-75">Duy trì phản xạ từ vựng liên tục</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Field 3b: Do not disturb */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80">
+                <label className="flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Không làm phiền khi đang bận
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Tự hoãn pop-up khi có ứng dụng toàn màn hình (trình chiếu, video, họp), khi đang chia sẻ màn
+                      hình Zoom, khi bật Focus/Không làm phiền (nếu macOS cho phép đọc) hoặc khi bạn rời máy quá 5
+                      phút. Khi đến giờ, một thẻ nhỏ hiện ở góc màn hình (không chiếm bàn phím) lúc bạn tạm dừng
+                      thao tác; bỏ qua thì thẻ tự hoãn sau 20 giây, bấm Học ngay để mở bài ôn.
+                    </span>
+                    {!IS_MAC && (
+                      <span className="block text-[11px] font-semibold text-amber-700 dark:text-amber-400 pt-1">
+                        Hiện chỉ hoạt động trên macOS.
+                      </span>
+                    )}
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.respectFocus}
+                    onChange={(e) => handleUpdateReminder({ respectFocus: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Luôn hiện trên màn hình chính
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Mặc định nhắc nhở hiện trên màn hình bạn đang làm việc (nơi có con trỏ chuột).
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.preferPrimaryMonitor}
+                    onChange={(e) => handleUpdateReminder({ preferPrimaryMonitor: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Nhắc vào lúc chuyển việc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Ngoài chu kỳ trên, nhắc sớm hơn vào lúc bạn vừa quay lại máy (buổi sáng, sau khi rời máy hoặc
+                      máy ngủ), vừa tắt chia sẻ màn hình hoặc vừa thoát ứng dụng toàn màn hình. Chỉ khi có thẻ cần ôn,
+                      và cách lời nhắc trước ít nhất 20 phút.
+                    </span>
+                    {!IS_MAC && (
+                      <span className="block text-[11px] font-semibold text-amber-700 dark:text-amber-400 pt-1">
+                        Hiện chỉ hoạt động trên macOS.
+                      </span>
+                    )}
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.contextMoments}
+                    onChange={(e) => handleUpdateReminder({ contextMoments: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Né giờ bạn hay bỏ qua lời nhắc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Học từ 30 ngày gần nhất: giờ nào lời nhắc gần như luôn bị hoãn hoặc bỏ qua thì không nhắc theo
+                      chu kỳ vào giờ đó (lời nhắc lúc chuyển việc vẫn hiện).
+                      {getQuietHours().length > 0 && ` Hiện đang né: ${getQuietHours().map((h) => `${h}h`).join(", ")}.`}
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.avoidQuietHours}
+                    onChange={(e) => handleUpdateReminder({ avoidQuietHours: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Xong mục tiêu ngày thì thôi nhắc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Đạt mục tiêu hôm nay rồi thì nghỉ, mai nhắc tiếp. Bạn vẫn có thể tự mở bài ôn bất cứ lúc nào.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.stopAfterGoal}
+                    onChange={(e) => handleUpdateReminder({ stopAfterGoal: e.target.checked })}
+                  />
+                </label>
+                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Không nhắc ban đêm ({NIGHT_QUIET_START}:00–{String(NIGHT_QUIET_END).padStart(2, "0")}:00)
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Ngủ đủ giúp nhớ từ tốt hơn học khuya.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.nightQuiet}
+                    onChange={(e) => handleUpdateReminder({ nightQuiet: e.target.checked })}
+                  />
+                </label>
+                <div className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3">
+                  <span className="space-y-1">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Tối đa số lần nhắc mỗi ngày
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Nhắc quá nhiều dễ thành thói quen bấm bỏ qua.
+                    </span>
+                  </span>
+                  <select
+                    className="text-xs rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 shrink-0"
+                    value={reminderSettings.maxNudgesPerDay}
+                    onChange={(e) => handleUpdateReminder({ maxNudgesPerDay: Number(e.target.value) })}
+                  >
+                    {[4, 6, 8, 12, 0].map((n) => (
+                      <option key={n} value={n}>
+                        {n === 0 ? "Không giới hạn" : `${n} lần`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Field 4: Words per Session */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    Số lượng từ mỗi lần Pop-up:
+                  </span>
+                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
+                    {reminderSettings.wordsPerSession} từ / phiên
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {[
+                    { count: 3, label: "3 từ", desc: "~15s nhanh" },
+                    { count: 5, label: "5 từ", desc: "~30s chuẩn" },
+                    { count: 10, label: "10 từ", desc: "~1p sâu" },
+                  ].map((item) => {
+                    const isSelected = reminderSettings.wordsPerSession === item.count;
+                    return (
+                      <button
+                        key={item.count}
+                        onClick={() => handleUpdateReminder({ wordsPerSession: item.count })}
+                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center flex flex-col items-center gap-0.5 ${
+                          isSelected
+                            ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
+                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
+                        }`}
+                      >
+                        <span className="font-bold">{item.label}</span>
+                        <span className={`text-[10px] ${isSelected ? "text-cyan-100" : "text-slate-400 dark:text-zinc-500"}`}>
+                          {item.desc}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Các câu hỏi trong phiên pop-up được tự động phân bổ ngẫu nhiên giữa trắc nghiệm 1-4 và gõ từ vựng.
+                </p>
+              </div>
+
+              {/* Field 5: Grammar Review in Popup & Level Multi-Select */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <GraduationCap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+                    Ôn tập ngữ pháp trong Pop-up:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleUpdateReminder({ includeGrammar: !reminderSettings.includeGrammar })}
+                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      reminderSettings.includeGrammar !== false ? "bg-cyan-600" : "bg-slate-300 dark:bg-zinc-700"
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                        reminderSettings.includeGrammar !== false ? "translate-x-4" : "translate-x-0"
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
+                  Tự động xen kẽ câu hỏi ngữ pháp song song với từ vựng trong mỗi phiên Pop-up theo thuật toán Spaced Repetition.
+                </p>
+
+                {reminderSettings.includeGrammar !== false && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-zinc-800/60">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-semibold text-slate-700 dark:text-zinc-300">
+                        Cấp độ ngữ pháp ôn tập (chọn nhiều):
+                      </span>
+                      <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold">
+                        {(reminderSettings.grammarLevels || []).join(", ") || "Chưa chọn"}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {(["A1", "A2", "B1", "B2", "C1"] as GrammarLevel[]).map((lvl) => {
+                        const currentLevels = reminderSettings.grammarLevels || ["A1", "A2", "B1"];
+                        const isSelected = currentLevels.includes(lvl);
+                        return (
+                          <button
+                            key={lvl}
+                            type="button"
+                            onClick={() => {
+                              let next: GrammarLevel[];
+                              if (isSelected) {
+                                next = currentLevels.filter((l) => l !== lvl);
+                                if (next.length === 0) next = [lvl];
+                              } else {
+                                next = [...currentLevels, lvl];
+                              }
+                              handleUpdateReminder({ grammarLevels: next });
+                            }}
+                            className={`py-2 px-1 rounded-xl text-xs font-bold transition-all text-center border ${
+                              isSelected
+                                ? "bg-cyan-600 border-cyan-500 text-white shadow-sm shadow-cyan-600/30"
+                                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 hover:border-cyan-400"
+                            }`}
+                          >
+                            {lvl}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic">
+                      Chỉ các câu hỏi thuộc cấp độ được chọn ở trên sẽ được đưa vào hàng đợi Pop-up.
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Field 6: Fullscreen Overlay Blur Level & Audio Policy */}
+              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
+                    <Maximize2 className="w-3.5 h-3.5 text-indigo-500" />
+                    Độ mờ màn hình (Backdrop Blur):
+                  </span>
+                  <span className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
+                    {reminderSettings.blurOverlay === "light" ? "Mờ nhẹ" : reminderSettings.blurOverlay === "heavy" ? "Mờ đậm" : "Mờ vừa"}
+                  </span>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["light", "medium", "heavy"] as BlurOverlayLevel[]).map((level) => {
+                    const isSelected = reminderSettings.blurOverlay === level;
+                    const label = level === "light" ? "Mờ nhẹ" : level === "heavy" ? "Mờ đậm" : "Mờ vừa";
+                    return (
+                      <button
+                        key={level}
+                        onClick={() => handleUpdateReminder({ blurOverlay: level })}
+                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                          isSelected
+                            ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
+                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-indigo-500"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-400 pt-1">
+                  <VolumeX className="w-3.5 h-3.5 shrink-0" />
+                  <span>Đã tắt âm thanh tự động khi hiển thị từ để không làm phiền bạn.</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. AI & NÂNG CAO: không bắt buộc để học */}
+      <section className="space-y-3">
+        <div className="px-1 space-y-1">
+          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">AI & nâng cao</h3>
+          <p className="text-xs text-slate-500 dark:text-zinc-400">
+            Không bắt buộc để học. AI CLI chỉ cần cho các tính năng AI như Viết và sửa lỗi.
+          </p>
+        </div>
+        <div className="space-y-6">
+          {/* AI CLI status: information only. Without it the app still works; only the AI features are off */}
+          <div className="p-4 md:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start gap-3.5">
+              <div
+                className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border ${
+                  cliStatus?.installed
+                    ? "bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/60"
+                    : "bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 border-slate-200 dark:border-zinc-700"
+                }`}
+              >
+                {cliStatus?.installed ? <CheckCircle2 className="w-5 h-5" /> : <Terminal className="w-5 h-5" />}
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-bold text-slate-900 dark:text-white">
+                    Trạng thái AI CLI (Claude hoặc Gemini):
+                  </span>
+                  <span
+                    className={`text-xs font-semibold font-mono px-2.5 py-0.5 rounded-full border ${
+                      cliStatus?.installed
+                        ? "bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+                        : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border-slate-200 dark:border-zinc-700"
+                    }`}
+                  >
+                    {cliStatus === null ? "○ ĐANG KIỂM TRA" : cliStatus.installed ? "● ĐÃ KẾT NỐI" : "○ CHƯA KẾT NỐI"}
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-zinc-400">
+                  {cliStatus?.installed
+                    ? "Sẵn sàng cho các tính năng AI."
+                    : "Bạn vẫn học bình thường khi chưa có. Chỉ các tính năng AI (như Viết và sửa lỗi) cần AI CLI."}
+                </p>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 font-mono">
+                  Đường dẫn:{" "}
+                  <span className="text-slate-800 dark:text-zinc-200 font-bold">
+                    {cliStatus?.path || "~/.gemini/antigravity-cli"}
+                  </span>
+                </p>
+                {cliStatus?.details && (
+                  <p className="text-xs text-emerald-600 dark:text-emerald-400 font-medium">✓ {cliStatus.details}</p>
+                )}
+                {cliStatus?.error && (
+                  <p className="text-xs text-slate-500 dark:text-zinc-400">Chi tiết: {cliStatus.error}</p>
+                )}
+              </div>
+            </div>
+
+            <button
+              onClick={() => checkCli()}
+              disabled={checkingCli}
+              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${checkingCli ? "animate-spin" : ""}`} />
+              <span>Kiểm tra lại kết nối</span>
+            </button>
+          </div>
+
+          {/* Custom CLI Path Configuration (Especially for Windows or custom install paths) */}
+          <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Sliders className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  Đường dẫn CLI tùy chỉnh (Tự động nhận diện hoặc chỉ định thủ công)
+                </span>
+              </div>
+              {customCliPath && (
+                <button
+                  type="button"
+                  onClick={handleResetCustomPath}
+                  className="text-[11px] text-slate-500 hover:text-red-500 dark:text-zinc-400 dark:hover:text-red-400 transition-colors"
+                >
+                  Đặt lại mặc định
+                </button>
+              )}
+            </div>
+            <form onSubmit={handleSaveCustomPath} className="flex flex-col sm:flex-row items-center gap-2">
+              <input
+                type="text"
+                value={customCliPath}
+                onChange={(e) => setCustomCliPath(e.target.value)}
+                placeholder="Ví dụ: C:\Users\<tên bạn>\.gemini\antigravity-cli (hoặc C:\Users\<tên bạn>\.gemini\antigravity-cli\agy.exe)"
+                className="flex-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+              />
+              <button
+                type="submit"
+                disabled={checkingCli}
+                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs transition-colors shrink-0 shadow-sm flex items-center justify-center gap-1.5"
+              >
+                {customCliSaved ? (
+                  <>
+                    <Check className="w-3.5 h-3.5 text-emerald-300" />
+                    <span>Đã lưu!</span>
+                  </>
+                ) : (
+                  <span>Lưu & Kiểm tra</span>
+                )}
+              </button>
+            </form>
+            <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+              Hệ thống tự động tìm trong <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\antigravity-cli</code>, <code className="font-mono text-cyan-600 dark:text-cyan-400">.gemini\bin</code>, và biến môi trường PATH. Nếu bạn cài đặt ở đường dẫn riêng, hãy dán đường dẫn thư mục hoặc file <code className="font-mono text-cyan-600 dark:text-cyan-400">agy.exe</code> vào ô trên.
+            </p>
+          </div>
           {/* OS Switcher Tabs */}
           <div className="p-1.5 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700/60 flex items-center justify-between gap-2">
             <div className="flex items-center gap-1.5">
@@ -817,634 +1465,58 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               </div>
             </div>
           )}
-        </div>
-      )}
 
-      {/* TAB 2: NOTIFICATION & FOCUS REVIEW SETTINGS */}
-      {activeGuideTab === "notification" && (
-        <div className="space-y-6 animate-in fade-in duration-150">
-          {/* SECTION 0: AUTOSTART SYSTEM SETTING */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <span className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white shadow-md shadow-rose-500/20">
-                  <Power className="w-5 h-5" />
-                </span>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Tự khởi động cùng hệ điều hành
-                    </h3>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-800">
-                      Mặc định: Bật
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
-                    Tự động mở MyEnglish khi khởi động máy tính để không bỏ lỡ lịch nhắc từ vựng và phím tắt tra từ nhanh
-                  </p>
-                </div>
-              </div>
-
-              {/* Autostart Toggle */}
-              <button
-                type="button"
-                disabled={togglingAutostart}
-                onClick={() => handleToggleAutostart(!autostart)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 ${
-                  autostart
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                    : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
-                }`}
-              >
-                <span
-                  className={`w-2 h-2 rounded-full ${
-                    autostart ? "bg-white animate-pulse" : "bg-slate-400"
-                  }`}
-                />
-                <span>
-                  {togglingAutostart
-                    ? "Đang cập nhật..."
-                    : autostart
-                    ? "Tự khởi động: Bật"
-                    : "Tự khởi động: Tắt"}
-                </span>
-              </button>
-            </div>
-          </div>
-
-          {/* SECTION 1: SETTINGS & SCHEDULE CONFIGURATION */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-6 shadow-sm">
-            <div className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 dark:border-zinc-800 pb-4">
-              <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-md shadow-cyan-500/20">
-                  <Sliders className="w-4 h-4" />
-                </span>
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Cấu hình Lịch nhắc & Pop-up Quiz (Focus Review)
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">
-                    Tùy chỉnh tần suất nhắc nhở, thời gian hoãn (Snooze), dạng câu hỏi và hiệu ứng mờ màn hình
-                  </p>
-                </div>
-              </div>
-
-              {/* Master Toggle */}
-              <button
-                onClick={() => handleUpdateReminder({ enabled: !reminderSettings.enabled })}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
-                  reminderSettings.enabled
-                    ? "bg-emerald-600 hover:bg-emerald-500 text-white"
-                    : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
-                }`}
-              >
-                <span className={`w-2 h-2 rounded-full ${reminderSettings.enabled ? "bg-white animate-pulse" : "bg-slate-400"}`} />
-                <span>{reminderSettings.enabled ? "Đang bật Pop-up" : "Đã tạm dừng"}</span>
-              </button>
-            </div>
-
-            {/* Realtime Schedule & Countdown Card */}
-            {reminderSettings.enabled && reminderSettings.intervalMinutes > 0 && (
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border border-cyan-200/80 dark:border-cyan-800/60 flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-bold shrink-0">
-                    <Clock className="w-5 h-5 animate-pulse" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-xs font-bold text-slate-900 dark:text-white">
-                        Lần hiển thị kế tiếp:
-                      </span>
-                      <span className="text-xs font-mono font-bold text-cyan-700 dark:text-cyan-300 bg-cyan-100/80 dark:bg-cyan-950/80 px-2 py-0.5 rounded-md">
-                        {formatDisplayTime(nextReminderMs)}
-                      </span>
-                      <span className="text-xs font-semibold text-indigo-600 dark:text-indigo-400">
-                        (Còn lại: {formatCountdown(remainingSeconds)})
-                      </span>
-                    </div>
-                    <div className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5">
-                      Lần hiển thị gần nhất: <strong className="text-slate-700 dark:text-zinc-300 font-mono">{formatDisplayTime(lastDisplayMs)}</strong>
-                      <span className="ml-2 text-cyan-600 dark:text-cyan-400 font-medium">
-                        • Chu kỳ: {reminderSettings.intervalMinutes} phút (tính từ lần cuối popup hiển thị)
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleTestPopupQuiz}
-                  disabled={testingPopup}
-                  className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
-                >
-                  <Sparkles className="w-3.5 h-3.5" />
-                  <span>{testingPopup ? "Đang mở..." : "Hiển thị ngay"}</span>
-                </button>
-              </div>
-            )}
-
-            {/* Active Snooze Alert if currently snoozed */}
-            {snoozeMinutesRemaining > 0 && (
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2.5 text-amber-800 dark:text-amber-300 text-xs font-semibold">
-                  <Hourglass className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-spin-slow shrink-0" />
-                  <span>
-                    Đang trong thời gian hoãn (Snooze): Còn khoảng{" "}
-                    <strong>{snoozeMinutesRemaining} phút</strong> trước lần nhắc kế tiếp.
-                  </span>
-                </div>
-                <button
-                  onClick={handleCancelSnooze}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
-                >
-                  Hủy hoãn ngay
-                </button>
-              </div>
-            )}
-
-            {/* SETTING FIELDS GRID */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              {/* Field 1: Reminder Interval */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                    <Clock className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                    Khoảng thời gian nhắc học:
-                  </span>
-                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
-                    {reminderSettings.intervalMinutes === 0 ? "Chỉ mở thủ công" : `Mỗi ${reminderSettings.intervalMinutes} phút`}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-1.5">
-                  {([15, 30, 45, 60, 120, 0] as ReminderInterval[]).map((val) => {
-                    const isSelected = reminderSettings.intervalMinutes === val;
-                    const label = val === 0 ? "Tắt tự động" : val >= 60 ? `${val / 60} giờ` : `${val} phút`;
-                    return (
-                      <button
-                        key={val}
-                        onClick={() => handleUpdateReminder({ intervalMinutes: val })}
-                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
-                          isSelected
-                            ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
-                  Khuyên dùng: <strong>30 phút</strong> để vừa tập trung làm việc vừa duy trì nhịp ôn tập đều đặn.
-                </p>
-              </div>
-
-              {/* Field 2: Snooze Duration */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                    <Hourglass className="w-3.5 h-3.5 text-amber-500" />
-                    Thời gian Hoãn học (Snooze):
-                  </span>
-                  <span className="text-[11px] font-mono text-amber-600 dark:text-amber-400 font-semibold">
-                    {reminderSettings.snoozeMinutes} phút
-                  </span>
-                </div>
-                <div className="grid grid-cols-4 gap-1.5">
-                  {([5, 10, 15, 30] as SnoozeDuration[]).map((val) => {
-                    const isSelected = reminderSettings.snoozeMinutes === val;
-                    return (
-                      <button
-                        key={val}
-                        onClick={() => handleUpdateReminder({ snoozeMinutes: val })}
-                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
-                          isSelected
-                            ? "bg-amber-600 text-white shadow-sm shadow-amber-600/30"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-amber-500"
-                        }`}
-                      >
-                        {val} phút
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
-                  Khi đang bận, bạn chỉ cần bấm nút <strong>Hoãn [S]</strong> trên pop-up để dời thời điểm ôn.
-                </p>
-              </div>
-
-              {/* Field 3: Trigger Condition */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                  Điều kiện kích hoạt hiển thị:
-                </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                  <button
-                    onClick={() => handleUpdateReminder({ triggerCondition: "due_only" })}
-                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
-                      reminderSettings.triggerCondition === "due_only"
-                        ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
-                        : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    <span className="text-xs font-bold">Chỉ khi có từ đến hạn (FSRS)</span>
-                    <span className="text-[10px] opacity-75">Tôn trọng chu kỳ phân bổ khoa học</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleUpdateReminder({ triggerCondition: "all_words" })}
-                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
-                      reminderSettings.triggerCondition === "all_words"
-                        ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
-                        : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    <span className="text-xs font-bold">Luôn nhắc nhở ngẫu nhiên</span>
-                    <span className="text-[10px] opacity-75">Duy trì phản xạ từ vựng liên tục</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Field 3b: Do not disturb */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80">
-                <label className="flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Không làm phiền khi đang bận
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Tự hoãn pop-up khi có ứng dụng toàn màn hình (trình chiếu, video, họp), khi đang chia sẻ màn
-                      hình Zoom, khi bật Focus/Không làm phiền (nếu macOS cho phép đọc) hoặc khi bạn rời máy quá 5
-                      phút. Khi đến giờ, một thẻ nhỏ hiện ở góc màn hình (không chiếm bàn phím) lúc bạn tạm dừng
-                      thao tác; bỏ qua thì thẻ tự hoãn sau 20 giây, bấm Học ngay để mở bài ôn.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.respectFocus}
-                    onChange={(e) => handleUpdateReminder({ respectFocus: e.target.checked })}
-                  />
-                </label>
-                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Luôn hiện trên màn hình chính
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Mặc định nhắc nhở hiện trên màn hình bạn đang làm việc (nơi có con trỏ chuột).
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.preferPrimaryMonitor}
-                    onChange={(e) => handleUpdateReminder({ preferPrimaryMonitor: e.target.checked })}
-                  />
-                </label>
-                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Nhắc vào lúc chuyển việc
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Ngoài chu kỳ trên, nhắc sớm hơn vào lúc bạn vừa quay lại máy (buổi sáng, sau khi rời máy hoặc
-                      máy ngủ), vừa tắt chia sẻ màn hình hoặc vừa thoát ứng dụng toàn màn hình. Chỉ khi có thẻ cần ôn,
-                      và cách lời nhắc trước ít nhất 20 phút.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.contextMoments}
-                    onChange={(e) => handleUpdateReminder({ contextMoments: e.target.checked })}
-                  />
-                </label>
-                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Né giờ bạn hay bỏ qua lời nhắc
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Học từ 30 ngày gần nhất: giờ nào lời nhắc gần như luôn bị hoãn hoặc bỏ qua thì không nhắc theo
-                      chu kỳ vào giờ đó (lời nhắc lúc chuyển việc vẫn hiện).
-                      {getQuietHours().length > 0 && ` Hiện đang né: ${getQuietHours().map((h) => `${h}h`).join(", ")}.`}
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.avoidQuietHours}
-                    onChange={(e) => handleUpdateReminder({ avoidQuietHours: e.target.checked })}
-                  />
-                </label>
-                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Xong mục tiêu ngày thì thôi nhắc
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Đạt mục tiêu hôm nay rồi thì nghỉ, mai nhắc tiếp. Bạn vẫn có thể tự mở bài ôn bất cứ lúc nào.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.stopAfterGoal}
-                    onChange={(e) => handleUpdateReminder({ stopAfterGoal: e.target.checked })}
-                  />
-                </label>
-                <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Không nhắc ban đêm ({NIGHT_QUIET_START}:00–{String(NIGHT_QUIET_END).padStart(2, "0")}:00)
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Ngủ đủ giúp nhớ từ tốt hơn học khuya.
-                    </span>
-                  </span>
-                  <input
-                    type="checkbox"
-                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.nightQuiet}
-                    onChange={(e) => handleUpdateReminder({ nightQuiet: e.target.checked })}
-                  />
-                </label>
-                <div className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3">
-                  <span className="space-y-1">
-                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Tối đa số lần nhắc mỗi ngày
-                    </span>
-                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Nhắc quá nhiều dễ thành thói quen bấm bỏ qua.
-                    </span>
-                  </span>
-                  <select
-                    className="text-xs rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1 shrink-0"
-                    value={reminderSettings.maxNudgesPerDay}
-                    onChange={(e) => handleUpdateReminder({ maxNudgesPerDay: Number(e.target.value) })}
-                  >
-                    {[4, 6, 8, 12, 0].map((n) => (
-                      <option key={n} value={n}>
-                        {n === 0 ? "Không giới hạn" : `${n} lần`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Field 4: Words per Session */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                    Số lượng từ mỗi lần Pop-up:
-                  </span>
-                  <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-semibold">
-                    {reminderSettings.wordsPerSession} từ / phiên
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { count: 3, label: "3 từ", desc: "~15s nhanh" },
-                    { count: 5, label: "5 từ", desc: "~30s chuẩn" },
-                    { count: 10, label: "10 từ", desc: "~1p sâu" },
-                  ].map((item) => {
-                    const isSelected = reminderSettings.wordsPerSession === item.count;
-                    return (
-                      <button
-                        key={item.count}
-                        onClick={() => handleUpdateReminder({ wordsPerSession: item.count })}
-                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center flex flex-col items-center gap-0.5 ${
-                          isSelected
-                            ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
-                        }`}
-                      >
-                        <span className="font-bold">{item.label}</span>
-                        <span className={`text-[10px] ${isSelected ? "text-cyan-100" : "text-slate-400 dark:text-zinc-500"}`}>
-                          {item.desc}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
-                  Các câu hỏi trong phiên pop-up được tự động phân bổ ngẫu nhiên giữa trắc nghiệm 1-4 và gõ từ vựng.
-                </p>
-              </div>
-
-              {/* Field 5: Grammar Review in Popup & Level Multi-Select */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                    <GraduationCap className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
-                    Ôn tập ngữ pháp trong Pop-up:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleUpdateReminder({ includeGrammar: !reminderSettings.includeGrammar })}
-                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                      reminderSettings.includeGrammar !== false ? "bg-cyan-600" : "bg-slate-300 dark:bg-zinc-700"
-                    }`}
-                  >
-                    <span
-                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
-                        reminderSettings.includeGrammar !== false ? "translate-x-4" : "translate-x-0"
-                      }`}
-                    />
-                  </button>
-                </div>
-
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-tight">
-                  Tự động xen kẽ câu hỏi ngữ pháp song song với từ vựng trong mỗi phiên Pop-up theo thuật toán Spaced Repetition.
-                </p>
-
-                {reminderSettings.includeGrammar !== false && (
-                  <div className="space-y-2 pt-2 border-t border-slate-200/60 dark:border-zinc-800/60">
-                    <div className="flex items-center justify-between text-[11px]">
-                      <span className="font-semibold text-slate-700 dark:text-zinc-300">
-                        Cấp độ ngữ pháp ôn tập (chọn nhiều):
-                      </span>
-                      <span className="text-cyan-600 dark:text-cyan-400 font-mono font-bold">
-                        {(reminderSettings.grammarLevels || []).join(", ") || "Chưa chọn"}
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {(["A1", "A2", "B1", "B2", "C1"] as GrammarLevel[]).map((lvl) => {
-                        const currentLevels = reminderSettings.grammarLevels || ["A1", "A2", "B1"];
-                        const isSelected = currentLevels.includes(lvl);
-                        return (
-                          <button
-                            key={lvl}
-                            type="button"
-                            onClick={() => {
-                              let next: GrammarLevel[];
-                              if (isSelected) {
-                                next = currentLevels.filter((l) => l !== lvl);
-                                if (next.length === 0) next = [lvl];
-                              } else {
-                                next = [...currentLevels, lvl];
-                              }
-                              handleUpdateReminder({ grammarLevels: next });
-                            }}
-                            className={`py-2 px-1 rounded-xl text-xs font-bold transition-all text-center border ${
-                              isSelected
-                                ? "bg-cyan-600 border-cyan-500 text-white shadow-sm shadow-cyan-600/30"
-                                : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400 hover:border-cyan-400"
-                            }`}
-                          >
-                            {lvl}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <p className="text-[10px] text-slate-400 dark:text-zinc-500 italic">
-                      Chỉ các câu hỏi thuộc cấp độ được chọn ở trên sẽ được đưa vào hàng đợi Pop-up.
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Field 6: Fullscreen Overlay Blur Level & Audio Policy */}
-              <div className="p-4 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/60 border border-slate-200/80 dark:border-zinc-800/80 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 flex items-center gap-1.5">
-                    <Maximize2 className="w-3.5 h-3.5 text-indigo-500" />
-                    Độ mờ màn hình (Backdrop Blur):
-                  </span>
-                  <span className="text-[11px] font-mono text-indigo-600 dark:text-indigo-400 font-semibold">
-                    {reminderSettings.blurOverlay === "light" ? "Mờ nhẹ" : reminderSettings.blurOverlay === "heavy" ? "Mờ đậm" : "Mờ vừa"}
-                  </span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {(["light", "medium", "heavy"] as BlurOverlayLevel[]).map((level) => {
-                    const isSelected = reminderSettings.blurOverlay === level;
-                    const label = level === "light" ? "Mờ nhẹ" : level === "heavy" ? "Mờ đậm" : "Mờ vừa";
-                    return (
-                      <button
-                        key={level}
-                        onClick={() => handleUpdateReminder({ blurOverlay: level })}
-                        className={`py-2 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
-                          isSelected
-                            ? "bg-indigo-600 text-white shadow-sm shadow-indigo-600/30"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-indigo-500"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-emerald-700 dark:text-emerald-400 pt-1">
-                  <VolumeX className="w-3.5 h-3.5 shrink-0" />
-                  <span>Đã tắt âm thanh tự động khi hiển thị từ để không làm phiền bạn.</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* SECTION 2: INTERACTIVE TEST CENTER */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
-              <BellRing className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-              <span>Trung tâm kiểm tra thực tế (Testing Center)</span>
-            </h3>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-1">
-              {/* Test 1: Pop-up Focus Review */}
-              <div className="p-4 rounded-2xl border border-cyan-200 dark:border-cyan-800/80 bg-cyan-50/50 dark:bg-cyan-950/20 space-y-2.5 flex flex-col justify-between">
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Zap className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
-                    <span>Test 1: Pop-up Quiz toàn màn hình</span>
-                  </div>
-                  <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-snug pt-1">
-                    Bật ngay cửa sổ làm mờ toàn màn hình. Bạn có thể nhấn <strong>Esc</strong> để tắt nhanh, dùng phím <strong>1-4</strong> để chọn, hoặc <strong>S</strong> để hoãn.
-                  </p>
-                </div>
-                <button
-                  onClick={handleTestPopupQuiz}
-                  disabled={testingPopup}
-                  className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all shadow-cyan-600/20"
-                >
-                  <Zap className={`w-3.5 h-3.5 ${testingPopup ? "animate-bounce" : ""}`} />
-                  <span>{testingPopup ? "Đang mở..." : "Bật thử Pop-up Quiz ngay"}</span>
-                </button>
-              </div>
-
-              {/* Test 2: Native Desktop Notification */}
-              <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 space-y-2.5 flex flex-col justify-between">
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Bell className="w-4 h-4 text-indigo-500" />
-                    <span>Test 2: Bắn thông báo macOS</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug pt-1">
-                    Gửi thông báo test lên Notification Center của macOS kèm chuông báo "Glass".
-                  </p>
-                </div>
-                <button
-                  onClick={handleTestNotification}
-                  disabled={testingNotif}
-                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all"
-                >
-                  <Bell className={`w-3.5 h-3.5 ${testingNotif ? "animate-bounce" : ""}`} />
-                  <span>{testingNotif ? "Đang gửi..." : "Gửi thông báo test macOS"}</span>
-                </button>
-              </div>
-
-              {/* Test 3: Mark word due in SQLite */}
-              <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 space-y-2.5 flex flex-col justify-between">
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Flame className="w-4 h-4 text-orange-500" />
-                    <span>Test 3: Tạo từ đến hạn ôn tập thật</span>
-                  </div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug pt-1">
-                    Đặt 1 từ trong SQLite về quá hạn để kiểm tra thuật toán tự động nhận diện từ đến hạn.
-                  </p>
-                </div>
-                <button
-                  onClick={handleMarkDueTest}
-                  disabled={testingDueWord}
-                  className="w-full py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all"
-                >
-                  <Flame className="w-3.5 h-3.5" />
-                  <span>{testingDueWord ? "Đang thiết lập..." : "Đặt 1 từ thành 'Cần ôn ngay'"}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Feedback alert message */}
-            {notifFeedback && (
-              <div className="p-4 rounded-2xl bg-cyan-50 dark:bg-cyan-950/40 border border-cyan-200 dark:border-cyan-800 text-xs text-cyan-950 dark:text-cyan-200 flex items-start justify-between gap-3 animate-in fade-in flex-wrap sm:flex-nowrap">
-                <div className="flex items-start gap-2.5">
-                  <CheckCircle2 className="w-4 h-4 text-cyan-600 dark:text-cyan-400 shrink-0 mt-0.5" />
-                  <span className="leading-relaxed">{notifFeedback}</span>
-                </div>
-                {onNavigateTab && (
-                  <button
-                    onClick={() => onNavigateTab("review")}
-                    className="shrink-0 px-3.5 py-1.5 rounded-lg bg-orange-600 hover:bg-orange-500 text-white font-semibold text-xs transition-colors shadow-sm flex items-center gap-1.5"
-                  >
-                    <Flame className="w-3.5 h-3.5" />
-                    <span>Mở Daily Review ngay →</span>
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* SECTION 3: FSRS ALGORITHM EXPLANATION & CONFIGURATION */}
+          {/* Dùng API key cho CLI: app không có ô nhập key, key được khai báo cho chính CLI */}
           <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
+              <Key className="w-4 h-4" />
+              <span>Dùng API key cho CLI</span>
+            </div>
+            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Nếu không muốn đăng nhập Google trong CLI, bạn có thể dùng Gemini API Key miễn phí. Ứng dụng không có ô nhập
+              key: key được khai báo cho chính CLI trên máy, và mọi lời gọi AI vẫn đi qua CLI đó.
+            </p>
+
+            <div className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800">
+              <h4 className="text-xs font-bold text-slate-900 dark:text-white">Cách lấy Gemini API Key:</h4>
+              <ol className="text-xs text-slate-600 dark:text-zinc-400 space-y-1.5 list-decimal pl-5 leading-relaxed">
+                <li>
+                  Truy cập vào trang{" "}
+                  <a
+                    href="https://aistudio.google.com/app/apikey"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-cyan-600 dark:text-cyan-400 underline font-semibold inline-flex items-center gap-1"
+                  >
+                    Google AI Studio (aistudio.google.com)
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </li>
+                <li>Đăng nhập bằng tài khoản Google (Gmail thông thường miễn phí).</li>
+                <li>Bấm nút <strong>&quot;Create API key&quot;</strong> và copy chuỗi key tạo ra.</li>
+                <li>Khai báo key cho CLI theo đoạn bên dưới.</li>
+              </ol>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
+              Khai báo key cho chính CLI (ví dụ biến môi trường <code className="font-mono">GEMINI_API_KEY</code> trong shell
+              của bạn, hoặc lệnh đăng nhập của CLI). Ứng dụng không lưu API key.
+            </p>
+          </div>
+
+          {/* Thuật toán lịch ôn: nâng cao, đã có sẵn cấu hình mặc định */}
+          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
                 <Zap className="w-4 h-4 text-amber-500" />
-                <span>Thuật toán Spaced Repetition Thế Hệ Mới: FSRS (DSR Model)</span>
+                <Jargon
+                  term="Thuật toán Spaced Repetition Thế Hệ Mới: FSRS"
+                  plain="Thuật toán lịch ôn thông minh"
+                  hint="FSRS: tính ngày ôn lại theo độ khó, độ bền và khả năng nhớ của từng từ"
+                />
               </div>
               <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 font-mono font-bold">
-                FSRS-6 Active
+                <Jargon term="FSRS-6 Active (DSR Model)" plain="Đang bật" hint="Phiên bản FSRS-6 đang chạy trong app" />
               </span>
             </div>
 
@@ -1484,79 +1556,20 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               </div>
             </div>
 
-            {/* Daily study limits */}
-            <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
-              {([
-                {
-                  key: "newCardsPerDay" as const,
-                  title: "Số thẻ mới mỗi ngày",
-                  desc: "Gồm từ mới và lượt tập gõ lại từ đã nhớ (thẻ nhớ lại mới). Giữ thấp để lượng ôn các ngày sau không dồn ứ.",
-                  options: [3, 5, 8, 10, 20],
-                },
-                {
-                  key: "maxSessionSize" as const,
-                  title: "Số thẻ tối đa mỗi phiên",
-                  desc: "Từ đến hạn được ưu tiên trước, từ mới xen kẽ đều trong phiên.",
-                  options: [20, 30, 40, 50, 100],
-                },
-              ]).map((cfg) => (
-                <div key={cfg.key} className="space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="text-xs font-bold text-slate-900 dark:text-white">{cfg.title}</div>
-                      <p className="text-[11px] text-slate-500 dark:text-zinc-400">{cfg.desc}</p>
-                    </div>
-                    <span className="text-sm font-bold text-cyan-600 dark:text-cyan-400 font-mono">
-                      {studyLimits[cfg.key]}
-                    </span>
-                  </div>
-                  <div className="grid grid-cols-5 gap-2">
-                    {cfg.options.map((val) => (
-                      <button
-                        key={val}
-                        onClick={() => {
-                          saveStudyLimits({ [cfg.key]: val });
-                          setStudyLimits((prev) => ({ ...prev, [cfg.key]: val }));
-                          setNotifFeedback(`Đã cập nhật "${cfg.title}" thành ${val}!`);
-                        }}
-                        className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
-                          studyLimits[cfg.key] === val
-                            ? "bg-cyan-600 text-white shadow-sm font-bold"
-                            : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
-                        }`}
-                      >
-                        {val}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <label className="flex items-start justify-between gap-3 pt-2 border-t border-slate-200 dark:border-zinc-800 cursor-pointer">
-                <div>
-                  <div className="text-xs font-bold text-slate-900 dark:text-white">Đoán nghĩa trước khi học từ mới</div>
-                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                    Trước thẻ giới thiệu, đoán nghĩa từ trong một câu ví dụ (3 lựa chọn). Đoán trước, kể cả đoán sai, giúp nhớ lâu hơn. Không tính điểm.
-                  </p>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={pretestOn}
-                  onChange={(e) => {
-                    setPretestEnabled(e.target.checked);
-                    setPretestOn(e.target.checked);
-                  }}
-                  className="mt-1 accent-cyan-600"
-                />
-              </label>
-            </div>
-
-            <DisplaySettings />
-
-            <AdvancedLearningSettings />
+            <AdvancedLearningSettings onWordsChanged={onRefreshWords} />
 
             <div className="text-xs text-slate-700 dark:text-zinc-300 space-y-2 leading-relaxed">
               <p>
-                <strong>1. Khắc phục hoàn toàn "Ease Hell" của SM-2:</strong> FSRS không dùng hệ số cố định mà mô hình hóa trí nhớ theo 3 biến số <strong>DSR (Độ khó - Độ bền - Khả năng nhớ lại)</strong>. Khi bạn bấm quên một từ, thuật toán sẽ tự cân bằng lại chứ không phạt kẹt từ ở chu kỳ ngắn vĩnh viễn.
+                <strong>
+                  1.{" "}
+                  <Jargon
+                    term='Khắc phục "Ease Hell" của SM-2'
+                    plain="Không bị kẹt ở chu kỳ ngắn"
+                    hint="SM-2 là thuật toán cũ: sau nhiều lần quên, hệ số ôn bị hạ mãi nên từ hiện quá dày"
+                  />
+                  :
+                </strong>{" "}
+                FSRS không dùng hệ số cố định mà mô hình hóa trí nhớ theo 3 biến số <strong>DSR (Độ khó - Độ bền - Khả năng nhớ lại)</strong>. Khi bạn bấm quên một từ, thuật toán sẽ tự cân bằng lại chứ không phạt kẹt từ ở chu kỳ ngắn vĩnh viễn.
               </p>
               <p>
                 <strong>2. Giảm 20% – 30% số lượt ôn tập:</strong> Khoảng cách ôn được tính toán toán học chính xác theo đường cong quên Ebbinghaus hiện đại, giúp bạn nhớ lâu hơn nhưng tốn ít thời gian lặp lại hơn.
@@ -1567,48 +1580,127 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </div>
           </div>
         </div>
-      )}
+      </section>
 
-      {/* TAB 3: GEMINI API KEY OPTION (STANDALONE ALTERNATIVE) */}
-      {activeGuideTab === "apikey" && (
-        <div className="space-y-6 animate-in fade-in duration-150">
-          <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-            <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
-              <Key className="w-4 h-4" />
-              <span>Giải pháp thay thế: Sử dụng Google Gemini API Key trực tiếp</span>
+      {/* 4. CÔNG CỤ CHO NHÀ PHÁT TRIỂN: thu gọn, người học không cần dùng */}
+      <details className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-700 bg-slate-50/60 dark:bg-zinc-950/40 p-4">
+        <summary className="cursor-pointer select-none text-xs font-bold text-slate-600 dark:text-zinc-400">
+          Công cụ cho nhà phát triển (kiểm thử thông báo, tạo từ đến hạn)
+        </summary>
+        <div className="mt-4 space-y-4">
+          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <BellRing className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+              <span>Trung tâm kiểm tra thực tế (Testing Center)</span>
+            </h3>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5 pt-1">
+              {/* Test 1: Pop-up Focus Review */}
+              <div className="p-4 rounded-2xl border border-cyan-200 dark:border-cyan-800/80 bg-cyan-50/50 dark:bg-cyan-950/20 space-y-2.5 flex flex-col justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Zap className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+                    <span>Test 1: Pop-up Quiz toàn màn hình</span>
+                  </div>
+                  <p className="text-[11px] text-slate-600 dark:text-zinc-400 leading-snug pt-1">
+                    Bật ngay cửa sổ làm mờ toàn màn hình. Bạn có thể nhấn <strong>Esc</strong> để tắt nhanh, dùng phím <strong>1-4</strong> để chọn, hoặc <strong>S</strong> để hoãn.
+                  </p>
+                </div>
+                <button
+                  onClick={handleTestPopupQuiz}
+                  disabled={testingPopup}
+                  className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all shadow-cyan-600/20"
+                >
+                  <Zap className={`w-3.5 h-3.5 ${testingPopup ? "animate-bounce" : ""}`} />
+                  <span>{testingPopup ? "Đang mở..." : "Bật thử Pop-up Quiz ngay"}</span>
+                </button>
+              </div>
+
+              {/* Test 2: Native Desktop Notification */}
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 space-y-2.5 flex flex-col justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Bell className="w-4 h-4 text-indigo-500" />
+                    <span>Test 2: Gửi thông báo thử</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug pt-1">
+                    Gửi một thông báo thử lên màn hình hệ thống (trên macOS kèm tiếng chuông "Glass").
+                  </p>
+                </div>
+                <button
+                  onClick={handleTestNotification}
+                  disabled={testingNotif}
+                  className="w-full py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Bell className={`w-3.5 h-3.5 ${testingNotif ? "animate-bounce" : ""}`} />
+                  <span>{testingNotif ? "Đang gửi..." : "Gửi thông báo thử"}</span>
+                </button>
+              </div>
+
+              {/* Test 3: Mark word due in SQLite */}
+              <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950 space-y-2.5 flex flex-col justify-between">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Flame className="w-4 h-4 text-orange-500" />
+                    <span>Test 3: Tạo từ đến hạn ôn tập thật</span>
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-snug pt-1">
+                    Đặt 1 từ trong SQLite về quá hạn để kiểm tra thuật toán tự động nhận diện từ đến hạn.
+                  </p>
+                </div>
+                <button
+                  onClick={handleMarkDueTest}
+                  disabled={testingDueWord}
+                  className="w-full py-2.5 rounded-xl bg-orange-600 hover:bg-orange-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-all"
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  <span>{testingDueWord ? "Đang thiết lập..." : "Đặt 1 từ thành 'Cần ôn ngay'"}</span>
+                </button>
+              </div>
             </div>
-            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-              Nếu bạn muốn mang ứng dụng MyEnglish sang một máy tính khác (hoặc gửi cho người khác dùng) mà máy đó <strong>không cài đặt Antigravity CLI</strong>, bạn chỉ cần lấy một <strong>Gemini API Key miễn phí</strong> từ Google AI Studio dán vào đây:
-            </p>
 
-            <div className="space-y-3 p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800">
-              <h4 className="text-xs font-bold text-slate-900 dark:text-white">Cách lấy Gemini API Key miễn phí 100%:</h4>
-              <ol className="text-xs text-slate-600 dark:text-zinc-400 space-y-1.5 list-decimal pl-5 leading-relaxed">
-                <li>
-                  Truy cập vào trang{" "}
-                  <a
-                    href="https://aistudio.google.com/app/apikey"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-cyan-600 dark:text-cyan-400 underline font-semibold inline-flex items-center gap-1"
-                  >
-                    Google AI Studio (aistudio.google.com)
-                    <ExternalLink className="w-3 h-3" />
-                  </a>
-                </li>
-                <li>Đăng nhập bằng tài khoản Google (Gmail thông thường miễn phí).</li>
-                <li>Bấm nút <strong>"Create API key"</strong> và copy chuỗi key tạo ra.</li>
-                <li>Khai báo key cho CLI theo hướng dẫn bên dưới.</li>
-              </ol>
-            </div>
-
-            <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
-              Khai báo key cho chính CLI (ví dụ biến môi trường <code className="font-mono">GEMINI_API_KEY</code> trong shell của bạn, hoặc lệnh đăng
-              nhập của CLI). Ứng dụng không lưu API key: mọi lời gọi AI đều đi qua CLI đã cấu hình trên máy.
-            </p>
           </div>
         </div>
-      )}
+      </details>
     </div>
   );
+}
+
+/** Whole seconds to the next reminder, as "12m 05s" */
+function formatCountdown(totalSec: number) {
+  if (totalSec <= 0) return "Đang đến giờ hiển thị!";
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m === 0) return `${s}s`;
+  return `${m}m ${s < 10 ? "0" : ""}${s}s`;
+}
+
+/** Counts down by itself, so the page does not re-render every second */
+function ReminderCountdown({ nextMs }: { nextMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  return <>{formatCountdown(Math.max(0, Math.ceil((nextMs - now) / 1000)))}</>;
+}
+
+/** Why the clock reminder is not showing now, in the same order as the reminder worker (srs.ts) */
+function getPauseReason(settings: ReminderSettings, goalMet: boolean): string | null {
+  if (isSnoozed()) {
+    const until = new Date(settings.snoozedUntil ?? 0).toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+    return `đang hoãn đến ${until}`;
+  }
+  if (isMainSessionActive()) return "bạn đang ôn trong cửa sổ chính";
+  const pause = reminderPause(settings, {
+    hour: new Date().getHours(),
+    goalReached: goalMet,
+    shownToday: getNudgesShownToday(),
+  });
+  if (pause === "night") return `ban đêm (${NIGHT_QUIET_START}:00–${String(NIGHT_QUIET_END).padStart(2, "0")}:00)`;
+  if (pause === "goal_reached") return "đã đạt mục tiêu hôm nay";
+  if (pause === "daily_cap") return "đủ số lần nhắc hôm nay";
+  return null;
 }

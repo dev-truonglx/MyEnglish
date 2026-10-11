@@ -6,6 +6,7 @@ import {
   claimTopicChallengeReward,
   getReviewLogsSince,
   getTopicChallenge,
+  MIN_RETENTION_SAMPLE,
   startOfWeek,
   summarizeWeek,
   type TopicChallenge,
@@ -55,6 +56,9 @@ export default function WeeklyProgressCard({ words }: { words: WordDetail[] }) {
   if (!week) return null;
   const retentionPct = week.retention === null ? null : Math.round(week.retention * 100);
   const targetPct = Math.round(week.targetRetention * 100);
+  // A few answers say nothing yet: no colour, no advice until there are enough
+  const enoughData = retentionPct !== null && week.reviewAnswers >= MIN_RETENTION_SAMPLE;
+  const lowRetention = enoughData && (retentionPct as number) < targetPct - 5;
 
   return (
     <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-4 shadow-sm">
@@ -68,15 +72,17 @@ export default function WeeklyProgressCard({ words }: { words: WordDetail[] }) {
         <Stat label="Từ đã ôn" value={String(week.wordsStudied)} />
         <Stat label="Ngày học" value={`${week.activeDays}/7`} />
         <Stat
-          label={`Tỉ lệ nhớ (mục tiêu ${targetPct}%)`}
+          label={`Tỉ lệ nhớ (mục tiêu ${targetPct}%) · ${week.reviewAnswers} lượt${
+            week.reviewAnswers < MIN_RETENTION_SAMPLE ? ", chưa đủ để đánh giá" : ""
+          }`}
           value={retentionPct === null ? "–" : `${retentionPct}%`}
-          tone={retentionPct === null ? undefined : retentionPct >= targetPct - 5 ? "good" : "warn"}
+          tone={!enoughData ? undefined : lowRetention ? "warn" : "good"}
         />
       </div>
       <p className="text-[11px] text-slate-500 dark:text-zinc-400">
         Bạn đang nhớ chắc <span className="font-semibold text-slate-700 dark:text-zinc-200">{week.masteredWords}</span> từ
         (sẽ không quên trong ít nhất 3 tuần).
-        {retentionPct !== null && retentionPct < targetPct - 5 && " Tỉ lệ nhớ đang thấp hơn mục tiêu: hãy ôn đúng hạn hoặc giảm số từ mới mỗi ngày."}
+        {lowRetention && " Tỉ lệ nhớ đang thấp hơn mục tiêu: hãy ôn đúng hạn hoặc giảm số từ mới mỗi ngày."}
       </p>
 
       {challenge && (
@@ -89,7 +95,7 @@ export default function WeeklyProgressCard({ words }: { words: WordDetail[] }) {
                 <Target className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
               )}
               <span className="truncate">
-                Thử thách tuần: trả lời đúng {challenge.target} câu chủ đề {challenge.topic}
+                Thử thách tuần: trả lời đúng {challenge.target} câu cấp độ {challenge.topic}
               </span>
             </span>
             <span className="font-mono text-[11px] text-slate-500 dark:text-zinc-400 shrink-0">

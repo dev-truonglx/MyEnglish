@@ -4,6 +4,7 @@ import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { pickExample } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
+import { maskTargetInMeaning } from "@/utils/exerciseHints";
 
 interface LetterTilesExerciseProps {
   word: WordDetail;
@@ -143,7 +144,7 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
     <div className="w-full max-w-xl mx-auto space-y-5 animate-in fade-in duration-200">
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-2 shadow-sm">
         <div className="text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{getConciseMeaning(word.meaning_vn)}</h2>
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn), target)}</h2>
         {word.part_of_speech && <p className="text-xs italic text-slate-400">{word.part_of_speech}</p>}
         {example?.sentence_vn && <p className="text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
       </div>

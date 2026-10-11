@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  includesFoundationGrammar,
   isBeginner,
   isSimpleMode,
   productionUnlockDays,
@@ -30,15 +29,13 @@ describe("learner profile", () => {
     expect(isSimpleMode()).toBe(true);
   });
 
-  it("A0 (mất gốc) = A1 content with foundation mode: foundation grammar, recall after 7 days", () => {
+  it("A0 (mất gốc) = A1 content with foundation mode: recall after 7 days", () => {
     expect(applyLevelChoice("A0")).toBe("A1");
     expect(productionUnlockDays()).toBe(7);
-    expect(includesFoundationGrammar()).toBe(true);
     applyLevelChoice("B1");
     expect(productionUnlockDays()).toBe(3);
-    expect(includesFoundationGrammar()).toBe(false);
     setFoundationMode(true);
-    expect(includesFoundationGrammar()).toBe(true);
+    expect(productionUnlockDays()).toBe(7);
   });
 });
 

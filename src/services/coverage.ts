@@ -8,6 +8,7 @@ import type { WordDetail } from "@/types/database";
 import type { CoverageText } from "@/data/coverageCorpus";
 import { FUNCTION_WORDS } from "@/data/commonWords";
 import { analyzeText } from "./reading";
+import { hasRealReview } from "./progress";
 
 export interface Coverage {
   /** 0–100 */
@@ -16,9 +17,9 @@ export interface Coverage {
   total: number;
 }
 
-/** A bank word counts once its recognition card has graduated to Review */
+/** A bank word counts once its recognition card has graduated to Review after a real answer (not just "Đã biết") */
 function isRecognised(word: WordDetail): boolean {
-  return (word.srs?.state ?? 0) === 2;
+  return (word.srs?.state ?? 0) === 2 && hasRealReview(word);
 }
 
 export function computeCoverage(words: WordDetail[], texts: CoverageText[]): Coverage {

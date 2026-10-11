@@ -2,24 +2,46 @@ import { useState, useEffect } from "react";
 import { Sparkles, Trophy, Award, X } from "lucide-react";
 import type { AchievementBadge } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
+import { isMainSessionActive } from "@/services/activeSession";
+
+interface LevelUp {
+  newLevel: number;
+  totalXP: number;
+}
 
 export default function LevelUpModal() {
-  const [levelUpData, setLevelUpData] = useState<{
-    newLevel: number;
-    totalXP: number;
-  } | null>(null);
+  const [levelUpData, setLevelUpData] = useState<LevelUp | null>(null);
 
   const [unlockedBadges, setUnlockedBadges] = useState<AchievementBadge[]>([]);
 
   useEffect(() => {
+    // Mid-session the level-up waits: a full-screen modal would cover the card while 1/Enter still grade it
+    let pending: LevelUp | null = null;
+    let waitTimer: ReturnType<typeof setInterval> | null = null;
+
+    const show = (data: LevelUp) => {
+      setLevelUpData(data);
+      triggerConfetti(3000);
+    };
+
     const handleXPUpdate = (e: CustomEvent) => {
-      if (e.detail?.leveledUp) {
-        setLevelUpData({
-          newLevel: e.detail.newLevel,
-          totalXP: e.detail.totalXP,
-        });
-        triggerConfetti(3000);
+      if (!e.detail?.leveledUp) return;
+      const data: LevelUp = { newLevel: e.detail.newLevel, totalXP: e.detail.totalXP };
+      if (!isMainSessionActive()) {
+        show(data);
+        return;
       }
+      // Keep the latest level; shown once the session has ended
+      pending = data;
+      if (waitTimer) return;
+      waitTimer = setInterval(() => {
+        if (isMainSessionActive()) return;
+        if (waitTimer) clearInterval(waitTimer);
+        waitTimer = null;
+        const next = pending;
+        pending = null;
+        if (next) show(next);
+      }, 2000);
     };
 
     const handleBadgeUnlocked = (e: CustomEvent) => {
@@ -45,6 +67,7 @@ export default function LevelUpModal() {
     return () => {
       window.removeEventListener("myenglish-xp-updated" as any, handleXPUpdate);
       window.removeEventListener("myenglish-badge-unlocked" as any, handleBadgeUnlocked);
+      if (waitTimer) clearInterval(waitTimer);
     };
   }, []);
 

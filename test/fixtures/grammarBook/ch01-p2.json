@@ -1,0 +1,435 @@
+{
+ "format": "myenglish-grammar-book",
+ "version": 2,
+ "chapterId": "ch01",
+ "part": 2,
+ "parts": 2,
+ "exerciseSets": [
+  {
+   "id": "ch01-s01",
+   "roman": "I",
+   "instruction": "Supply the correct verb form.",
+   "type": "verb_form",
+   "page": 8,
+   "keyPage": 13,
+   "wordBank": [],
+   "example": null,
+   "passage": null,
+   "itemCount": 5
+  },
+  {
+   "id": "ch01-s02",
+   "roman": "II",
+   "instruction": "Choose the correct form.",
+   "type": "choose",
+   "page": 8,
+   "keyPage": 13,
+   "wordBank": [],
+   "example": null,
+   "passage": null,
+   "itemCount": 2
+  },
+  {
+   "id": "ch01-s03",
+   "roman": "III",
+   "instruction": "Rewrite the sentences.",
+   "type": "rewrite",
+   "page": 9,
+   "keyPage": 13,
+   "wordBank": [],
+   "example": null,
+   "passage": null,
+   "itemCount": 2
+  },
+  {
+   "id": "ch01-s04",
+   "roman": "IV",
+   "instruction": "Complete the sentences.",
+   "type": "complete",
+   "page": 9,
+   "keyPage": 13,
+   "wordBank": [],
+   "example": null,
+   "passage": null,
+   "itemCount": 1
+  }
+ ],
+ "practiceGroups": [
+  {
+   "id": "ch01-g01",
+   "lessonIds": [
+    "ch01-l01"
+   ],
+   "title": "",
+   "items": [
+    {
+     "setId": "ch01-s01",
+     "n": 1,
+     "lessonIds": [
+      "ch01-l01"
+     ],
+     "prompt": "My brother ___ (drive) to work every day.",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "drives"
+      ]
+     ],
+     "answerSentence": "My brother drives to work every day.",
+     "keyRaw": "drives",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Anh tôi lái xe đi làm mỗi ngày.",
+      "distractors": [
+       [
+        "is driving",
+        "drove",
+        "drive"
+       ]
+      ],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s01",
+     "n": 5,
+     "lessonIds": [
+      "ch01-l01"
+     ],
+     "prompt": "If it ___ (rain) tomorrow, we will stay at home.",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "rains"
+      ]
+     ],
+     "answerSentence": "If it rains tomorrow, we will stay at home.",
+     "keyRaw": "rains",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Nếu mai trời mưa, chúng tôi sẽ ở nhà.",
+      "distractors": [
+       [
+        "will rain",
+        "rains",
+        "rained"
+       ]
+      ],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s02",
+     "n": 1,
+     "lessonIds": [
+      "ch01-l01"
+     ],
+     "prompt": "Water ___ at 100 degrees Celsius.",
+     "given": "",
+     "underline": "",
+     "options": [
+      "boils",
+      "is boiling"
+     ],
+     "answers": [
+      [
+       "boils"
+      ]
+     ],
+     "answerSentence": "Water boils at 100 degrees Celsius.",
+     "keyRaw": "boils",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Nước sôi ở 100 độ C.",
+      "distractors": [],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s03",
+     "n": 2,
+     "lessonIds": [
+      "ch01-l01"
+     ],
+     "prompt": "They play football on Sundays.",
+     "given": "Do ...",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "Do they play football on Sundays?"
+      ]
+     ],
+     "answerSentence": "Do they play football on Sundays?",
+     "keyRaw": "Do they play football on Sundays?",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Họ có chơi bóng đá vào Chủ nhật không?",
+      "distractors": [],
+      "wrongSentences": [
+       "Does they play football on Sundays?",
+       "Do they plays football on Sundays?"
+      ],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "ch01-g02",
+   "lessonIds": [
+    "ch01-l02"
+   ],
+   "title": "",
+   "items": [
+    {
+     "setId": "ch01-s01",
+     "n": 2,
+     "lessonIds": [
+      "ch01-l02"
+     ],
+     "prompt": "Look! The children ___ (play) in the garden.",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "are playing"
+      ]
+     ],
+     "answerSentence": "Look! The children are playing in the garden.",
+     "keyRaw": "are playing",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Nhìn kìa! Bọn trẻ đang chơi trong vườn.",
+      "distractors": [
+       [
+        "play",
+        "played",
+        "plays"
+       ]
+      ],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s02",
+     "n": 2,
+     "lessonIds": [
+      "ch01-l02"
+     ],
+     "prompt": "Please be quiet. I ___ to the radio.",
+     "given": "",
+     "underline": "",
+     "options": [
+      "listen",
+      "am listening"
+     ],
+     "answers": [
+      [
+       "am listening",
+       "'m listening"
+      ]
+     ],
+     "answerSentence": "Please be quiet. I am listening to the radio.",
+     "keyRaw": "am listening",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Làm ơn yên lặng. Tôi đang nghe đài.",
+      "distractors": [],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "ch01-g01-02",
+   "lessonIds": [
+    "ch01-l01",
+    "ch01-l02"
+   ],
+   "title": "",
+   "items": [
+    {
+     "setId": "ch01-s01",
+     "n": 3,
+     "lessonIds": [
+      "ch01-l01",
+      "ch01-l02"
+     ],
+     "prompt": "She usually ___ (drink) tea, but today she ___ (drink) coffee.",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "drinks"
+      ],
+      [
+       "is drinking"
+      ]
+     ],
+     "answerSentence": "She usually drinks tea, but today she is drinking coffee.",
+     "keyRaw": "drinks - is drinking",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Cô ấy thường uống trà, nhưng hôm nay cô ấy đang uống cà phê.",
+      "distractors": [
+       [
+        "is drinking",
+        "drank",
+        "drink"
+       ],
+       [
+        "drinks",
+        "drank",
+        "drink"
+       ]
+      ],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    }
+   ]
+  },
+  {
+   "id": "ch01-g03",
+   "lessonIds": [
+    "ch01-l03"
+   ],
+   "title": "",
+   "items": [
+    {
+     "setId": "ch01-s01",
+     "n": 4,
+     "lessonIds": [
+      "ch01-l03"
+     ],
+     "prompt": "We ___ (visit) our grandparents last Sunday.",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "visited"
+      ]
+     ],
+     "answerSentence": "We visited our grandparents last Sunday.",
+     "keyRaw": "visited",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Chủ nhật tuần trước chúng tôi thăm ông bà.",
+      "distractors": [
+       [
+        "visit",
+        "are visiting",
+        "visits"
+       ]
+      ],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s03",
+     "n": 1,
+     "lessonIds": [
+      "ch01-l03"
+     ],
+     "prompt": "Tom was ill. He didn't come to class yesterday.",
+     "given": "Tom didn't come ...",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "Tom didn't come to class yesterday because he was ill."
+      ]
+     ],
+     "answerSentence": "Tom didn't come to class yesterday because he was ill.",
+     "keyRaw": "Tom didn't come to class yesterday because he was ill.",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Hôm qua Tom không đến lớp vì bị ốm.",
+      "distractors": [],
+      "wrongSentences": [
+       "Tom didn't come to class yesterday because of he was ill.",
+       "Tom doesn't come to class yesterday because he was ill."
+      ],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    },
+    {
+     "setId": "ch01-s04",
+     "n": 1,
+     "lessonIds": [
+      "ch01-l03"
+     ],
+     "prompt": "When I was a child, I ___",
+     "given": "",
+     "underline": "",
+     "options": [],
+     "answers": [
+      [
+       "lived in Hue"
+      ]
+     ],
+     "answerSentence": "When I was a child, I lived in Hue.",
+     "keyRaw": "lived in Hue",
+     "keyPartial": false,
+     "noKey": false,
+     "parts": [],
+     "ai": {
+      "vi": "Khi còn nhỏ, tôi sống ở Huế.",
+      "distractors": [],
+      "wrongSentences": [],
+      "explainVn": "Giải thích mẫu.",
+      "suggestedAnswers": []
+     }
+    }
+   ]
+  }
+ ],
+ "fixes": [],
+ "stats": {
+  "lessons": 0,
+  "sets": 4,
+  "groups": 4,
+  "items": 10
+ }
+}

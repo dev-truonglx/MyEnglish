@@ -12,6 +12,7 @@ import {
 } from "@/services/fsrsOptimizer";
 import { exportBackupJson, exportWordsCsv, importBackup, parseBackup } from "@/services/dataExport";
 import { getFSRSSettings, saveFSRSSettings } from "@/services/srs";
+import { useSimpleMode } from "../Jargon";
 
 const BOX = "p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-2.5";
 const BTN =
@@ -28,6 +29,7 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
   const [result, setResult] = useState<OptimizerResult | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [maxInterval, setMaxInterval] = useState(() => getFSRSSettings().maximumInterval);
+  const simple = useSimpleMode();
   const fileRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -57,8 +59,8 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
 
   return (
     <div className="space-y-3">
-      {/* Personal FSRS parameters */}
-      <div className={BOX}>
+      {/* Personal FSRS parameters: advanced, hidden in simple mode */}
+      {!simple && <div className={BOX}>
         <div className="flex items-center gap-2">
           <Cpu className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
           <div className="text-xs font-bold text-slate-900 dark:text-white">Tối ưu theo trí nhớ của bạn</div>
@@ -67,8 +69,9 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
           </span>
         </div>
         <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
-          FSRS học lại 21 tham số từ chính lịch sử ôn của bạn (chỉ lượt ôn đúng lịch), để khoảng ôn khớp với tốc độ quên thật của bạn:
-          ít lượt ôn thừa hơn mà vẫn giữ mục tiêu ghi nhớ. Cần ít nhất {MIN_OPTIMIZER_REVIEWS} lượt ôn trên {MIN_OPTIMIZER_CARDS} thẻ.
+          FSRS dùng 21 tham số (hệ số mô tả cách bạn quên theo thời gian). Có thể học lại chúng từ lịch sử ôn của bạn
+          (chỉ lượt ôn đúng lịch), để khoảng ôn khớp với tốc độ quên thật: ít lượt ôn thừa hơn mà vẫn giữ mục tiêu ghi nhớ.
+          Cần ít nhất {MIN_OPTIMIZER_REVIEWS} lượt ôn trên {MIN_OPTIMIZER_CARDS} thẻ.
         </p>
         {data && (
           <div className="space-y-1">
@@ -116,12 +119,16 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
               </thead>
               <tbody className="text-slate-800 dark:text-zinc-200">
                 <tr>
-                  <td>Log loss</td>
+                  <td>
+                    Log loss <span className="font-sans text-slate-500 dark:text-zinc-400">(độ lệch dự đoán)</span>
+                  </td>
                   <td className="text-right">{fmt(result.default_metrics.log_loss)}</td>
                   <td className="text-right font-bold">{fmt(result.new_metrics.log_loss)}</td>
                 </tr>
                 <tr>
-                  <td>RMSE</td>
+                  <td>
+                    RMSE <span className="font-sans text-slate-500 dark:text-zinc-400">(sai số trung bình)</span>
+                  </td>
                   <td className="text-right">{fmt(result.default_metrics.rmse)}</td>
                   <td className="text-right font-bold">{fmt(result.new_metrics.rmse)}</td>
                 </tr>
@@ -150,7 +157,7 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
             </div>
           </div>
         )}
-      </div>
+      </div>}
 
       {/* Longest interval */}
       <div className={BOX}>

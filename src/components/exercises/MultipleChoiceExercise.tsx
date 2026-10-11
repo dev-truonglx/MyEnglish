@@ -40,7 +40,9 @@ export default function MultipleChoiceExercise({
   // Young cards are asked English -> Vietnamese; older ones sometimes Vietnamese -> English
   const questionData: MultipleChoiceQuestion = useMemo(
     () => generateMultipleChoiceQuestion(word, allWords, multipleChoiceDirection(word)),
-    [word, allWords]
+    // Options must not reshuffle while answering
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [word.id]
   );
 
   // Reset state on word change

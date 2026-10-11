@@ -1,18 +1,21 @@
 import { useEffect, useState, useMemo, useRef, useCallback, lazy, Suspense } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { Layers, X } from "lucide-react";
 import { takePendingContext, pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { isPlaceholderMeaning } from "@/services/db";
-import { getDueCards, isWordDue, practiceCards, getNextReviewDate } from "@/services/cards";
+import { getDueCards, isWordDue, practiceCards, getNextReviewDate, toCard } from "@/services/cards";
 import { formatNextReviewRelative, compareNextReview, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
 import { AI_VOCAB_ENABLED } from "@/services/features";
-import { getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
+import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import { needsVocabMigration } from "@/services/vocabReset";
+import { isSimpleMode } from "@/services/learnerProfile";
+import { countWordStatus, isRememberedLong } from "@/services/wordStatus";
 import {
   getRetrievabilityInfo,
   isLeech,
@@ -21,6 +24,10 @@ import {
   buildReviewSession,
   getNewCardsIntroducedToday,
   summarizeTodayWork,
+  isSuspended,
+  getUnmasteredWords,
+  getStudiedWords,
+  extraNewWordAllowance,
   type NewCardCounts,
 } from "@/services/smartReview";
 import LevelUpModal from "./LevelUpModal";
@@ -103,6 +110,13 @@ export default function MainDashboard({
   useEffect(() => {
     if (activeTab !== "grammar") setGrammarLessonToOpen(null);
   }, [activeTab]);
+  // Simple mode (Settings): the sidebar shows five entries and the header the tabs of the current one
+  const [simpleMode, setSimpleModeState] = useState(isSimpleMode);
+  useEffect(() => {
+    const onProfile = () => setSimpleModeState(isSimpleMode());
+    window.addEventListener("myenglish-profile-updated", onProfile);
+    return () => window.removeEventListener("myenglish-profile-updated", onProfile);
+  }, []);
   const [inputWord, setInputWord] = useState("");
   const [message, setMessage] = useState<string | null>(null);
   const [isReviewing, setIsReviewing] = useState(false);
@@ -112,11 +126,32 @@ export default function MainDashboard({
   // New key per session so FlashcardReview never reuses the previous queue
   const [sessionId, setSessionId] = useState(0);
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
+
+  // The word panel belongs to the screen it was opened from: a tab change closes it, unless the same click
+  // picked the word (Capture's "Xem chi tiết" opens the library with it). A new session closes it too, so the
+  // meaning of a word being asked is never on screen.
+  const selectedBeforeRef = useRef(selectedWord);
+  useEffect(() => {
+    if (selectedWord && selectedWord === selectedBeforeRef.current) setSelectedWord(null);
+  }, [activeTab]);
+  useEffect(() => {
+    if (sessionId > 0) setSelectedWord(null);
+  }, [sessionId]);
+  useEffect(() => {
+    selectedBeforeRef.current = selectedWord;
+  });
   // Practice sessions (no due cards / "Practice All") never change the FSRS schedule
   const [isPracticeSession, setIsPracticeSession] = useState(false);
   const [wordToDelete, setWordToDelete] = useState<{ id: string; word: string } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [globalToast, setGlobalToast] = useState<GlobalToastData | null>(null);
+  // "Nothing to study" explained (instead of a button that does nothing), with a way to pick levels
+  const [startNotice, setStartNotice] = useState<{ title: string; body: string } | null>(null);
+  useEffect(() => {
+    if (!startNotice) return;
+    const id = setTimeout(() => setStartNotice(null), 12000);
+    return () => clearTimeout(id);
+  }, [startNotice]);
   const [autoReplenishBanner, setAutoReplenishBanner] = useState<AutoReplenishSummary | null>(null);
   const [expandedTerms, toggleTermExpanded] = useToggleMap();
   const [expandedQueueItems, toggleQueueItemExpand] = useToggleMap();
@@ -140,7 +175,18 @@ export default function MainDashboard({
     () => resolveComeback(fullTodayWork.reviews, getStudyLimits().maxSessionSize),
     [fullTodayWork.reviews, activityVersion]
   );
-  const todayWork = useMemo(() => applyComebackToWork(fullTodayWork, comeback), [fullTodayWork, comeback]);
+  // While the plan runs: the plan's new words (not the daily budget, not cut by the backlog), minus the ones
+  // already introduced today, as the session takes them (buildReviewSession's comebackNewCards)
+  const todayWork = useMemo(() => {
+    const base =
+      comeback && !comeback.caughtUp
+        ? summarizeTodayWork(words, introducedToday, new Date(), {
+            newCardsPerDay: comeback.newWordsPerDay,
+            maxSessionSize: Number.MAX_SAFE_INTEGER,
+          })
+        : fullTodayWork;
+    return applyComebackToWork(base, comeback, introducedToday);
+  }, [fullTodayWork, comeback, words, introducedToday]);
 
   const streakStats = useMemo(() => {
     // Finishing what is left today (reviews + budgeted new words) also completes the daily goal
@@ -240,9 +286,11 @@ export default function MainDashboard({
       .finally(() => setVocabSetupChecked(true));
   }, []);
   useEffect(() => {
-    // Already onboarded (or every word deleted) but no levels yet: ask for them
-    if (vocabSetupChecked && !loading && !showOnboarding && vocabSetup === null && !hasChosenStudyLevels()) setVocabSetup("levels");
-  }, [vocabSetupChecked, loading, showOnboarding, vocabSetup]);
+    // Already onboarded (or every word deleted) but no levels yet: ask for them. The first-run flow asks
+    // for the levels itself, and showOnboarding may still be false in the commit that turns it on.
+    const onboarding = showOnboarding || shouldShowOnboarding(words.length, loading);
+    if (vocabSetupChecked && !loading && !onboarding && vocabSetup === null && !hasChosenStudyLevels()) setVocabSetup("levels");
+  }, [vocabSetupChecked, loading, showOnboarding, vocabSetup, words.length]);
   const handleVocabSetupDone = async () => {
     setVocabSetup(null);
     await refreshWords();
@@ -261,6 +309,8 @@ export default function MainDashboard({
 
   const handleOnboardingFinish = async (startNow: boolean) => {
     setShowOnboarding(false);
+    // The levels were just chosen in the first-run flow: never ask for them again right after it
+    setVocabSetup((v) => (v === "levels" && hasChosenStudyLevels() ? null : v));
     await refreshWords();
     setActivityVersion((v) => v + 1);
     if (startNow) setPendingAutoStart(true);
@@ -372,6 +422,10 @@ export default function MainDashboard({
 
     // Reviews recorded in the popup / other windows
     let unlistenWordsChangedFn: (() => void) | null = null;
+    const handleWordsChanged = () => {
+      if (!isCancelled) scheduleRefresh();
+    };
+    window.addEventListener("words-changed", handleWordsChanged);
     listen("words-changed", () => {
       if (!isCancelled) scheduleRefresh();
     })
@@ -397,6 +451,7 @@ export default function MainDashboard({
       srsWorker.stop();
       unsubscribePipeline();
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
+      window.removeEventListener("words-changed", handleWordsChanged);
       window.removeEventListener("open-review-popup-preview", handleOpenPreview);
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
       window.removeEventListener("focus", handleFocus);
@@ -407,42 +462,107 @@ export default function MainDashboard({
     };
   }, []);
 
-  const handleStartReview = async (onlyDue: boolean = true, topicFilter?: string) => {
+  /** `maxCards`: a short session ("Chỉ 1 phút" on Today: 3 cards to keep the streak) */
+  const handleStartReview = async (onlyDue: boolean = true, topicFilter?: string, maxCards?: number) => {
+    // A session is in progress (maybe kept behind another tab): show it instead of restarting from card 0
+    if (isReviewingRef.current) {
+      setActiveTab("review");
+      return;
+    }
     const now = new Date();
     const matchesTopic = (w: WordDetail) =>
       !topicFilter ||
       topicFilter === "all" ||
       (w.topic || "General Tech").trim().toLowerCase() === topicFilter.trim().toLowerCase();
 
+    const capturePlace = AI_VOCAB_ENABLED ? "Thêm từ bằng AI" : "Lộ trình từ vựng";
+    const levelText = topicFilter && topicFilter !== "all" ? ` ở cấp ${topicFilter}` : "";
+
     // Read the store directly so callers registered in older renders never see stale words
     const pool = useWordsStore.getState().words.filter(matchesTopic);
-    if (pool.length === 0) return;
+    if (pool.length === 0) {
+      setGlobalToast(null);
+      setStartNotice({
+        title: `Chưa có từ nào để học${levelText}`,
+        body: AI_VOCAB_ENABLED
+          ? `Mở "${capturePlace}" để thêm vài từ đầu tiên.`
+          : `Mở "${capturePlace}" và chọn cấp độ (ví dụ A1): app sẽ lấy từ trong bộ Oxford cho bạn.`,
+      });
+      return;
+    }
 
     let session: ReviewCard[] = [];
     if (onlyDue) {
       const due = pool.filter((w) => isWordDue(w, now));
       const newToday = await getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 }));
-      // Comeback plan: today's share first (then normal-sized extra sessions), no new words until caught up.
-      // Computed here, not read from render state, since older closures may call this.
+      // Comeback plan: today's share first (then normal-sized extra sessions), with the plan's 1-2 new words a
+      // day once the backlog goes down. Computed here, not read from render state, since older closures may call this.
       const backlog = summarizeTodayWork(useWordsStore.getState().words, newToday, now).reviews;
       const cb = resolveComeback(backlog, getStudyLimits().maxSessionSize, now);
       const plan = cb && !cb.caughtUp ? cb : null;
+      const cap = Math.min(maxCards ?? Infinity, plan && plan.todayRemaining > 0 ? plan.todayRemaining : Infinity);
       session = buildReviewSession(due, newToday, now, {
-        maxCards: plan && plan.todayRemaining > 0 ? plan.todayRemaining : undefined,
-        noNewCards: !!plan,
+        maxCards: Number.isFinite(cap) ? cap : undefined,
+        comebackNewCards: plan ? plan.newWordsPerDay : undefined,
       });
     }
 
     if (session.length > 0) {
       setIsPracticeSession(false);
     } else {
-      // Nothing due (or new-card budget used up): extra practice on the weakest words, not recorded in FSRS.
-      // Only words already studied: a new word needs its introduction and counts toward the daily
-      // new-word limit; a word still waiting for AI analysis has no meaning to practise yet.
-      const { maxSessionSize } = getStudyLimits();
-      const studied = pool.filter((w) => (w.srs?.reps ?? 0) > 0 && !isPlaceholderMeaning(w.meaning_vn));
-      session = practiceCards(smartSortReviewQueue(studied, now).slice(0, maxSessionSize));
-      setIsPracticeSession(true);
+      // Nothing due and today's new words done. "Học thêm": a few extra new words in deck order, as a real
+      // session (they count as new cards today), within extraNewWordAllowance; otherwise extra practice on
+      // the weakest words, not recorded in FSRS.
+      const maxSessionSize = Math.min(getStudyLimits().maxSessionSize, maxCards ?? Infinity);
+      const newToday = await getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 }));
+      const extra = onlyDue ? extraNewWordAllowance(useWordsStore.getState().words, newToday) : { allowed: 0, young: 0, cap: 0, reason: null };
+      if (extra.allowed > 0) {
+        try {
+          const waitingCount = await countWaitingWords();
+          if (waitingCount < extra.allowed) {
+            await topUpNewWords({ target: extra.allowed });
+            await refreshWords();
+          }
+        } catch (err) {
+          console.warn("Failed to top up extra new words:", err);
+        }
+        const waitingNewWords = useWordsStore
+          .getState()
+          .words.filter(matchesTopic)
+          .filter((w) => (w.srs?.reps ?? 0) === 0 && (w.srs?.state ?? 0) === 0 && !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w))
+          // Deck order: the buffer's due time, then insertion order (IT words and the level mix come first)
+          .sort((a, b) => a.srs.next_review_date.localeCompare(b.srs.next_review_date) || a.created_at.localeCompare(b.created_at));
+        session = waitingNewWords.slice(0, Math.min(extra.allowed, maxSessionSize)).map((w) => toCard(w, "recognition"));
+      }
+      if (session.length > 0) {
+        setIsPracticeSession(false);
+      } else {
+        const latestPool = useWordsStore.getState().words.filter(matchesTopic);
+        const unmastered = getUnmasteredWords(latestPool);
+        const studied = (unmastered.length > 0 ? unmastered : getStudiedWords(latestPool)).filter((w) => !isPlaceholderMeaning(w.meaning_vn));
+        session = practiceCards(smartSortReviewQueue(studied, now).slice(0, maxSessionSize));
+        setIsPracticeSession(true);
+        if (extra.reason === "young" && session.length > 0) {
+          setGlobalToast({
+            title: "Củng cố từ đang học",
+            body: `Bạn đang học ${extra.young} từ chưa vững. Luyện thêm các từ này (không ảnh hưởng lịch ôn); từ mới sẽ đến theo hạn mức mỗi ngày.`,
+          });
+        } else if (extra.reason === "daily" && session.length > 0) {
+          setGlobalToast({
+            title: "Đã học đủ từ mới hôm nay",
+            body: "Bạn đã học gấp đôi hạn mức từ mới. Luyện lại vài từ yếu (không ảnh hưởng lịch ôn), mai học tiếp nhé!",
+          });
+        }
+      }
+    }
+
+    if (session.length === 0) {
+      setGlobalToast(null);
+      setStartNotice({
+        title: `Chưa có từ nào để ôn lúc này${levelText}`,
+        body: `Không còn từ mới đang chờ và chưa có từ nào đã học để luyện. Mở "${capturePlace}" để chọn thêm cấp độ hoặc chọn từ muốn học.`,
+      });
+      return;
     }
 
     setReviewSet(session);
@@ -472,7 +592,14 @@ export default function MainDashboard({
 
   // The library shows the learner's words: deck words still waiting to be introduced are not theirs yet
   const libraryWords = useMemo(
-    () => words.filter((w) => !(w.catalog_id && (w.srs?.reps ?? 0) === 0 && (w.srs?.state ?? 0) === 0)),
+    () =>
+      words.filter(
+        (w) =>
+          !w.catalog_id ||
+          (w.srs?.reps ?? 0) > 0 ||
+          (w.srs?.state ?? 0) > 0 ||
+          Boolean(w.srs?.last_review)
+      ),
     [words]
   );
 
@@ -533,7 +660,7 @@ export default function MainDashboard({
         return isWordDue(item, now);
       }
       if (filterMode === "mastered") {
-        return item.srs.interval >= 6;
+        return isRememberedLong(item);
       }
       if (filterMode === "leech") {
         return isLeech(item.srs);
@@ -583,17 +710,16 @@ export default function MainDashboard({
     const leechIds = new Set(getLeechWords(libraryWords).map((w) => w.id));
     const dueWords: WordDetail[] = [];
     const perTopic: Record<string, { total: number; due: number }> = {};
-    let learnedCount = 0;
     for (const w of libraryWords) {
       const isDue = isWordDue(w, now);
       if (isDue) dueWords.push(w);
-      if (w.srs.repetitions > 0) learnedCount++;
       const key = (w.topic || "General Tech").trim().toLowerCase();
       const entry = perTopic[key] || (perTopic[key] = { total: 0, due: 0 });
       entry.total++;
       if (isDue) entry.due++;
     }
-    return { dueWords, learnedCount, leechCount: leechIds.size, perTopic };
+    const { learning, rememberedLong } = countWordStatus(libraryWords);
+    return { dueWords, learningCount: learning, rememberedLongCount: rememberedLong, leechCount: leechIds.size, perTopic };
   }, [libraryWords, nowTick]);
 
   // What a review session will actually contain today: due reviews + new words within the daily budget
@@ -624,13 +750,17 @@ export default function MainDashboard({
   // Keyboard-first Navigation
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isReviewing || wordToDelete) return;
+      // The session's own shortcuts own the keys only while it is on screen (it stays mounted behind other tabs)
+      if ((isReviewing && activeTab === "review") || wordToDelete) return;
 
       const isTyping =
-        e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement ||
+        !!(e.target as HTMLElement | null)?.isContentEditable;
 
-      // '/' to focus search input
-      if (e.key === "/" && !isTyping) {
+      // '/' to focus search input (word library)
+      if (e.key === "/" && !isTyping && activeTab === "library") {
         e.preventDefault();
         searchInputRef.current?.focus();
         return;
@@ -655,6 +785,9 @@ export default function MainDashboard({
         handleStartReview(true);
         return;
       }
+
+      // The word-card navigation below belongs to the library: other tabs keep ↑/↓ for scrolling
+      if (activeTab !== "library") return;
 
       // 'j' or ArrowDown to move to next word card
       if ((e.key.toLowerCase() === "j" || e.key === "ArrowDown") && filteredWords.length > 0) {
@@ -690,7 +823,8 @@ export default function MainDashboard({
   }, [isReviewing, wordToDelete, selectedWord, filteredWords, searchQuery, activeTab]);
 
   return (
-    <div className="flex h-screen w-screen overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans selection:bg-cyan-500 selection:text-white relative">
+    // h-full, not h-screen: with the interface scale (zoom on <html>) 100vh is taller than the window
+    <div className="flex h-full w-full overflow-hidden bg-slate-50 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 font-sans selection:bg-cyan-500 selection:text-white relative">
       {/* GLOBAL NOTIFICATION INTERACTIVE TOAST */}
       {globalToast && (
         <GlobalToast
@@ -698,6 +832,39 @@ export default function MainDashboard({
           handleOpenReview={handleOpenReview}
           setGlobalToast={setGlobalToast}
         />
+      )}
+
+      {/* NOTHING TO STUDY: why, and where to pick levels / words */}
+      {startNotice && (
+        <div
+          role="status"
+          className="fixed top-5 right-5 z-50 max-w-sm w-[calc(100%-2.5rem)] bg-white dark:bg-zinc-900 border-2 border-cyan-500/80 rounded-2xl shadow-2xl p-4 flex items-start gap-3 animate-in slide-in-from-top-4 duration-300"
+        >
+          <div className="w-10 h-10 rounded-xl bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
+            <Layers className="w-5 h-5" />
+          </div>
+          <div className="flex-1 min-w-0 select-text">
+            <h4 className="text-sm font-bold text-slate-900 dark:text-white">{startNotice.title}</h4>
+            <p className="text-xs text-slate-600 dark:text-zinc-300 mt-1 leading-snug">{startNotice.body}</p>
+            <button
+              onClick={() => {
+                setStartNotice(null);
+                setActiveTab("capture");
+              }}
+              className="mt-2.5 w-full py-1.5 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-700 dark:bg-cyan-500 dark:hover:bg-cyan-400 text-white dark:text-zinc-950 font-semibold text-xs flex items-center justify-center gap-1.5 shadow-sm transition-colors select-none"
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>{AI_VOCAB_ENABLED ? "Mở Thêm từ bằng AI" : "Mở Lộ trình từ vựng"}</span>
+            </button>
+          </div>
+          <button
+            onClick={() => setStartNotice(null)}
+            aria-label="Đóng thông báo"
+            className="text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-200 p-1"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
       )}
 
       {/* SMART AUTO-REPLENISH BANNER NOTIFICATION */}
@@ -718,6 +885,7 @@ export default function MainDashboard({
         streakStats={streakStats}
         libraryStats={libraryStats}
         onOpenQuickInputPreview={onOpenQuickInputPreview}
+        simpleMode={simpleMode}
       />
 
       {/* MAIN CONTENT AREA */}
@@ -739,6 +907,8 @@ export default function MainDashboard({
           effectiveLevel={effectiveLevel}
           setGlobalToast={setGlobalToast}
           onStartReview={() => handleStartReview(true)}
+          isReviewing={isReviewing}
+          simpleMode={simpleMode}
         />
 
         {/* TODAY: the opening screen, one main action */}
@@ -750,7 +920,10 @@ export default function MainDashboard({
               comeback={comeback}
               streakStats={streakStats}
               onStart={() => handleStartReview(true)}
+              onQuickStart={() => handleStartReview(true, undefined, 3)}
               setActiveTab={setActiveTab}
+              loading={loading}
+              simpleMode={simpleMode}
             />
           </Suspense>
         )}
@@ -816,40 +989,23 @@ export default function MainDashboard({
           />
         )}
 
-        {/* TAB 3: DAILY REVIEW WITH INTERACTIVE FLASHCARD SESSION */}
-        {activeTab === "review" && (
-          isReviewing ? (
-            <FlashcardReview
-              key={sessionId}
-              wordsToReview={reviewSet}
-              distractorPool={distractorPool}
-              practiceMode={isPracticeSession}
-              onFinish={() => {
-                setIsReviewing(false);
-                topUpNewWords().catch(() => {}).finally(() => refreshWords());
-              }}
-              onExit={() => {
-                setIsReviewing(false);
-                // Reviews answered before exiting were already persisted
-                topUpNewWords().catch(() => {}).finally(() => refreshWords());
-              }}
-            />
-          ) : (
-            <ReviewTab
-              dueCount={dueCount}
-              comeback={comeback}
-              libraryStats={libraryStats}
-              availableTopics={availableTopics}
-              handleStartReview={handleStartReview}
-              setMessage={setMessage}
-            />
-          )
+        {/* TAB 3: DAILY REVIEW (the start screen; the session itself is rendered below) */}
+        {activeTab === "review" && !isReviewing && (
+          <ReviewTab
+            dueCount={dueCount}
+            comeback={comeback}
+            libraryStats={libraryStats}
+            availableTopics={availableTopics}
+            handleStartReview={handleStartReview}
+            setMessage={setMessage}
+          />
         )}
 
         {/* TAB 4: ADVANCED ANALYTICS & INSIGHTS */}
         {activeTab === "analytics" && (
           <AnalyticsView
             words={words}
+            dueRemaining={todayWork.total}
             onStartReviewWord={(w) => {
               // Scheduled review only if one of the word's cards is due; otherwise practice (no FSRS change)
               const [dueCard] = getDueCards(w);
@@ -879,6 +1035,35 @@ export default function MainDashboard({
         {/* TAB 6: GRAMMAR HUB (A1 - C1 ROADMAP & DIAGNOSTIC PRACTICE) */}
         {activeTab === "grammar" && <GrammarHub key={grammarLessonToOpen ?? "hub"} initialLessonId={grammarLessonToOpen} />}
         </Suspense>
+
+        {/* INTERACTIVE FLASHCARD SESSION: stays mounted (hidden) on other tabs, so leaving the tab neither
+            restarts it from card 0 nor grades its cards a second time. Own Suspense boundary: a lazy tab
+            loading must not touch it. */}
+        {isReviewing && (
+          <div className={activeTab === "review" ? "contents" : "hidden"}>
+            <Suspense fallback={<TabFallback />}>
+              <FlashcardReview
+                key={sessionId}
+                wordsToReview={reviewSet}
+                distractorPool={distractorPool}
+                practiceMode={isPracticeSession}
+                active={activeTab === "review"}
+                onFinish={() => {
+                  setIsReviewing(false);
+                  // Close the loop on the day: back to "Hôm nay" (what is left, the streak, the goal)
+                  setActiveTab("today");
+                  topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                }}
+                onExit={() => {
+                  setIsReviewing(false);
+                  setActiveTab("today");
+                  // Reviews answered before exiting were already persisted
+                  topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                }}
+              />
+            </Suspense>
+          </div>
+        )}
       </main>
 
       {/* RIGHT SLIDE-OVER WORD DETAIL INSPECTOR */}

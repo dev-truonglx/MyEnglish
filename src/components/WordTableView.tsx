@@ -5,6 +5,7 @@ import { Volume2, Trash2, ArrowUpDown, ChevronRight, Tag, Sparkles, Clock } from
 import type { WordDetail } from "@/types/database";
 import { formatNextReviewRelative, compareNextReview, type ReviewTimeRelativeInfo } from "@/utils/reviewSchedule";
 import ReviewTrajectoryModal from "./review/ReviewTrajectoryModal";
+import Jargon from "./Jargon";
 
 interface WordTableViewProps {
   words: WordDetail[];
@@ -143,7 +144,9 @@ export default function WordTableView({
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-center">Interval</th>
+                <th className="py-3 px-4 text-center">
+                  <Jargon term="Interval" plain="Ôn lại sau" hint="Số ngày từ lần ôn trước đến lần ôn kế tiếp" />
+                </th>
                 <th
                   onClick={() => handleSort("next_review")}
                   className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
@@ -277,7 +280,7 @@ export default function WordTableView({
                             e.stopPropagation();
                             setTrajectoryWord(item);
                           }}
-                          title="Xem lộ trình các lần nhắc lại tiếp theo (FSRS)"
+                          title="Xem lộ trình các lần ôn tiếp theo"
                           className="p-1 rounded-lg text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                         >
                           <Sparkles className="w-3.5 h-3.5 text-cyan-500" />

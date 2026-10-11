@@ -89,9 +89,16 @@ describe("reminder pauses", () => {
   it("counts reminders shown today and starts again the next day", async () => {
     localStorage.clear();
     const { getNudgesShownToday, triggerReviewNudge } = await import("@/services/reminderSettings");
-    expect(getNudgesShownToday()).toBe(0);
-    await triggerReviewNudge(3).catch(() => {});
-    expect(getNudgesShownToday()).toBe(1);
-    expect(getNudgesShownToday(new Date(Date.now() + 86400000))).toBe(0);
+    // Only a reminder the native corner card confirms as shown is counted
+    const g = globalThis as { __tauriInvoke?: (cmd: string) => unknown };
+    g.__tauriInvoke = async (cmd: string) => cmd === "show_review_nudge";
+    try {
+      expect(getNudgesShownToday()).toBe(0);
+      await triggerReviewNudge(3).catch(() => {});
+      expect(getNudgesShownToday()).toBe(1);
+      expect(getNudgesShownToday(new Date(Date.now() + 86400000))).toBe(0);
+    } finally {
+      delete g.__tauriInvoke;
+    }
   });
 });

@@ -4,7 +4,7 @@ import type { calculateStreakAndGoal } from "@/services/streak";
 import { triggerAutoReplenish } from "@/services/autoReplenish";
 import { useWordsStore } from "@/stores/wordsStore";
 import type { GlobalToastData } from "./DashboardBanners";
-import type { DashboardTab, FilterMode, LibraryStats, ViewMode } from "./shared";
+import { navGroupOf, type DashboardTab, type FilterMode, type LibraryStats, type ViewMode } from "./shared";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 
 interface DashboardHeaderProps {
@@ -23,6 +23,10 @@ interface DashboardHeaderProps {
   effectiveLevel: string;
   setGlobalToast: (toast: GlobalToastData | null) => void;
   onStartReview?: () => void;
+  /** A review session is in progress (maybe kept behind another tab): the button goes back to it */
+  isReviewing?: boolean;
+  /** Simple mode: a small bar under the header switches between the tabs of the current sidebar entry */
+  simpleMode?: boolean;
 }
 
 /** Top App Bar: search, streak indicator, view/filter toggles, refresh, auto-replenish, add word */
@@ -42,6 +46,8 @@ export default function DashboardHeader({
   effectiveLevel,
   setGlobalToast,
   onStartReview,
+  isReviewing = false,
+  simpleMode = false,
 }: DashboardHeaderProps) {
   const loading = useWordsStore((s) => s.loading);
   const refreshWords = useWordsStore((s) => s.refreshWords);
@@ -70,10 +76,18 @@ export default function DashboardHeader({
     }
   };
 
+  // Simple mode groups several tabs under one sidebar entry: their bar is hidden during a session on screen
+  const group = simpleMode ? navGroupOf(activeTab) : null;
+  const subTabs = group && group.tabs.length > 1 && !(isReviewing && activeTab === "review") ? group.tabs : null;
+
   return (
-    <header className="h-14 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-6 flex items-center justify-between shrink-0 backdrop-blur-md">
-      {/* Search Bar */}
-      <div className="flex-1 max-w-md relative">
+    <>
+    <header className="min-h-14 py-2 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-6 flex items-center justify-between gap-3 shrink-0 backdrop-blur-md">
+      {/* Search Bar: it only filters the word library, so it is only shown there */}
+      {activeTab !== "library" ? (
+        <div className="flex-1" />
+      ) : (
+      <div className="flex-1 min-w-[120px] max-w-md relative">
         <Search className="w-4 h-4 text-slate-400 dark:text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           ref={searchInputRef}
@@ -96,10 +110,12 @@ export default function DashboardHeader({
           </div>
         )}
       </div>
+      )}
 
-      {/* Right Header Controls */}
-      <div className="flex items-center gap-3">
-        {/* Streak & Daily Goal Quick Indicator */}
+      {/* Right Header Controls: wrap onto a second row in a narrow window instead of being cut off */}
+      <div className="min-w-0 flex flex-wrap items-center justify-end gap-2">
+        {/* Streak & Daily Goal Quick Indicator (the word library needs the room; the sidebar shows both too) */}
+        {activeTab !== "library" && (
         <button
           onClick={() => setActiveTab("analytics")}
           title={`Chuỗi: ${streakStats.currentStreak} ngày • Hôm nay: ${streakStats.todayCount}/${streakStats.dailyGoal} câu (bấm để xem tiến độ)`}
@@ -120,6 +136,7 @@ export default function DashboardHeader({
             )}
           </div>
         </button>
+        )}
         {/* View Mode Toggle (Gallery vs Data Grid Table) */}
         {activeTab === "library" && (
           <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
@@ -151,7 +168,7 @@ export default function DashboardHeader({
         <div className="flex items-center gap-1 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-300 dark:border-zinc-800">
           <button
             onClick={() => setFilterMode("all")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "all"
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "all"
               ? "bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-transparent font-medium"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
@@ -160,7 +177,7 @@ export default function DashboardHeader({
           </button>
           <button
             onClick={() => setFilterMode("due")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "due"
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "due"
               ? "bg-white dark:bg-zinc-800 text-orange-600 dark:text-orange-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
@@ -172,16 +189,16 @@ export default function DashboardHeader({
           </button>
           <button
             onClick={() => setFilterMode("mastered")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "mastered"
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "mastered"
               ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
           >
-            Đã thuộc
+            Nhớ lâu
           </button>
           <button
             onClick={() => setFilterMode("leech")}
-            className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "leech"
+            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "leech"
               ? "bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
               }`}
@@ -192,12 +209,12 @@ export default function DashboardHeader({
         </div>
         )}
 
-        {/* Refresh */}
+        {/* Refresh (words also refresh on their own: in the word library it gives its room up in a narrow window) */}
         <button
           onClick={() => refreshWords({ showLoading: true })}
           disabled={loading}
-          title="Refresh vocabulary"
-          className="p-1.5 rounded-lg border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors shadow-sm"
+          title="Tải lại danh sách từ"
+          className={`${activeTab === "library" ? "hidden xl:inline-flex" : "inline-flex"} p-1.5 rounded-lg border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors shadow-sm`}
         >
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-600 dark:text-cyan-400" : ""}`} />
         </button>
@@ -224,20 +241,23 @@ export default function DashboardHeader({
         </button>
         )}
 
-        {/* Quick Review Button (the Today screen has its own, single main button) */}
-        {onStartReview && activeTab !== "today" && (
+        {/* Quick Review Button (the Today screen has its own, single main button). During a session it only
+            goes back to it: starting another one would restart from card 0 and grade cards twice. */}
+        {onStartReview && activeTab !== "today" && !(isReviewing && activeTab === "review") && (
           <button
-            onClick={onStartReview}
+            onClick={isReviewing ? () => setActiveTab("review") : onStartReview}
             title={
-              dueCount > 0
-                ? `Ôn tập nhanh ${dueCount} từ đã đến hạn`
-                : "Bắt đầu buổi ôn tập nhanh (Flashcards & Bài tập)"
+              isReviewing
+                ? "Quay lại buổi ôn đang làm dở"
+                : dueCount > 0
+                  ? `Ôn tập nhanh ${dueCount} từ đã đến hạn`
+                  : "Bắt đầu buổi ôn tập nhanh (Flashcards & Bài tập)"
             }
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
           >
             <Zap className="w-3.5 h-3.5 fill-white text-white" />
-            <span>Ôn tập ngay</span>
-            {dueCount > 0 ? (
+            <span>{isReviewing ? "Tiếp tục ôn" : "Ôn tập ngay"}</span>
+            {isReviewing ? null : dueCount > 0 ? (
               <span className="text-[10px] bg-black/25 text-white px-1.5 py-0.2 rounded font-mono font-bold">
                 {dueCount}
               </span>
@@ -251,13 +271,50 @@ export default function DashboardHeader({
         {activeTab === "library" && (
         <button
           onClick={() => setActiveTab("capture")}
+          title={AI_VOCAB_ENABLED ? "Thêm từ mới" : "Tìm một từ trong bộ Oxford để học sớm"}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-sm transition-all"
         >
           <Plus className="w-3.5 h-3.5" />
-          <span>{AI_VOCAB_ENABLED ? "Thêm từ" : "Tìm từ trong bộ Oxford"}</span>
+          <span>{AI_VOCAB_ENABLED ? "Thêm từ" : "Từ Oxford"}</span>
         </button>
         )}
       </div>
     </header>
+
+    {/* Simple mode: the tabs of the current sidebar entry (e.g. Ôn tập · Sổ từ · Lộ trình từ vựng) */}
+    {group && subTabs && (
+      <div className="h-10 shrink-0 border-b border-slate-200 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/30 px-6 flex items-center">
+        <div
+          role="tablist"
+          aria-label={group.label}
+          className="inline-flex items-center gap-0.5 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800"
+        >
+          {subTabs.map((t) => {
+            const selected = t.tab === activeTab;
+            return (
+              <button
+                key={t.tab}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setActiveTab(t.tab)}
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${selected
+                  ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
+                  : "border border-transparent text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
+                  }`}
+              >
+                <span>{t.label}</span>
+                {t.tab === "review" && dueCount > 0 && (
+                  <span className="text-[10px] font-mono font-semibold px-1.5 rounded-full bg-orange-100 dark:bg-orange-950 text-orange-700 dark:text-orange-400">
+                    {dueCount}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    )}
+    </>
   );
 }

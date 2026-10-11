@@ -1,10 +1,15 @@
-import { Play, Bell, CheckCircle, Flame, Folder, Tag } from "lucide-react";
-import { checkAndNotifyDueReviews } from "@/services/srs";
+import { useMemo } from "react";
+import { Play, CheckCircle, Flame, Folder, Tag, Sparkles, RotateCcw, AlertCircle } from "lucide-react";
 import { useWordsStore } from "@/stores/wordsStore";
 import { DUE_LIST_LIMIT, PAGE_CONTAINER, type LibraryStats } from "./shared";
 import WeeklyProgressCard from "../WeeklyProgressCard";
 import ComebackCard from "./ComebackCard";
 import type { ComebackStatus } from "@/services/comeback";
+import { getUnmasteredWords, youngWordCap } from "@/services/smartReview";
+import { isSimpleMode } from "@/services/learnerProfile";
+
+const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const ADD_WORD_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
 
 interface ReviewTabProps {
   dueCount: number;
@@ -13,6 +18,7 @@ interface ReviewTabProps {
   libraryStats: LibraryStats;
   availableTopics: string[];
   handleStartReview: (onlyDue?: boolean, topicFilter?: string) => void;
+  /** Still passed by the parent; this tab no longer posts messages */
   setMessage: (msg: string | null) => void;
 }
 
@@ -23,32 +29,22 @@ export default function ReviewTab({
   libraryStats,
   availableTopics,
   handleStartReview,
-  setMessage,
 }: ReviewTabProps) {
   const words = useWordsStore((s) => s.words);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
   const inComeback = !!comeback && !comeback.caughtUp;
-
-  const handleTestNotification = async () => {
-    try {
-      const count = await checkAndNotifyDueReviews(true);
-      setMessage(
-        count > 0
-          ? `Đã gửi thông báo nhắc ôn tập ${count} từ vựng!`
-          : "Đã gửi thông báo nhắc ôn tập! Hãy nhấp vào thông báo để mở màn hình ôn tập."
-      );
-      setTimeout(() => setMessage(null), 4000);
-    } catch (err) {
-      setMessage(`Lỗi gửi thông báo: ${err}`);
-    }
-  };
+  const unmasteredCount = useMemo(() => getUnmasteredWords(words).length, [words]);
+  const isCapped = unmasteredCount >= youngWordCap();
+  const simple = isSimpleMode();
+  // Both counts are words: the list shows due words, not the session size (dueCount)
+  const dueWordCount = libraryStats.dueWords.length;
 
   return (
     <div className={`${PAGE_CONTAINER} space-y-6`}>
       <div className="text-center space-y-2">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Spaced Repetition Review</h2>
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Ôn tập đúng lúc</h2>
         <p className="text-xs text-slate-500 dark:text-zinc-400">
-          Powered by FSRS. Optimal recall timing tailored to your memory strength.
+          Lịch ôn tự điều chỉnh theo trí nhớ của bạn: từ được hỏi lại ngay khi sắp quên.
         </p>
       </div>
 
@@ -62,11 +58,13 @@ export default function ReviewTab({
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 uppercase tracking-wider block">
-              Queue Overview
+              Việc hôm nay
             </span>
             <div className="text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
               <span>{dueCount}</span>
-              <span className="text-sm font-normal text-slate-500 dark:text-zinc-400">cards due for review</span>
+              <span className="text-sm font-normal text-slate-500 dark:text-zinc-400">
+                {dueCount > 0 ? "thẻ đến hạn ôn tập" : "Đã ôn tập hết hôm nay 🎉"}
+              </span>
             </div>
           </div>
 
@@ -78,11 +76,23 @@ export default function ReviewTab({
         <div className="flex items-center gap-3 pt-2">
           <button
             onClick={() => handleStartReview(true)}
-            disabled={dueCount === 0}
-            className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-xs font-semibold shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40 disabled:pointer-events-none"
+            disabled={words.length === 0}
+            className="flex-1 inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-xs font-semibold shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40"
           >
-            <Play className="w-4 h-4 fill-white" />
-            <span>Start Review ({dueCount})</span>
+            {dueCount > 0 ? (
+              <Play className="w-4 h-4 fill-white" />
+            ) : isCapped ? (
+              <RotateCcw className="w-4 h-4" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+            <span>
+              {dueCount > 0
+                ? `Bắt đầu ôn tập (${dueCount})`
+                : isCapped
+                ? `Ôn luyện từ chưa thuộc (${unmasteredCount})`
+                : "Học thêm từ mới (+5)"}
+            </span>
           </button>
 
           <button
@@ -90,17 +100,16 @@ export default function ReviewTab({
             disabled={words.length === 0}
             className="inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors disabled:opacity-40"
           >
-            <span>Practice All ({words.length})</span>
-          </button>
-
-          <button
-            onClick={handleTestNotification}
-            title="Send test macOS notification"
-            className="p-3 rounded-xl border border-slate-300 dark:border-zinc-800 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-500 hover:text-cyan-600 dark:text-zinc-400 dark:hover:text-cyan-400 transition-colors"
-          >
-            <Bell className="w-4 h-4" />
+            <span>Luyện tất cả ({words.length})</span>
           </button>
         </div>
+
+        {dueCount === 0 && isCapped && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 flex items-center gap-1.5 font-medium pt-1">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            Bạn có {unmasteredCount} từ đang học chưa đạt mốc &apos;Đã biết&apos; (ổn định ≥ 7 ngày). Hãy củng cố các từ này trước khi học thêm từ mới!
+          </p>
+        )}
       </div>
       )}
 
@@ -144,7 +153,7 @@ export default function ReviewTab({
 
                     {dueInTopic > 0 && (
                       <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-semibold bg-orange-100 dark:bg-orange-950/80 text-orange-700 dark:text-orange-300 border border-orange-200 dark:border-orange-800/60">
-                        {dueInTopic} Due
+                        {dueInTopic} đến hạn
                       </span>
                     )}
                   </div>
@@ -175,48 +184,59 @@ export default function ReviewTab({
       )}
 
       {/* List of due words (hidden during a comeback plan: the whole pile is what it avoids showing) */}
-      {inComeback ? null : dueCount > 0 ? (
+      {inComeback ? null : dueWordCount > 0 ? (
         <div className="space-y-3">
           <div className="flex items-center justify-between text-xs text-slate-600 dark:text-zinc-400 font-medium">
-            <span>Due Words Waiting in Queue</span>
-            <span className="font-mono text-[11px]">Interval & Ease Factor</span>
+            <span>Từ đang chờ ôn</span>
+            {!simple && <span className="font-mono text-[11px]">Độ bền · khoảng ôn</span>}
           </div>
           {libraryStats.dueWords
             .slice(0, DUE_LIST_LIMIT)
-            .map((w) => (
-              <div
-                key={w.id}
-                onClick={() => setSelectedWord(w)}
-                className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-cyan-500/50 cursor-pointer flex items-center justify-between transition-colors shadow-sm"
-              >
-                <div className="space-y-0.5">
-                  <div className="text-base font-bold text-slate-900 dark:text-white font-mono">
-                    {w.word}
+            .map((w) => {
+              const reviewed = !!w.srs.stability && w.srs.stability > 0;
+              return (
+                <div
+                  key={w.id}
+                  onClick={() => setSelectedWord(w)}
+                  className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-cyan-500/50 cursor-pointer flex items-center justify-between transition-colors shadow-sm"
+                >
+                  <div className="space-y-0.5">
+                    <div className="text-base font-bold text-slate-900 dark:text-white font-mono">
+                      {w.word}
+                    </div>
+                    <div className="text-sm font-medium text-slate-700 dark:text-cyan-200">{w.meaning_vn}</div>
                   </div>
-                  <div className="text-sm font-medium text-slate-700 dark:text-cyan-200">{w.meaning_vn}</div>
+                  <div className="text-right">
+                    {simple ? (
+                      !reviewed && (
+                        <span className="text-[11px] font-semibold text-cyan-700 dark:text-cyan-400 block">Từ mới</span>
+                      )
+                    ) : (
+                      <>
+                        <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 block font-semibold">
+                          {reviewed ? `Độ bền: ${Number(w.srs.stability).toFixed(1)} ngày` : "Từ mới"}
+                        </span>
+                        <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
+                          {w.srs.interval === 0 ? "Ôn lần đầu" : `Ôn lại sau ${w.srs.interval} ngày`}
+                        </span>
+                      </>
+                    )}
+                  </div>
                 </div>
-                <div className="text-right">
-                  <span className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 block font-semibold">
-                    {w.srs.stability && w.srs.stability > 0 ? `S: ${w.srs.stability}d` : `Mới`}
-                  </span>
-                  <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-mono">
-                    {w.srs.interval === 0 ? "Initial review" : `${w.srs.interval}d interval`}
-                  </span>
-                </div>
-              </div>
-            ))}
-          {dueCount > DUE_LIST_LIMIT && (
+              );
+            })}
+          {dueWordCount > DUE_LIST_LIMIT && (
             <div className="text-center text-xs text-slate-500 dark:text-zinc-400 py-2">
-              và {dueCount - DUE_LIST_LIMIT} từ khác
+              và {dueWordCount - DUE_LIST_LIMIT} từ khác
             </div>
           )}
         </div>
       ) : (
         <div className="text-center py-12 space-y-3 rounded-2xl border border-slate-200 dark:border-zinc-800/60 bg-slate-50 dark:bg-zinc-900/30">
           <CheckCircle className="w-10 h-10 text-emerald-500 dark:text-emerald-400 mx-auto" />
-          <h3 className="text-base font-bold text-slate-900 dark:text-white">All caught up!</h3>
+          <h3 className="text-base font-bold text-slate-900 dark:text-white">Đã ôn hết các từ đang chờ!</h3>
           <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-sm mx-auto">
-            You have reviewed all pending cards. Click "Practice All" to rehearse anytime or add new terms via ⌘⇧E.
+            Bấm &quot;Luyện tất cả&quot; để ôn lại bất cứ lúc nào, hoặc thêm từ mới khi gặp từ lạ bằng {ADD_WORD_SHORTCUT}.
           </p>
         </div>
       )}

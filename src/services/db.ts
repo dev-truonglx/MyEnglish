@@ -2,9 +2,10 @@ import Database from "@tauri-apps/plugin-sql";
 import type { Word, WordExample, SRSReview, CreateWordInput, WordDetail } from "@/types/database";
 import { initReviewLogsTable, registerWordForms } from "./smartReview";
 import { logTerminal } from "./logger";
+import { INTRO_READY_MS, nextLocalDayStart } from "./cards";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 10;
+const SCHEMA_VERSION = 12;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -190,7 +191,46 @@ export async function initSchema(db: Database): Promise<void> {
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_custom_ex_lesson ON grammar_custom_exercises(lesson_id);`);
   } catch {}
 
-  // 6. Key-value backup for settings/XP/streak that live in localStorage
+  // 6. Grammar Book tables (Chapters, Lessons, Exercise Sets, Items)
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_book_chapters (
+      id TEXT PRIMARY KEY,
+      chapter_id TEXT,
+      ord INTEGER,
+      data TEXT
+    );
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_book_lessons (
+      id TEXT PRIMARY KEY,
+      chapter_id TEXT,
+      ord INTEGER,
+      data TEXT
+    );
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_book_sets (
+      id TEXT PRIMARY KEY,
+      chapter_id TEXT,
+      ord INTEGER,
+      data TEXT
+    );
+  `);
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS grammar_book_items (
+      id TEXT PRIMARY KEY,
+      chapter_id TEXT,
+      ord INTEGER,
+      data TEXT
+    );
+  `);
+  try {
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_book_lessons_ch ON grammar_book_lessons(chapter_id, ord);`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_book_sets_ch ON grammar_book_sets(chapter_id, ord);`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_grammar_book_items_ch ON grammar_book_items(chapter_id, ord);`);
+  } catch {}
+
+  // 7. Key-value backup for settings/XP/streak that live in localStorage
   await db.execute(`
     CREATE TABLE IF NOT EXISTS app_kv (
       key TEXT PRIMARY KEY,
@@ -213,8 +253,28 @@ async function repairMissingSrsRows(db: Database): Promise<void> {
       INSERT INTO srs_reviews (word_id, next_review_date)
       SELECT id, created_at FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews);
     `);
+    await db.execute(`
+      UPDATE srs_reviews
+      SET last_review = (
+            SELECT timestamp FROM review_logs
+            WHERE word_id = srs_reviews.word_id AND exercise_type = 'intro'
+            ORDER BY timestamp DESC LIMIT 1
+          )
+      WHERE last_review IS NULL
+        AND word_id IN (
+          SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'intro'
+        );
+    `);
   } catch (e) {
     console.warn("SRS row repair notice:", e);
+  }
+}
+
+/** The tables that hold the imported grammar book (one JSON row per chapter / lesson / set / item) */
+export async function createGrammarBookTables(exec: (sql: string) => Promise<unknown>): Promise<void> {
+  for (const table of ["grammar_book_chapters", "grammar_book_lessons", "grammar_book_sets", "grammar_book_items"]) {
+    await exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, chapter_id TEXT, ord INTEGER, data TEXT);`);
+    await exec(`CREATE INDEX IF NOT EXISTS idx_${table}_ch ON ${table}(chapter_id, ord);`);
   }
 }
 
@@ -464,6 +524,51 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`DROP INDEX IF EXISTS idx_words_word_unique;`);
     await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_catalog ON words(catalog_id) WHERE catalog_id IS NOT NULL;`);
     await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_free_unique ON words(LOWER(TRIM(word))) WHERE catalog_id IS NULL;`);
+  }
+
+  if (version < 11) {
+    // Schema v11: Grammar book chapters, lessons, exercise sets, items
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS grammar_book_chapters (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT,
+        ord INTEGER,
+        data TEXT
+      );
+    `);
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS grammar_book_lessons (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT,
+        ord INTEGER,
+        data TEXT
+      );
+    `);
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS grammar_book_sets (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT,
+        ord INTEGER,
+        data TEXT
+      );
+    `);
+    await tryExec(`
+      CREATE TABLE IF NOT EXISTS grammar_book_items (
+        id TEXT PRIMARY KEY,
+        chapter_id TEXT,
+        ord INTEGER,
+        data TEXT
+      );
+    `);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_grammar_book_lessons_ch ON grammar_book_lessons(chapter_id, ord);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_grammar_book_sets_ch ON grammar_book_sets(chapter_id, ord);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_grammar_book_items_ch ON grammar_book_items(chapter_id, ord);`);
+  }
+
+  if (version < 12) {
+    // Schema v12: some databases reached v11 from an early build that had not created the grammar book
+    // tables yet; create them (no-op where they exist)
+    await createGrammarBookTables(tryExec);
   }
 
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
@@ -772,11 +877,14 @@ async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, 
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
     db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
-      // "known" rows (a word marked as already known) are no attempt, but show the word has a history
+      // "known" rows (a word marked as already known) are no attempt, but show the word has a history.
+      // Only answers that moved the schedule (or legacy rows) count: extra practice (is_scheduled = 0) and
+      // recognition credited from a recall answer (2) are no attempt of their own (S18).
       `SELECT word_id, SUM(CASE WHEN exercise_type != 'known' THEN 1 ELSE 0 END) as total,
               SUM(CASE WHEN exercise_type != 'known' AND rating > 1 THEN 1 ELSE 0 END) as correct,
               SUM(CASE WHEN exercise_type != 'known' AND rating = 1 THEN 1 ELSE 0 END) as wrong
-       FROM review_logs WHERE word_id IN (${wordFilterSql}) AND exercise_type != 'intro' GROUP BY word_id;`,
+       FROM review_logs WHERE word_id IN (${wordFilterSql}) AND exercise_type != 'intro'
+         AND (is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'known') GROUP BY word_id;`,
       params
     ).catch(() => []),
   ]);
@@ -928,21 +1036,41 @@ export async function getAllWords(): Promise<WordDetail[]> {
 }
 
 /**
- * Fetch only words whose next review is due (uses idx_srs_reviews_next_date).
+ * SQL form of cards.isDueSrs on a schedule table (alias): a Review card on a schedule of a day or more is due
+ * for its whole due day (local time), any other card to the minute. `$1` = now, `$2` = start of the next
+ * local day (ISO strings, as next_review_date is stored).
+ */
+function dueCardSql(alias: string): string {
+  return `(${alias}.next_review_date <= $1
+    OR (COALESCE(${alias}.state, 0) = 2 AND COALESCE(${alias}.scheduled_days, ${alias}.interval, 0) >= 1
+        AND ${alias}.next_review_date < $2))`;
+}
+
+/** Parameters of dueCardSql */
+function dueParams(now: Date): [string, string] {
+  return [now.toISOString(), new Date(nextLocalDayStart(now)).toISOString()];
+}
+
+/**
+ * Fetch only words with a card due now, by the same rule as cards.isDueSrs (uses idx_srs_reviews_next_date).
  */
 export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDetail[]> {
   const db = await getDatabase();
-  const nowIso = now.toISOString();
+  // A new card whose introduction is at least INTRO_READY_MS old is due even if its quiz was postponed
+  const params = [...dueParams(now), new Date(now.getTime() - INTRO_READY_MS).toISOString()];
+  const introduced = (alias: string) =>
+    `(COALESCE(${alias}.state, 0) = 0 AND COALESCE(${alias}.reps, 0) = 0 AND ${alias}.last_review IS NOT NULL
+      AND ${alias}.last_review <= $3)`;
   // A word is due when either of its cards is due. Words without an SRS row are treated as new
   // and due (same as getAllWords' default).
-  const dueFilter = `SELECT word_id FROM srs_reviews WHERE next_review_date <= $1
-    UNION SELECT word_id FROM srs_production WHERE next_review_date <= $1
+  const dueFilter = `SELECT s.word_id FROM srs_reviews s WHERE ${dueCardSql("s")} OR ${introduced("s")}
+    UNION SELECT p.word_id FROM srs_production p WHERE ${dueCardSql("p")} OR ${introduced("p")}
     UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)`;
   const words = await db.select<Word[]>(
     `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) AND COALESCE(suspended, 0) = 0 ORDER BY created_at DESC;`,
-    [nowIso]
+    params
   );
-  return hydrateWords(db, words, dueFilter, [nowIso]);
+  return hydrateWords(db, words, dueFilter, params);
 }
 
 /**
@@ -996,22 +1124,22 @@ export interface DueCounts {
  */
 export async function countDueCards(now: Date = new Date()): Promise<DueCounts> {
   const db = await getDatabase();
-  const nowIso = now.toISOString();
+  // Same due rule as cards.isDueSrs: a review card is due for its whole due day (dueCardSql)
   const rows = await db.select<Array<{ reviews: number; new_waiting: number; new_recall_waiting: number }>>(
     `SELECT
        (SELECT COUNT(*) FROM (
           SELECT s.word_id FROM srs_reviews s JOIN words w ON w.id = s.word_id
-          WHERE s.next_review_date <= $1 AND COALESCE(s.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
+          WHERE ${dueCardSql("s")} AND COALESCE(s.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
           UNION ALL
           SELECT p.word_id FROM srs_production p JOIN words w ON w.id = p.word_id
-          WHERE p.next_review_date <= $1 AND COALESCE(p.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
+          WHERE ${dueCardSql("p")} AND COALESCE(p.reps, 0) > 0 AND COALESCE(w.suspended, 0) = 0
        )) AS reviews,
        (SELECT COUNT(*) FROM words w LEFT JOIN srs_reviews s ON s.word_id = w.id
           WHERE COALESCE(s.reps, 0) = 0 AND COALESCE(w.suspended, 0) = 0
-            AND (s.next_review_date IS NULL OR s.next_review_date <= $1)) AS new_waiting,
+            AND (s.next_review_date IS NULL OR ${dueCardSql("s")})) AS new_waiting,
        (SELECT COUNT(*) FROM srs_production p JOIN words w ON w.id = p.word_id
-          WHERE COALESCE(p.reps, 0) = 0 AND COALESCE(w.suspended, 0) = 0 AND p.next_review_date <= $1) AS new_recall_waiting`,
-    [nowIso]
+          WHERE COALESCE(p.reps, 0) = 0 AND COALESCE(w.suspended, 0) = 0 AND ${dueCardSql("p")}) AS new_recall_waiting`,
+    dueParams(now)
   );
   return {
     reviews: Number(rows[0]?.reviews ?? 0),

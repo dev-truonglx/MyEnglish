@@ -9,7 +9,7 @@ import { emit } from "@tauri-apps/api/event";
 import type { CardDirection, ReviewCard, SRSReview } from "@/types/database";
 import { getDatabase, SRS_COLUMNS } from "./db";
 import { getFSRSSettings, recordReview, type FSRSResult } from "./srs";
-import { isValidEvidence } from "./cards";
+import { INTRO_READY_MS, isDueSrs, isValidEvidence } from "./cards";
 import {
   awardXP,
   calculateRetrievability,
@@ -27,7 +27,7 @@ import { recordDailyActivity } from "./streak";
 import { logLearningEvent } from "./learningEvents";
 
 /** A new word's first graded quiz must come at least this long after its introduction card */
-export const INTRO_MIN_GAP_MS = 60 * 1000;
+export const INTRO_MIN_GAP_MS = INTRO_READY_MS;
 /** A new word quizzed too soon after its introduction is asked again (graded) after this delay */
 export const INTRO_POSTPONE_MINUTES = 10;
 
@@ -65,7 +65,7 @@ export function schedulingDecision(ctx: SchedulingContext): SchedulingDecision {
   if (isSuspended(ctx.card)) return { scheduled: false, reason: "suspended" };
   if (ctx.alreadyGraded) return { scheduled: false, reason: "already_graded" };
   if (!isValidEvidence(ctx.exerciseType, ctx.card.direction)) return { scheduled: false, reason: "exercise_mismatch" };
-  if (new Date(ctx.card.srs.next_review_date).getTime() > now.getTime()) return { scheduled: false, reason: "not_due" };
+  if (!isDueSrs(ctx.card.srs, now)) return { scheduled: false, reason: "not_due" };
   if (ctx.introducedAt != null && now.getTime() - ctx.introducedAt < INTRO_MIN_GAP_MS) {
     return { scheduled: false, reason: "intro_too_recent" };
   }
@@ -102,6 +102,13 @@ export interface CardAnswerResult {
    * valuable kind of review, worth telling the learner about.
    */
   rescued: boolean;
+  /** Whether the answer really moved the schedule (a scheduled answer can be downgraded, see practiceReason) */
+  scheduled: boolean;
+  /**
+   * Why an answer the caller decided to schedule was recorded as practice: the stored card was no longer
+   * due (graded since the caller's snapshot was taken). Null otherwise.
+   */
+  practiceReason: PracticeReason | null;
 }
 
 /** Below this predicted recall, remembering the word counts as "rescued just before forgetting" */
@@ -140,12 +147,15 @@ export function cardWithResult(card: ReviewCard, r: FSRSResult): ReviewCard {
 /**
  * Producing the English word from its meaning proves the word is also recognised. When the recognition
  * card is due (or has faded below the target retention), it is credited with Good instead of being
- * asked again tomorrow. Logged with is_scheduled = 2 so the optimizer can tell it apart.
+ * asked again tomorrow. Logged with is_scheduled = 2 so the optimizer can tell it apart. Letter tiles
+ * never credit it.
  */
 async function creditRecognition(card: ReviewCard, exerciseType: ExerciseType, now: Date): Promise<FSRSResult | null> {
+  // Building the word from its own letters is not enough evidence of reading it (M9)
+  if (exerciseType === "letter_tiles") return null;
   const rec = card.srsRecognition;
   if (!rec || (rec.state ?? 0) !== 2) return null;
-  const due = new Date(rec.next_review_date).getTime() <= now.getTime();
+  const due = isDueSrs(rec, now);
   const R = calculateRetrievability(rec, now);
   if (!due && R >= getFSRSSettings().requestRetention) return null;
   const before = reviewLogBefore(rec, now);
@@ -179,11 +189,39 @@ function notifyWordsChanged(): void {
   } catch {}
 }
 
+/** The card's stored schedule: the row recordReview would update (production falls back to recognition). */
+async function readStoredSrs(card: ReviewCard): Promise<SRSReview | null> {
+  const db = await getDatabase();
+  const read = (table: string) =>
+    db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM ${table} WHERE word_id = $1 LIMIT 1`, [card.id]);
+  let rows = await read(card.direction === "production" ? "srs_production" : "srs_reviews");
+  if (card.direction === "production" && rows.length === 0) rows = await read("srs_reviews");
+  return rows[0] ?? null;
+}
+
+/**
+ * Whether the stored row shows the card was graded after the snapshot was taken. A new card stays new
+ * until its first graded answer (a postponed quiz moves its due date but is no grade); any other card was
+ * graded when it is no longer due (same rule as schedulingDecision).
+ */
+export function wasGradedSince(snapshot: Partial<SRSReview>, stored: Partial<SRSReview>, now: Date = new Date()): boolean {
+  const isNew = (s: Partial<SRSReview>) => (s.state ?? 0) === 0 && (s.reps ?? 0) === 0;
+  if (isNew(snapshot)) return !isNew(stored);
+  return !isDueSrs(stored, now);
+}
+
 /** Record one answer to a vocabulary card. See schedulingDecision for when the schedule moves. */
 export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnswerResult> {
   const now = input.now ?? new Date();
-  const { card, rating, scheduled } = input;
-  const before = reviewLogBefore(card.srs, now);
+  const { card, rating } = input;
+  // schedulingDecision saw a snapshot (session queue, popup). If the card was graded since (popup, another
+  // window, an earlier mount of the session), its stored row is no longer due: grading it again would move
+  // FSRS twice for one recall and count twice toward the daily goal, so the answer becomes practice.
+  const stored = input.scheduled ? await readStoredSrs(card).catch(() => null) : null;
+  const gradedSince = !!stored && wasGradedSince(card.srs, stored, now);
+  const scheduled = input.scheduled && !gradedSince;
+  const practiceReason: PracticeReason | null = gradedSince ? "not_due" : null;
+  const before = reviewLogBefore(gradedSince && stored ? stored : card.srs, now);
   const leechSettings = getLeechSettings();
   const wasLeech = isLeech(card.srs, leechSettings);
 
@@ -218,7 +256,8 @@ export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnsw
     implicit = await creditRecognition(card, input.exerciseType, now).catch(() => null);
   }
 
-  const becameLeech = !!result && !wasLeech && leechSettings.enabled && result.lapses >= leechSettings.threshold;
+  const becameLeech =
+    !!result && !wasLeech && isLeech({ lapses: result.lapses, stability: result.stability }, leechSettings);
   let suspended = false;
   if (becameLeech && leechSettings.action === "suspend") {
     await setWordSuspended(card.id, true).catch(() => {});
@@ -237,14 +276,24 @@ export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnsw
   const rescued =
     !!result && rating >= Rating.Hard && before?.retrievability != null && before.retrievability < RESCUE_RETRIEVABILITY;
 
-  if (input.countsForDailyGoal) recordDailyActivity(1);
+  if (input.countsForDailyGoal && !gradedSince) recordDailyActivity(1);
   if (result || implicit || suspended) notifyWordsChanged();
 
-  return { result, xp, implicit, becameLeech, suspended, mastered, rescued };
+  return { result, xp, implicit, becameLeech, suspended, mastered, rescued, scheduled, practiceReason };
 }
 
 /** Log that a new (or relearned) word's introduction card was shown. Consumes the daily new-word budget. */
 export async function recordIntro(card: ReviewCard, now: Date = new Date()): Promise<void> {
+  const db = await getDatabase();
+  await db
+    .execute(
+      `UPDATE srs_reviews
+       SET last_review = COALESCE(last_review, $1)
+       WHERE word_id = $2`,
+      [now.toISOString(), card.id]
+    )
+    .catch((err) => console.warn("Failed to update srs_reviews last_review on intro:", err));
+
   await saveReviewLog({
     wordId: card.id,
     exerciseType: "intro",
@@ -258,27 +307,74 @@ export async function recordIntro(card: ReviewCard, now: Date = new Date()): Pro
     direction: card.direction,
     before: reviewLogBefore(card.srs, now),
   }).catch((err) => console.warn("Intro log save failed:", err));
+
+  notifyWordsChanged();
+}
+
+/** First check of a word marked "Đã biết": spread over this many days, by word id */
+export const KNOWN_CHECK_MIN_DAYS = 4;
+export const KNOWN_CHECK_MAX_DAYS = 21;
+/** Difficulty a word marked "Đã biết" starts with: a middle value, as after a first Good (not the minimum, as Easy gave) */
+export const KNOWN_DIFFICULTY = 5;
+
+/**
+ * Days until the first check of a word marked "Đã biết", from KNOWN_CHECK_MIN_DAYS to KNOWN_CHECK_MAX_DAYS.
+ * Deterministic (a hash of the word id, not Math.random): marking hundreds of words in one sitting spreads
+ * their checks over two and a half weeks instead of piling them on one day, and a retry gives the same date.
+ */
+export function knownCheckDays(wordId: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < wordId.length; i++) {
+    h ^= wordId.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return KNOWN_CHECK_MIN_DAYS + ((h >>> 0) % (KNOWN_CHECK_MAX_DAYS - KNOWN_CHECK_MIN_DAYS + 1));
 }
 
 /**
- * The learner already knows a new word: its recognition card is scheduled as Easy (a check in about a week)
- * without a quiz. It is outside the daily new-word budget, and recall practice only starts once a real
- * review has confirmed the word (otherwise skimming hundreds of easy words would flood the budget with
- * recall cards). A word already studied is left alone. Returns whether the word was marked.
+ * The learner already knows a new word: its recognition card goes straight to Review without a quiz, with a
+ * middle difficulty (KNOWN_DIFFICULTY) and a stability equal to the wait before its first check (knownCheckDays),
+ * so FSRS expects 90% recall on that day. It is outside the daily new-word budget, it is not "remembered" until
+ * a real review confirms it (see isKnownOnly), and recall practice only starts after that review (otherwise
+ * skimming hundreds of easy words would flood the budget with recall cards). A word already studied is left
+ * alone. Returns whether the word was marked.
  */
 export async function markWordKnown(wordId: string, now: Date = new Date()): Promise<boolean> {
   const db = await getDatabase();
   const rows = await db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id = $1 LIMIT 1`, [wordId]);
   const before = rows[0];
   if (before && ((before.reps ?? 0) > 0 || (before.state ?? 0) !== 0)) return false;
-  await recordReview(wordId, Rating.Easy, "recognition", { unlockProduction: false });
+  const days = knownCheckDays(wordId);
+  const due = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+  await db.execute(
+    `INSERT INTO srs_reviews (
+       word_id, ease_factor, interval, repetitions, next_review_date,
+       stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
+     )
+     VALUES ($1, 2.5, $2, 1, $3, $2, $4, 0, $2, 1, 0, 2, $5, 0)
+     ON CONFLICT(word_id) DO UPDATE SET
+       ease_factor = excluded.ease_factor,
+       interval = excluded.interval,
+       repetitions = excluded.repetitions,
+       next_review_date = excluded.next_review_date,
+       stability = excluded.stability,
+       difficulty = excluded.difficulty,
+       elapsed_days = excluded.elapsed_days,
+       scheduled_days = excluded.scheduled_days,
+       reps = excluded.reps,
+       lapses = excluded.lapses,
+       state = excluded.state,
+       last_review = excluded.last_review,
+       learning_steps = excluded.learning_steps`,
+    [wordId, days, due, KNOWN_DIFFICULTY, now.toISOString()]
+  );
   await saveReviewLog({
     wordId,
     exerciseType: "known",
     responseTimeMs: 0,
     isCorrect: true,
     wrongAttempts: 0,
-    rating: Rating.Easy,
+    rating: Rating.Good,
     xpEarned: 0,
     timestamp: now.toISOString(),
     isScheduled: false,

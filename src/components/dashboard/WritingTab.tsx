@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { BookMarked, Loader2, NotebookPen, Play, Sparkles, Trash2 } from "lucide-react";
 import { useWordsStore } from "@/stores/wordsStore";
-import { correctWritingWithAI, type WritingFeedback } from "@/services/ai";
+import { correctWritingWithAI, type MistakeCategory, type WritingFeedback } from "@/services/ai";
 import {
-  CATEGORY_LESSON,
   deleteMistake,
+  getCategoryLesson,
   getDueMistakes,
   getMistakeSummary,
   listMistakes,
@@ -47,12 +48,44 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
   const [recent, setRecent] = useState<Mistake[]>([]);
   const [reviewing, setReviewing] = useState<Mistake[] | null>(null);
   const [reviewResult, setReviewResult] = useState<string | null>(null);
+  // The grammar lesson behind each weak category; a category with no lesson in the book gets no link
+  const [categoryLessons, setCategoryLessons] = useState<Partial<Record<MistakeCategory, { id: string; title: string }>>>({});
 
   const reload = () => {
     getMistakeSummary().then(setSummary).catch(() => {});
     listMistakes(12).then(setRecent).catch(() => {});
   };
   useEffect(reload, []);
+
+  // Checked once per visit: without an AI CLI the correction button is off, not an error after a click
+  const [cliReady, setCliReady] = useState<boolean | null>(null);
+  useEffect(() => {
+    let customPath: string | undefined;
+    try {
+      customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+    } catch {}
+    invoke<{ installed: boolean }>("check_cli_status", { customPath })
+      .then((res) => setCliReady(res.installed))
+      .catch(() => setCliReady(false));
+  }, []);
+
+  useEffect(() => {
+    if (!summary) return;
+    let cancelled = false;
+    const categories = summary.byCategory.slice(0, 4).map((c) => c.category);
+    Promise.all(categories.map((c) => getCategoryLesson(c).catch(() => undefined))).then((found) => {
+      if (cancelled) return;
+      const next: Partial<Record<MistakeCategory, { id: string; title: string }>> = {};
+      categories.forEach((c, i) => {
+        const lesson = found[i];
+        if (lesson) next[c] = lesson;
+      });
+      setCategoryLessons(next);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [summary]);
 
   // A few words being learned, to try using them in today's update (output practice)
   const suggestions = useMemo(
@@ -73,7 +106,7 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
   };
 
   const len = text.trim().length;
-  const canSend = !busy && len >= 10 && len <= 600 && used < STANDUP_PER_DAY;
+  const canSend = !busy && len >= 10 && len <= 600 && used < STANDUP_PER_DAY && cliReady !== false;
 
   const send = async () => {
     if (!canSend) return;
@@ -94,7 +127,7 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
       reload();
     } catch (err) {
       setError(
-        `Không sửa được bằng AI: ${err instanceof Error ? err.message : String(err)}. Cần cài Gemini CLI (xem tab Settings).`
+        `Không sửa được bằng AI: ${err instanceof Error ? err.message : String(err)}. Cần cài AI CLI (Claude hoặc Gemini), xem tab Cài đặt ở thanh bên.`
       );
     } finally {
       setBusy(false);
@@ -159,6 +192,11 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
             {busy ? "AI đang sửa…" : used >= STANDUP_PER_DAY ? "Hết lượt hôm nay" : "Nhờ AI sửa"}
           </button>
         </div>
+        {cliReady === false && (
+          <p className="text-xs text-amber-700 dark:text-amber-400">
+            Cần cài AI CLI (Claude hoặc Gemini) để nhờ AI sửa. Bạn vẫn viết và ôn lại lỗi đã lưu bình thường. Xem tab Cài đặt ở thanh bên.
+          </p>
+        )}
         {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
 
         {feedback && (
@@ -235,7 +273,7 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
                 {summary.total} lỗi đã lưu · {summary.due} cần ôn hôm nay · Bạn hay sai nhất:
               </div>
               {summary.byCategory.slice(0, 4).map(({ category, count }) => {
-                const lesson = CATEGORY_LESSON[category];
+                const lesson = categoryLessons[category];
                 const max = summary.byCategory[0].count;
                 return (
                   <div key={category} className="flex items-center gap-3 text-xs">

@@ -1,522 +1,556 @@
-import { useState, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { BookOpen, Check, ChevronDown, Clock, Copy, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
+import type { GrammarBookFile } from "@/types/grammarBook";
 import {
-  GraduationCap,
-  Search,
-  BookOpen,
-  Zap,
-  CheckCircle2,
-  Clock,
-  RotateCw,
-  Sparkles,
-} from "lucide-react";
-import { GRAMMAR_LESSONS, getLessonById } from "@/data/grammarData";
-import {
-  initGrammarStorage,
-  getAllGrammarProgress,
-  getGrammarSummaryStats,
-  getDueGrammarLessons,
-} from "@/services/grammarService";
-import type { GrammarLevel, GrammarProgress } from "@/types/grammar";
-import GrammarLessonView from "./GrammarLessonView";
+  getAllBookChapters,
+  getBookLoadError,
+  getHiddenItemKeys,
+  listUserAcceptedAnswers,
+  removeUserAcceptedAnswer,
+  unhideItem,
+} from "@/services/grammarBook";
+import { getTodayGrammarPlan, type TodayGrammarPlan } from "@/services/grammarPath";
+import { getGrammarSummaryStats, initGrammarStorage } from "@/services/grammarService";
+import { buildPracticeSession, buildReviewSession, type SessionEntry } from "@/services/grammarSession";
+import importPrompt from "../../../docs/grammar-import-prompt.md?raw";
+import PathPicker, { type PathPickerMode } from "./PathPicker";
+import GrammarLessonView, { type GrammarLessonTab } from "./GrammarLessonView";
+import GrammarImportDialog from "./GrammarImportDialog";
+import GrammarPlayer from "./GrammarPlayer";
 import { PAGE_CONTAINER } from "../dashboard/shared";
-import ReviewTimeFilterBar from "../dashboard/ReviewTimeFilterBar";
-import ReviewTrajectoryModal from "../review/ReviewTrajectoryModal";
-import { formatNextReviewRelative, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 
-export default function GrammarHub({ initialLessonId = null }: { initialLessonId?: string | null } = {}) {
-  const [selectedLevel, setSelectedLevel] = useState<string>("all");
-  const [statusFilter, setStatusFilter] = useState<"all" | "due" | "mastered" | "learning">("all");
-  const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
-  const [searchQuery, setSearchQuery] = useState("");
-  // Opened from elsewhere (e.g. a mistake category in the Writing tab): straight to the lesson's handbook
-  const [activeLessonId, setActiveLessonId] = useState<string | null>(initialLessonId);
-  const [activeLessonInitialTab, setActiveLessonInitialTab] = useState<"diagnostic" | "practice" | "handbook">(
-    initialLessonId ? "handbook" : "diagnostic"
-  );
-  const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [trajectoryLesson, setTrajectoryLesson] = useState<{
-    id: string;
-    title: string;
-    titleVn: string;
-    level: string;
-    progress?: GrammarProgress;
-  } | null>(null);
+interface GrammarHubProps {
+  initialLessonId?: string | null;
+}
 
-  // Initialize storage & sync on mount
+type Stats = ReturnType<typeof getGrammarSummaryStats>;
+
+/** What the learner has hidden or marked as accepted, kept here so each can be undone */
+interface ManagedItems {
+  hidden: string[];
+  accepted: Array<{ itemKey: string; blankIndex: number; answer: string }>;
+}
+
+function readManagedItems(): ManagedItems {
+  return { hidden: getHiddenItemKeys(), accepted: listUserAcceptedAnswers() };
+}
+
+interface PlayerState {
+  entries: SessionEntry[];
+  mode: "review" | "practice";
+  title: string;
+  subtitle?: string;
+}
+
+/** The prompt the learner pastes into an AI: the text inside the ````text fence of the doc (whole file as a fallback) */
+function getPromptText(): string {
+  const match = /````text\r?\n([\s\S]*?)\r?\n````/.exec(importPrompt);
+  return (match ? match[1] : importPrompt).trim();
+}
+
+export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) {
+  const [chapters, setChapters] = useState<GrammarBookFile[]>([]);
+  const [plan, setPlan] = useState<TodayGrammarPlan | null>(null);
+  const [stats, setStats] = useState<Stats | null>(null);
+  const [loading, setLoading] = useState(true);
+  // The data could not be read (as opposed to: the book is simply not imported yet)
+  const [loadError, setLoadError] = useState(false);
+  const [managed, setManaged] = useState<ManagedItems>(() => readManagedItems());
+  const [activeLesson, setActiveLesson] = useState<{ chapterId: string; lessonId: string; tab: GrammarLessonTab } | null>(null);
+  const [player, setPlayer] = useState<PlayerState | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState<PathPickerMode>("path");
+  const [starting, setStarting] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const loadSeq = useRef(0);
+  const initialHandled = useRef(false);
+  const pickerRef = useRef<HTMLDivElement | null>(null);
+  const timers = useRef<number[]>([]);
+  const noticeTimer = useRef<number | null>(null);
+
   useEffect(() => {
-    initGrammarStorage().then(() => setRefreshTrigger((v) => v + 1));
-
-    const onGrammarUpdate = () => setRefreshTrigger((v) => v + 1);
-    window.addEventListener("myenglish-grammar-updated", onGrammarUpdate);
-    return () => window.removeEventListener("myenglish-grammar-updated", onGrammarUpdate);
+    const list = timers.current;
+    return () => {
+      list.forEach((t) => window.clearTimeout(t));
+      if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    };
   }, []);
 
-  const progressMap: Record<string, GrammarProgress> = useMemo(() => {
-    return getAllGrammarProgress();
-  }, [refreshTrigger]);
+  const later = (fn: () => void, ms: number) => {
+    timers.current.push(window.setTimeout(fn, ms));
+  };
 
-  const summaryStats = useMemo(() => {
-    return getGrammarSummaryStats();
-  }, [refreshTrigger]);
+  const showNotice = (text: string) => {
+    setNotice(text);
+    if (noticeTimer.current !== null) window.clearTimeout(noticeTimer.current);
+    noticeTimer.current = window.setTimeout(() => setNotice(null), 4000);
+  };
 
-  const dueLessonIds = useMemo(() => {
-    return getDueGrammarLessons();
-  }, [refreshTrigger]);
+  const loadData = useCallback(async () => {
+    const seq = ++loadSeq.current;
+    try {
+      await initGrammarStorage();
+      const chs = await getAllBookChapters();
+      const nextPlan = await getTodayGrammarPlan();
+      if (seq !== loadSeq.current) return;
+      setChapters(chs);
+      setPlan(nextPlan);
+      setStats(getGrammarSummaryStats());
+      setManaged(readManagedItems());
+      // The book loader reports a failed read as an empty book: ask it why
+      setLoadError(getBookLoadError() !== null);
 
-  // Counts for each review schedule time bucket
-  const grammarBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
-    const now = new Date();
-    const counts: Record<ReviewTimeBucket, number> = {
-      all: GRAMMAR_LESSONS.length,
-      due: 0,
-      today: 0,
-      "1-3d": 0,
-      "4-7d": 0,
-      future: 0,
-      new: 0,
-    };
-    for (const lesson of GRAMMAR_LESSONS) {
-      const prog = progressMap[lesson.id];
-      const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
-      const info = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted, now);
-      counts[info.bucket]++;
+      // Open the requested lesson once (e.g. from the mistake notebook), not on every refresh
+      if (initialLessonId && !initialHandled.current) {
+        initialHandled.current = true;
+        const ch = chs.find((c) => (c.lessons ?? []).some((l) => l.id === initialLessonId));
+        if (ch) setActiveLesson({ chapterId: ch.chapterId, lessonId: initialLessonId, tab: "handbook" });
+      }
+    } catch (err) {
+      console.warn("Failed to load the grammar hub:", err);
+      if (seq === loadSeq.current) setLoadError(true);
+    } finally {
+      if (seq === loadSeq.current) setLoading(false);
     }
-    return counts;
-  }, [progressMap]);
+  }, [initialLessonId]);
 
-  // Filter lessons
-  const filteredLessons = useMemo(() => {
-    const now = new Date();
-    return GRAMMAR_LESSONS.filter((lesson) => {
-      // Level filter
-      if (selectedLevel !== "all" && lesson.level !== selectedLevel) {
-        return false;
+  useEffect(() => {
+    void loadData();
+    const onUpdate = () => void loadData();
+    window.addEventListener("myenglish-grammar-updated", onUpdate);
+    return () => window.removeEventListener("myenglish-grammar-updated", onUpdate);
+  }, [loadData]);
+
+  const retryLoad = () => {
+    setLoading(true);
+    setLoadError(false);
+    void loadData();
+  };
+
+  const restoreHidden = (itemKey: string) => {
+    unhideItem(itemKey);
+    setManaged(readManagedItems());
+  };
+
+  const removeAccepted = (item: ManagedItems["accepted"][number]) => {
+    removeUserAcceptedAnswer(item.itemKey, item.answer, item.blankIndex);
+    setManaged(readManagedItems());
+  };
+
+  const openLesson = (lessonId: string, tab: GrammarLessonTab = "handbook") => {
+    const ch = chapters.find((c) => (c.lessons ?? []).some((l) => l.id === lessonId));
+    if (ch) setActiveLesson({ chapterId: ch.chapterId, lessonId, tab });
+  };
+
+  const startReview = async () => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const entries = await buildReviewSession();
+      if (entries.length === 0) {
+        showNotice("Chưa có câu ôn tập phù hợp cho các bài đến hạn");
+        return;
       }
-
-      // Status filter
-      const prog = progressMap[lesson.id];
-      const isDue = dueLessonIds.includes(lesson.id);
-      const isMastered = (prog?.mastery || 0) >= 80;
-      const isLearning =
-        (prog?.mastery || 0) > 0 && (prog?.mastery || 0) < 80;
-
-      if (statusFilter === "due" && !isDue) return false;
-      if (statusFilter === "mastered" && !isMastered) return false;
-      if (statusFilter === "learning" && !isLearning) return false;
-
-      // Review schedule time bucket filter
-      if (reviewTimeFilter !== "all") {
-        const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
-        const info = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted, now);
-        if (info.bucket !== reviewTimeFilter) {
-          return false;
-        }
-      }
-
-      // Search query
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase().trim();
-        const matchTitle = lesson.title.toLowerCase().includes(q);
-        const matchTitleVn = lesson.titleVn.toLowerCase().includes(q);
-        const matchCategory = lesson.category.toLowerCase().includes(q);
-        const matchTagline = lesson.tagline.toLowerCase().includes(q);
-        if (!matchTitle && !matchTitleVn && !matchCategory && !matchTagline) {
-          return false;
-        }
-      }
-
-      return true;
-    });
-  }, [selectedLevel, statusFilter, reviewTimeFilter, searchQuery, progressMap, dueLessonIds]);
-
-  const activeLesson = useMemo(() => {
-    if (!activeLessonId) return null;
-    return getLessonById(activeLessonId);
-  }, [activeLessonId]);
-
-  const handleNextLesson = () => {
-    if (!activeLessonId) return;
-    const currentIdx = GRAMMAR_LESSONS.findIndex((l) => l.id === activeLessonId);
-    if (currentIdx !== -1 && currentIdx + 1 < GRAMMAR_LESSONS.length) {
-      setActiveLessonInitialTab("diagnostic");
-      setActiveLessonId(GRAMMAR_LESSONS[currentIdx + 1].id);
-    } else {
-      setActiveLessonId(null);
+      setPlayer({ entries, mode: "review", title: "Ôn tập ngữ pháp", subtitle: `${stats?.dueCount ?? 0} bài đến hạn` });
+    } catch (err) {
+      console.warn("Failed to build the review:", err);
+      showNotice("Không tạo được bài ôn tập");
+    } finally {
+      setStarting(false);
     }
   };
 
-  const handleOpenLesson = (
-    lessonId: string,
-    tab: "diagnostic" | "practice" | "handbook" = "diagnostic"
-  ) => {
-    setActiveLessonInitialTab(tab);
-    setActiveLessonId(lessonId);
-  };
-
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case "A1":
-        return "bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border-emerald-300 dark:border-emerald-800/60";
-      case "A2":
-        return "bg-teal-50 dark:bg-teal-950/80 text-teal-700 dark:text-teal-400 border-teal-300 dark:border-teal-800/60";
-      case "B1":
-        return "bg-cyan-50 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-400 border-cyan-300 dark:border-cyan-800/60";
-      case "B2":
-        return "bg-blue-50 dark:bg-blue-950/80 text-blue-700 dark:text-blue-400 border-blue-300 dark:border-blue-800/60";
-      case "C1":
-        return "bg-purple-50 dark:bg-purple-950/80 text-purple-700 dark:text-purple-400 border-purple-300 dark:border-purple-800/60";
-      default:
-        return "bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300";
+  const startPractice = async (lessonIds: string[]) => {
+    if (starting) return;
+    setStarting(true);
+    try {
+      const entries = await buildPracticeSession(lessonIds);
+      if (entries.length === 0) {
+        showNotice("Chưa có câu nào chỉ dùng các bài này");
+        return;
+      }
+      setPickerMode("path");
+      const names = chapters
+        .flatMap((c) => c.lessons ?? [])
+        .filter((l) => lessonIds.includes(l.id))
+        .map((l) => l.titleVn || l.title);
+      setPlayer({
+        entries,
+        mode: "practice",
+        title: "Luyện theo thì",
+        subtitle: names.length <= 3 ? names.join(" + ") : `${names.slice(0, 3).join(" + ")} và ${names.length - 3} bài khác`,
+      });
+    } catch (err) {
+      console.warn("Failed to build the practice:", err);
+      showNotice("Không tạo được bài luyện");
+    } finally {
+      setStarting(false);
     }
   };
 
-  if (activeLesson) {
+  const openPractice = () => {
+    setPickerMode("practice");
+    later(() => pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+  };
+
+  const copyPrompt = async () => {
+    try {
+      await navigator.clipboard.writeText(getPromptText());
+      setCopied(true);
+      later(() => setCopied(false), 2000);
+    } catch {
+      showNotice("Không sao chép được, hãy thử lại");
+    }
+  };
+
+  if (player) {
     return (
-      <div className={`${PAGE_CONTAINER} space-y-6`}>
-        <GrammarLessonView
-          lesson={activeLesson}
-          initialTab={activeLessonInitialTab}
-          onBack={() => setActiveLessonId(null)}
-          onNextLesson={handleNextLesson}
+      <div className={PAGE_CONTAINER}>
+        <GrammarPlayer
+          entries={player.entries}
+          mode={player.mode}
+          title={player.title}
+          subtitle={player.subtitle}
+          onFinish={() => {}}
+          onExit={() => {
+            setPlayer(null);
+            void loadData();
+          }}
+          onOpenLesson={(lessonId) => {
+            setPlayer(null);
+            openLesson(lessonId);
+          }}
         />
       </div>
     );
   }
 
-  return (
-    <div className={`${PAGE_CONTAINER} space-y-6`}>
-      {/* ─── HEADER HERO BANNER ─── */}
-      <div className="relative rounded-3xl p-6 md:p-8 overflow-hidden border border-cyan-200 dark:border-cyan-800/40 bg-gradient-to-br from-cyan-500/10 via-emerald-500/5 to-transparent shadow-sm">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-2 max-w-xl">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold bg-cyan-100 dark:bg-cyan-950/80 text-cyan-800 dark:text-cyan-300 border border-cyan-300/80 dark:border-cyan-800/60">
-              <GraduationCap className="w-4 h-4 text-cyan-500" />
-              <span>Lộ Trình Toàn Diện CEFR: A1 - C1</span>
-            </div>
-            <h1 className="text-2xl md:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-              Trung Tâm Làm Chủ Ngữ Pháp
-            </h1>
-            <p className="text-xs md:text-sm text-slate-600 dark:text-zinc-300 leading-relaxed">
-              Học ngữ pháp theo cơ chế{" "}
-              <strong className="text-cyan-600 dark:text-cyan-400 font-bold">
-                Làm Bài Kiểm Tra Chẩn Đoán Trước (Diagnostic-First)
-              </strong>
-              , phân tích cú pháp trực quan, so sánh đối chiếu và ôn tập lặp lại ngắt quãng (SRS/FSRS).
-            </p>
-          </div>
-
-          {/* Quick Summary Pill Widget */}
-          <div className="grid grid-cols-3 gap-3 p-4 rounded-2xl bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm border border-cyan-200/60 dark:border-cyan-800/40 shadow-sm shrink-0">
-            <div className="text-center">
-              <div className="text-xl md:text-2xl font-black text-cyan-600 dark:text-cyan-400 font-mono">
-                {summaryStats.masteredCount}
-              </div>
-              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Thành thạo
-              </div>
-            </div>
-            <div className="text-center border-x border-slate-200 dark:border-zinc-800 px-3">
-              <div className="text-xl md:text-2xl font-black text-amber-500 font-mono">
-                {summaryStats.learningCount}
-              </div>
-              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Đang học
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-xl md:text-2xl font-black text-orange-500 font-mono">
-                {dueLessonIds.length}
-              </div>
-              <div className="text-[10px] md:text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                Cần ôn ngay
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ─── LEVEL SELECTOR TABS ─── */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
-          <button
-            onClick={() => setSelectedLevel("all")}
-            className={`px-3 py-1.5 rounded-xl text-xs font-semibold shrink-0 transition-all ${
-              selectedLevel === "all"
-                ? "bg-slate-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm"
-                : "bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 border border-slate-200 dark:border-zinc-800"
-            }`}
-          >
-            Tất cả cấp độ ({GRAMMAR_LESSONS.length})
-          </button>
-
-          {(["A1", "A2", "B1", "B2", "C1"] as GrammarLevel[]).map((lvl) => {
-            const stat = summaryStats.levelStats[lvl] || { total: 0, mastered: 0, percent: 0 };
-            const isSelected = selectedLevel === lvl;
-            return (
-              <button
-                key={lvl}
-                onClick={() => setSelectedLevel(lvl)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-2 border ${
-                  isSelected
-                    ? "bg-cyan-600 text-white border-cyan-600 shadow-sm font-semibold"
-                    : "bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200"
-                }`}
-              >
-                <span>{lvl}</span>
-                <span className="text-[10px] font-mono px-1.5 py-0.2 rounded-full bg-black/10 dark:bg-white/10">
-                  {stat.mastered}/{stat.total}
-                </span>
-                <div className="w-8 h-1.5 bg-slate-200 dark:bg-zinc-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${isSelected ? "bg-white" : "bg-cyan-500"}`}
-                    style={{ width: `${stat.percent}%` }}
-                  />
-                </div>
-              </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* ─── FILTERS & SEARCH BAR ─── */}
-      <div className="space-y-2 p-3 rounded-2xl bg-slate-50/60 dark:bg-zinc-900/40 border border-slate-200/80 dark:border-zinc-800/80">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-          {/* Search */}
-          <div className="relative w-full sm:w-72">
-            <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Tìm kiếm bài học, thì, cấu trúc..."
-              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-xs text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500"
-            />
-          </div>
-
-          {/* Status Filter Pills */}
-          <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
-            <button
-              onClick={() => setStatusFilter("all")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition ${
-                statusFilter === "all"
-                  ? "bg-slate-900 dark:bg-white text-white dark:text-zinc-900 shadow-sm"
-                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-            >
-              Tất cả ({GRAMMAR_LESSONS.length})
-            </button>
-
-            <button
-              onClick={() => setStatusFilter("due")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                statusFilter === "due"
-                  ? "bg-orange-500 text-white shadow-sm"
-                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5 text-orange-400" />
-              <span>Cần ôn</span>
-              {dueLessonIds.length > 0 && (
-                <span className="px-1.5 py-0.2 rounded-full text-[10px] bg-orange-100 dark:bg-orange-950 text-orange-800 dark:text-orange-300 font-bold">
-                  {dueLessonIds.length}
-                </span>
-              )}
-            </button>
-
-            <button
-              onClick={() => setStatusFilter("mastered")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                statusFilter === "mastered"
-                  ? "bg-emerald-600 text-white shadow-sm"
-                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-            >
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-              <span>Thành thạo</span>
-            </button>
-
-            <button
-              onClick={() => setStatusFilter("learning")}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5 ${
-                statusFilter === "learning"
-                  ? "bg-cyan-600 text-white shadow-sm"
-                  : "bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-            >
-              <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
-              <span>Đang học</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Review Time Schedule Filter Bar */}
-        <div className="pt-1 border-t border-slate-200/60 dark:border-zinc-800/60">
-          <ReviewTimeFilterBar
-            selectedBucket={reviewTimeFilter}
-            onSelectBucket={setReviewTimeFilter}
-            bucketCounts={grammarBucketCounts}
+  if (activeLesson) {
+    const lesson = chapters.flatMap((c) => c.lessons ?? []).find((l) => l.id === activeLesson.lessonId);
+    if (lesson) {
+      return (
+        <div className={PAGE_CONTAINER}>
+          <GrammarLessonView
+            key={activeLesson.lessonId}
+            lesson={lesson}
+            chapterId={activeLesson.chapterId}
+            initialTab={activeLesson.tab}
+            onBack={() => {
+              setActiveLesson(null);
+              void loadData();
+            }}
+            onOpenLesson={(lessonId) => openLesson(lessonId)}
           />
         </div>
-      </div>
+      );
+    }
+  }
 
-      {/* ─── LESSON CARDS GRID ─── */}
-      {filteredLessons.length === 0 ? (
-        <div className="p-12 text-center rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-2">
-          <BookOpen className="w-10 h-10 text-slate-300 dark:text-zinc-600 mx-auto" />
-          <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
-            Không tìm thấy bài học phù hợp
-          </h3>
-          <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Hãy thử tìm bằng từ khóa khác hoặc xóa bộ lọc lịch nhắc lại.
+  const hasBook = chapters.length > 0;
+  const total = stats?.totalLessons ?? 0;
+  const studiedPercent = total > 0 ? Math.round(((stats?.studiedCount ?? 0) / total) * 100) : 0;
+
+  return (
+    <div className={PAGE_CONTAINER}>
+      <div className="mx-auto max-w-4xl space-y-5 pb-6">
+        <div className="space-y-1">
+          <h1 className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">
+            <GraduationCap className="h-6 w-6 shrink-0 text-cyan-600 dark:text-cyan-400" />
+            <span>Ngữ pháp</span>
+          </h1>
+          <p className="text-xs text-slate-500 dark:text-zinc-400 sm:text-sm">
+            Học theo sách của bạn: mỗi ngày một bài mới, ôn lại đúng lúc sắp quên.
           </p>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {filteredLessons.map((lesson) => {
-            const prog = progressMap[lesson.id];
-            const isDue = dueLessonIds.includes(lesson.id);
-            const mastery = prog?.mastery || 0;
-            const isMastered = mastery >= 80;
-            const isUnattempted = !prog || prog.diagnosticStatus === "unattempted" || prog.reps === 0;
 
-            const relativeInfo = formatNextReviewRelative(prog?.nextReviewDate, isUnattempted);
-            const totalAttempts = prog?.reps || 0;
-            const wrongCount = prog?.lapses || 0;
-            const correctCount = Math.max(0, totalAttempts - wrongCount);
-            const accuracy = totalAttempts > 0 ? Math.round((correctCount / totalAttempts) * 100) : (prog?.score || 0);
-
-            return (
-              <div
-                key={lesson.id}
-                className="rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/90 p-5 shadow-sm hover:shadow-md hover:border-cyan-400/60 dark:hover:border-cyan-500/40 transition-all flex flex-col justify-between group space-y-4"
+        {loading && !hasBook ? (
+          <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-500 dark:text-zinc-400">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Đang tải...
+          </div>
+        ) : loadError && !hasBook ? (
+          <div className="space-y-4 rounded-2xl border border-rose-200 bg-white p-6 text-center shadow-sm dark:border-rose-900/60 dark:bg-zinc-900 sm:p-10">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-rose-50 text-rose-600 dark:bg-rose-950/60 dark:text-rose-400">
+              <CircleAlert className="h-7 w-7" />
+            </span>
+            <div className="mx-auto max-w-md space-y-1.5">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Không tải được dữ liệu ngữ pháp</h2>
+              <p className="text-sm leading-relaxed text-slate-600 dark:text-zinc-400">
+                Có lỗi khi đọc dữ liệu trên máy này. Hãy thử lại. Nếu vẫn lỗi, hãy khởi động lại ứng dụng.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={retryLoad}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Thử lại
+            </button>
+          </div>
+        ) : !hasBook ? (
+          <div className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 text-center shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-10">
+            <span className="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-cyan-50 text-cyan-600 dark:bg-cyan-950/60 dark:text-cyan-400">
+              <BookOpen className="h-7 w-7" />
+            </span>
+            <div className="mx-auto max-w-md space-y-1.5">
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white">Chưa có dữ liệu sách ngữ pháp</h2>
+              <p className="text-sm leading-relaxed text-slate-600 dark:text-zinc-400">
+                Dữ liệu lấy từ chính cuốn sách của bạn: nhờ AI chuyển từng chương sang file JSON bằng prompt có sẵn, rồi nhập các file vào đây.
+              </p>
+            </div>
+            <div className="flex flex-col items-stretch justify-center gap-2.5 sm:flex-row sm:items-center">
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
               >
-                {/* Header row */}
-                <div
-                  onClick={() => handleOpenLesson(lesson.id, isUnattempted ? "diagnostic" : "practice")}
-                  className="space-y-2.5 cursor-pointer"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold border ${getLevelColor(lesson.level)}`}>
-                      {lesson.level}
-                    </span>
-
-                    {/* Status Pill */}
-                    {isDue ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-orange-100 dark:bg-orange-950/80 text-orange-700 dark:text-orange-400 border border-orange-300 dark:border-orange-800">
-                        <Clock className="w-3 h-3" /> Cần ôn
-                      </span>
-                    ) : isMastered ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border border-emerald-300 dark:border-emerald-800">
-                        <CheckCircle2 className="w-3 h-3" /> Thành thạo
-                      </span>
-                    ) : isUnattempted ? (
-                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">
-                        Chưa làm
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-100 dark:bg-cyan-950/80 text-cyan-700 dark:text-cyan-400 border border-cyan-300 dark:border-cyan-800">
-                        Đang học ({mastery}%)
-                      </span>
-                    )}
-                  </div>
-
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-cyan-600 dark:group-hover:text-cyan-400 transition">
-                      {lesson.title}
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-zinc-400 font-medium">
-                      {lesson.titleVn}
-                    </p>
-                  </div>
-
-                  <p className="text-xs text-slate-600 dark:text-zinc-400 line-clamp-2 leading-relaxed">
-                    {lesson.tagline}
-                  </p>
-
-                  {/* Schedule & History Row */}
-                  <div className="flex items-center justify-between pt-1 gap-2 flex-wrap">
+                <Upload className="h-4 w-4" />
+                Nhập dữ liệu sách
+              </button>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+              >
+                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                {copied ? "Đã sao chép" : "Sao chép prompt chuyển đổi"}
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 dark:text-zinc-500">Các file chỉ được lưu trên máy này, không gửi đi đâu.</p>
+          </div>
+        ) : (
+          <>
+            <section className="space-y-3" aria-label="Hôm nay">
+              <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Hôm nay</h2>
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <TodayCard icon={<Clock className="h-3.5 w-3.5" />} label="Ôn lại" highlight={(stats?.dueCount ?? 0) > 0}>
+                  {stats && stats.dueCount > 0 ? (
                     <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setTrajectoryLesson({ ...lesson, progress: prog });
-                      }}
-                      className={`text-[10px] font-mono px-2 py-0.5 rounded-full border flex items-center gap-1 transition-all hover:scale-105 ${relativeInfo.badgeClass}`}
-                      title={`Lịch nhắc lại: ${relativeInfo.label} (${relativeInfo.exactDateStr}). Bấm để xem 4 mốc nhắc lại tiếp theo.`}
+                      type="button"
+                      onClick={startReview}
+                      disabled={starting}
+                      className="w-full rounded-lg bg-cyan-600 px-3 py-2 text-left text-sm font-semibold !text-white transition hover:bg-cyan-500 disabled:opacity-50"
                     >
-                      <Clock className="w-2.5 h-2.5 opacity-80" />
-                      <span>{relativeInfo.label}</span>
-                      <Sparkles className="w-2.5 h-2.5 text-cyan-500" />
+                      Ôn tập ({stats.dueCount} bài đến hạn)
                     </button>
+                  ) : (
+                    <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Không có bài đến hạn ✓</p>
+                  )}
+                </TodayCard>
 
-                    {totalAttempts > 0 && (
-                      <div
-                        className="flex items-center gap-1 text-[10px] font-mono bg-slate-50 dark:bg-zinc-950/70 px-2 py-0.5 rounded-md border border-slate-200/80 dark:border-zinc-800/80"
-                        title={`Lịch sử: ${totalAttempts} lần ôn (${correctCount} đúng · ${wrongCount} sai - ${accuracy}% chính xác)`}
-                      >
-                        <span className="text-slate-500 dark:text-zinc-400 font-semibold">{totalAttempts} lần:</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-bold">{correctCount}✓</span>
-                        <span className="text-slate-300 dark:text-zinc-700">/</span>
-                        <span className="text-rose-600 dark:text-rose-400 font-bold">{wrongCount}✗</span>
-                        <span className="text-cyan-600 dark:text-cyan-400 font-semibold">({accuracy}%)</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Footer: Mastery line + Action buttons */}
-                <div className="space-y-3 pt-3 border-t border-slate-100 dark:border-zinc-800/80">
-                  <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
-                    <span>Độ thành thạo:</span>
-                    <span className="font-bold text-slate-700 dark:text-zinc-300 font-mono">
-                      {mastery}%
-                    </span>
-                  </div>
-
-                  <div className="w-full h-1.5 bg-slate-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all ${
-                        isMastered
-                          ? "bg-emerald-500"
-                          : mastery > 0
-                          ? "bg-cyan-500"
-                          : "bg-slate-300 dark:bg-zinc-700"
-                      }`}
-                      style={{ width: `${mastery}%` }}
+                <TodayCard icon={<Sparkles className="h-3.5 w-3.5" />} label="Bài mới">
+                  {plan?.relearn ? (
+                    <LessonButton
+                      primary
+                      text={`Học lại: ${plan.relearn.titleVn || plan.relearn.title}`}
+                      hint="Lần kiểm tra nhanh trước chưa đạt"
+                      onClick={() => openLesson(plan.relearn!.id)}
                     />
-                  </div>
+                  ) : plan?.nextLesson && !plan.newLessonDoneToday ? (
+                    <LessonButton
+                      primary
+                      text={`Bài mới: ${plan.nextLesson.titleVn || plan.nextLesson.title}`}
+                      onClick={() => openLesson(plan.nextLesson!.id)}
+                    />
+                  ) : plan?.nextLesson ? (
+                    <div className="space-y-1.5">
+                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Đã học bài mới hôm nay ✓</p>
+                      <button
+                        type="button"
+                        onClick={() => openLesson(plan.nextLesson!.id)}
+                        className="text-xs font-semibold text-cyan-700 hover:underline dark:text-cyan-400"
+                      >
+                        Học tiếp bài sau
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Đã đi hết lộ trình ✓</p>
+                  )}
+                </TodayCard>
 
-                  <div className="grid grid-cols-2 gap-2 pt-1">
-                    <button
-                      onClick={() => handleOpenLesson(lesson.id, isUnattempted ? "diagnostic" : "practice")}
-                      className="px-3 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-emerald-600 text-white text-xs font-semibold hover:opacity-95 shadow-sm transition flex items-center justify-center gap-1.5"
-                    >
-                      <Zap className="w-3.5 h-3.5 fill-white" />
-                      <span>{isUnattempted ? "Kiểm Tra" : "Luyện Tập"}</span>
-                    </button>
+                <TodayCard icon={<Layers className="h-3.5 w-3.5" />} label="Luyện tập">
+                  <LessonButton text="Luyện theo thì" hint="Chọn thì muốn luyện, làm các câu chỉ dùng thì đó" onClick={openPractice} />
+                </TodayCard>
+              </div>
 
-                    <button
-                      onClick={() => handleOpenLesson(lesson.id, "handbook")}
-                      className="px-3 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition flex items-center justify-center gap-1.5"
-                    >
-                      <BookOpen className="w-3.5 h-3.5 text-cyan-500" />
-                      <span>Sổ Tay</span>
-                    </button>
-                  </div>
+              <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs text-slate-600 dark:text-zinc-400">
+                  <span>
+                    <strong className="font-mono text-sm text-slate-900 dark:text-white">
+                      {stats?.studiedCount ?? 0}/{total}
+                    </strong>{" "}
+                    bài đã học
+                  </span>
+                  <span>{stats?.masteredCount ?? 0} bài thuộc</span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800">
+                  <div className="h-full rounded-full bg-cyan-500 transition-all duration-300" style={{ width: `${studiedPercent}%` }} />
                 </div>
               </div>
-            );
-          })}
+            </section>
+
+            <div ref={pickerRef} className="scroll-mt-2">
+              <PathPicker
+                chapters={chapters}
+                onOpenLesson={openLesson}
+                onPractice={startPractice}
+                mode={pickerMode}
+                onModeChange={setPickerMode}
+              />
+            </div>
+
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 pt-4 text-xs dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-1.5 font-semibold text-slate-600 transition hover:text-cyan-700 dark:text-zinc-400 dark:hover:text-cyan-400"
+              >
+                <Upload className="h-3.5 w-3.5" />
+                Nhập thêm / cập nhật dữ liệu
+              </button>
+              <button
+                type="button"
+                onClick={copyPrompt}
+                className="inline-flex items-center gap-1.5 font-semibold text-slate-600 transition hover:text-cyan-700 dark:text-zinc-400 dark:hover:text-cyan-400"
+              >
+                {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
+                {copied ? "Đã sao chép" : "Sao chép prompt"}
+              </button>
+            </div>
+
+            <ManagedItemsPanel managed={managed} onRestoreHidden={restoreHidden} onRemoveAccepted={removeAccepted} />
+          </>
+        )}
+      </div>
+
+      <GrammarImportDialog isOpen={importOpen} onClose={() => setImportOpen(false)} onImportComplete={() => void loadData()} />
+
+      {notice && (
+        <div
+          role="status"
+          className="fixed bottom-16 left-1/2 z-50 max-w-[90vw] -translate-x-1/2 rounded-xl bg-slate-900 px-4 py-2.5 text-center text-xs font-medium text-white shadow-lg dark:bg-zinc-100 dark:text-zinc-900"
+        >
+          {notice}
         </div>
       )}
-
-      {/* Trajectory Modal for Grammar Lessons */}
-      {trajectoryLesson && (
-        <ReviewTrajectoryModal
-          isOpen={!!trajectoryLesson}
-          onClose={() => setTrajectoryLesson(null)}
-          grammarLesson={trajectoryLesson}
-        />
-      )}
     </div>
+  );
+}
+
+/** Hidden questions and self-accepted answers: folded away by default, only keys and answers are listed */
+function ManagedItemsPanel({
+  managed,
+  onRestoreHidden,
+  onRemoveAccepted,
+}: {
+  managed: ManagedItems;
+  onRestoreHidden: (itemKey: string) => void;
+  onRemoveAccepted: (item: ManagedItems["accepted"][number]) => void;
+}) {
+  return (
+    <details className="group rounded-xl border border-slate-200 bg-white p-3.5 text-xs dark:border-zinc-800 dark:bg-zinc-900">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 font-semibold text-slate-600 dark:text-zinc-300">
+        <span className="flex items-center gap-1.5">
+          <Wrench className="h-3.5 w-3.5" />
+          Công cụ: câu đã ẩn và đáp án tự công nhận
+        </span>
+        <ChevronDown className="h-3.5 w-3.5 transition group-open:rotate-180" />
+      </summary>
+
+      <div className="mt-3 space-y-4">
+        <section className="space-y-1.5">
+          <h3 className="font-bold text-slate-700 dark:text-zinc-200">Câu đã ẩn ({managed.hidden.length})</h3>
+          {managed.hidden.length === 0 ? (
+            <p className="text-slate-500 dark:text-zinc-400">Chưa ẩn câu nào.</p>
+          ) : (
+            <ul className="space-y-1">
+              {managed.hidden.map((itemKey) => (
+                <li key={itemKey} className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-zinc-800/60">
+                  <span className="min-w-0 truncate font-mono text-slate-700 dark:text-zinc-300">{itemKey}</span>
+                  <button
+                    type="button"
+                    onClick={() => onRestoreHidden(itemKey)}
+                    className="inline-flex shrink-0 items-center gap-1 font-semibold text-cyan-700 hover:underline dark:text-cyan-400"
+                  >
+                    <Eye className="h-3.5 w-3.5" />
+                    Hiện lại
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="space-y-1.5">
+          <h3 className="font-bold text-slate-700 dark:text-zinc-200">Đáp án mình tự công nhận ({managed.accepted.length})</h3>
+          {managed.accepted.length === 0 ? (
+            <p className="text-slate-500 dark:text-zinc-400">Chưa có đáp án nào.</p>
+          ) : (
+            <ul className="space-y-1">
+              {managed.accepted.map((item) => (
+                <li
+                  key={`${item.itemKey}-${item.blankIndex}-${item.answer}`}
+                  className="flex items-center justify-between gap-3 rounded-lg bg-slate-50 px-2.5 py-1.5 dark:bg-zinc-800/60"
+                >
+                  <span className="min-w-0 truncate">
+                    <span className="font-mono text-slate-500 dark:text-zinc-400">{item.itemKey}</span>
+                    {item.blankIndex > 0 && <span className="text-slate-500 dark:text-zinc-400"> · ô {item.blankIndex + 1}</span>}
+                    <span className="text-slate-700 dark:text-zinc-200">: {item.answer}</span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => onRemoveAccepted(item)}
+                    className="inline-flex shrink-0 items-center gap-1 font-semibold text-rose-600 hover:underline dark:text-rose-400"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Xoá
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </details>
+  );
+}
+
+function TodayCard({ icon, label, highlight = false, children }: { icon: ReactNode; label: string; highlight?: boolean; children: ReactNode }) {
+  return (
+    <div
+      className={`space-y-2 rounded-xl border p-3.5 shadow-sm ${
+        highlight
+          ? "border-cyan-200 bg-cyan-50/50 dark:border-cyan-900/60 dark:bg-cyan-950/20"
+          : "border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+      }`}
+    >
+      <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-700 dark:text-cyan-300">
+        {icon}
+        <span>{label}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function LessonButton({ text, hint, primary = false, onClick }: { text: string; hint?: string; primary?: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`w-full space-y-0.5 rounded-lg border px-3 py-2 text-left transition ${
+        primary
+          ? "border-cyan-600 bg-cyan-600 hover:bg-cyan-500"
+          : "border-slate-200 hover:border-cyan-400 hover:bg-cyan-50/40 dark:border-zinc-700 dark:hover:border-cyan-700 dark:hover:bg-cyan-950/20"
+      }`}
+    >
+      <span className={`block break-words text-sm font-semibold ${primary ? "!text-white" : "text-slate-900 dark:text-white"}`}>{text}</span>
+      {hint && (
+        <span className={`block text-xs ${primary ? "text-cyan-100" : "text-slate-500 dark:text-zinc-400"}`}>{hint}</span>
+      )}
+    </button>
   );
 }

@@ -20,7 +20,7 @@ export interface ReminderSettings {
   autoPlayAudio: boolean; // strictly false by user requirement
   snoozedUntil: number | null; // timestamp ms
   includeGrammar: boolean; // whether to review grammar in popup alongside vocabulary
-  grammarLevels: GrammarLevel[]; // selected grammar levels (multi-select)
+  grammarLevels?: GrammarLevel[]; // deprecated: popup uses selected book lessons
   respectFocus: boolean; // postpone the popup while full screen, sharing the screen, in Focus mode or idle
   preferPrimaryMonitor: boolean; // show the reminder on the primary monitor instead of the one under the cursor
   contextMoments: boolean; // also remind at natural transitions: back at the computer, screen share / full screen over
@@ -223,13 +223,14 @@ export function resetIgnoredNudges(): void {
 }
 
 /**
- * Snooze length after `ignoredBefore` reminders were already ignored in a row: doubles each time
- * (10 -> 20 -> 40 min) so a busy user is not nagged every few minutes, but never longer than the
- * normal reminder interval.
+ * Snooze length after `ignoredBefore` reminders were already ignored in a row. The base is the normal
+ * reminder interval (the snooze length when reminders are off) and it doubles with each ignored reminder
+ * (base -> 2x -> 4x -> 8x), so a busy user is spaced out rather than nagged. The wait never exceeds
+ * 4 hours, unless the base itself is longer.
  */
 export function ignoredNudgeSnoozeMinutes(ignoredBefore: number, snoozeMinutes: number, intervalMinutes: number): number {
-  const cap = Math.max(snoozeMinutes, intervalMinutes || snoozeMinutes);
-  return Math.min(cap, snoozeMinutes * 2 ** Math.min(ignoredBefore, 10));
+  const base = Math.max(snoozeMinutes, intervalMinutes || snoozeMinutes);
+  return Math.min(base * 2 ** Math.min(ignoredBefore, 3), Math.max(base, 240));
 }
 
 /** The reminder timed out unanswered: snooze it with backoff. Returns the minutes snoozed. */
@@ -237,6 +238,11 @@ export function snoozeIgnoredNudge(): number {
   const settings = getReminderSettings();
   const ignored = getIgnoredNudgeCount();
   const minutes = ignoredNudgeSnoozeMinutes(ignored, settings.snoozeMinutes ?? 10, settings.intervalMinutes);
+  // A longer pause picked from the tray while the card was up stays: the card was not ignored (N9)
+  const pausedMs = (settings.snoozedUntil ?? 0) - Date.now();
+  if (settings.snoozedUntil === getTrayPauseEnd() && pausedMs > minutes * 60 * 1000) {
+    return Math.ceil(pausedMs / (60 * 1000));
+  }
   try {
     localStorage.setItem(IGNORED_NUDGES_KEY, String(ignored + 1));
   } catch {}
@@ -250,6 +256,68 @@ export function snoozeIgnoredNudge(): number {
  */
 export function cancelSnooze(): void {
   saveReminderSettings({ snoozedUntil: null });
+}
+
+/** End of the last pause picked from the tray: a timed-out card must not shorten it */
+const TRAY_PAUSE_KEY = "myenglish_tray_pause_until_v1";
+
+function getTrayPauseEnd(): number | null {
+  try {
+    const n = parseInt(localStorage.getItem(TRAY_PAUSE_KEY) || "", 10);
+    return Number.isFinite(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
+function markTrayPause(until: number | null): void {
+  try {
+    localStorage.setItem(TRAY_PAUSE_KEY, String(until));
+  } catch {}
+}
+
+/**
+ * Pause reminders until tomorrow morning, when the night quiet hours end (tray menu, N9).
+ * Before 04:00 the night is still going on, so "tomorrow" is this morning. Returns the end timestamp.
+ */
+export function snoozeUntilTomorrow(now: Date = new Date()): number {
+  const dayOffset = now.getHours() < 4 ? 0 : 1;
+  const until = new Date(now.getFullYear(), now.getMonth(), now.getDate() + dayOffset, NIGHT_QUIET_END, 0).getTime();
+  saveReminderSettings({ snoozedUntil: until });
+  markTrayPause(until);
+  return until;
+}
+
+/** Turn reminders back on after a pause or snooze (tray menu, N9) */
+export function resumeReminders(): void {
+  saveReminderSettings({ snoozedUntil: null });
+}
+
+/** Reminder actions of the tray menu, sent by Rust as the `tray-reminder-action` event */
+export const TRAY_REMINDER_EVENT = "tray-reminder-action";
+export type TrayReminderAction = "pause_1h" | "pause_tomorrow" | "resume";
+
+/** Apply a reminder action picked from the tray menu. False for an unknown action. */
+export function applyTrayReminderAction(action: unknown, now: Date = new Date()): boolean {
+  if (action === "pause_1h") {
+    snoozeReminder(60);
+    markTrayPause(getReminderSettings().snoozedUntil);
+  } else if (action === "pause_tomorrow") {
+    snoozeUntilTomorrow(now);
+  } else if (action === "resume") {
+    resumeReminders();
+  } else {
+    return false;
+  }
+  return true;
+}
+
+/** "HH:MM" when the active pause ends, for the tray tooltip; null while reminders are not paused */
+export function snoozedUntilLabel(now: number = Date.now()): string | null {
+  const { snoozedUntil } = getReminderSettings();
+  if (!snoozedUntil || snoozedUntil <= now) return null;
+  const d = new Date(snoozedUntil);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
 /**
@@ -279,6 +347,9 @@ export function getSnoozeRemainingMinutes(): number {
  */
 export const LAST_POPUP_DISPLAY_KEY = "myenglish_srs_last_trigger_ms";
 
+/** A stored reminder time further than this in the future means the clock went back (N18) */
+export const CLOCK_SKEW_TOLERANCE_MS = 60 * 1000;
+
 /**
  * Get timestamp (ms) when the Focus Review Pop-up was last displayed
  */
@@ -287,7 +358,15 @@ export function getLastPopupDisplayTime(): number {
     const raw = localStorage.getItem(LAST_POPUP_DISPLAY_KEY);
     if (!raw) return 0;
     const parsed = parseInt(raw, 10);
-    return isNaN(parsed) ? 0 : parsed;
+    if (isNaN(parsed)) return 0;
+    // The system clock was set back: a display time in the future would hold every reminder until
+    // the clock catches up (N18). Clamp it to now and keep the fix.
+    const now = Date.now();
+    if (parsed > now + CLOCK_SKEW_TOLERANCE_MS) {
+      localStorage.setItem(LAST_POPUP_DISPLAY_KEY, now.toString());
+      return now;
+    }
+    return parsed;
   } catch {
     return 0;
   }
@@ -374,15 +453,17 @@ export async function triggerReviewNudge(
   extraPayload?: Partial<ReviewNudgePayload>
 ): Promise<boolean> {
   recordPopupDisplayed(Date.now());
-  countNudgeShown();
   const settings = getReminderSettings();
   try {
     // false = not shown (the review popup is already open)
     const payload = buildNudgePayload(dueCount, settings, extraPayload);
-    return await invoke<boolean>("show_review_nudge", {
+    const shown = await invoke<boolean>("show_review_nudge", {
       payload,
       preferPrimary: settings.preferPrimaryMonitor,
     });
+    // Count only a reminder that actually appeared (N4)
+    if (shown) countNudgeShown();
+    return shown;
   } catch (err) {
     console.warn("invoke show_review_nudge failed, opening the review directly:", err);
     return triggerReviewPopup();

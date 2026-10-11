@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
+import { cleanMeaningForOption, generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
+import { pickSenseForExample, sharesSense } from "@/utils/exerciseHints";
 
 interface ReverseClozeExerciseProps {
   word: WordDetail;
@@ -33,13 +34,20 @@ export default function ReverseClozeExercise({
     }
   }, [example, onFallback]);
 
-  // Options: the shared generator (plausible distractors, never synonyms of the word)
-  const options = useMemo(
-    () => generateMultipleChoiceQuestion(word, allWords, "en_to_vn").options.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
+  // Options: the shared generator (plausible distractors, never synonyms of the word). The right answer is
+  // the sense the example sentence uses, not always the first one; no distractor may share a sense with the word.
+  const options = useMemo(() => {
+    const others = allWords.filter((w) => !sharesSense(word.meaning_vn, w.meaning_vn));
+    const exampleVi = example?.sentence_vn?.trim() ?? "";
+    const sense = exampleVi ? cleanMeaningForOption(pickSenseForExample(word.meaning_vn, exampleVi)) : "";
+    return generateMultipleChoiceQuestion(word, others, "en_to_vn").options.map((o) => ({
+      id: o.id,
+      text: o.isCorrect && sense ? sense : o.text,
+      isCorrect: o.isCorrect,
+    }));
     // Options must not reshuffle while answering
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [word.id]
-  );
+  }, [word.id, example?.id]);
 
   useEffect(() => {
     setSelectedId(null);

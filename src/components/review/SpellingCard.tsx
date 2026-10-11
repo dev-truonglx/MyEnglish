@@ -4,6 +4,7 @@ import type { ReviewCard } from "@/types/database";
 import type { FeedbackMessage } from "@/hooks/useReviewSession";
 import RevealedWordContent from "./RevealedWordContent";
 import { handleSpeak } from "./speech";
+import { maskTargetInMeaning } from "@/utils/exerciseHints";
 
 interface SpellingCardProps {
   currentWord: ReviewCard;
@@ -68,7 +69,7 @@ export default function SpellingCard({
                 <span className="text-[10px] font-mono uppercase text-emerald-700 dark:text-emerald-400 block font-bold mb-1">
                   Định nghĩa tiếng Việt:
                 </span>
-                <span className="font-medium">{currentWord.meaning_vn}</span>
+                <span className="font-medium">{maskTargetInMeaning(currentWord.meaning_vn, currentWord.word)}</span>
               </div>
             </div>
 
@@ -155,13 +156,9 @@ export default function SpellingCard({
               </div>
 
               {/* Action buttons */}
-              <div className="flex items-center justify-between text-xs px-1 pt-1">
+              <div className="flex items-center justify-end text-xs px-1 pt-1">
                 {wrongAttempts < 2 && !showHint ? (
                   <>
-                    <div className="text-xs font-mono text-slate-500 dark:text-zinc-400">
-                      Độ dài: <span className="text-emerald-600 dark:text-emerald-400 font-bold">{currentWord.word.length}</span> ký tự
-                    </div>
-
                     <div className="flex items-center gap-3">
                       <button
                         type="button"

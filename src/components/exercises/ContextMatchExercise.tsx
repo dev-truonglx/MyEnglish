@@ -55,6 +55,9 @@ export default function ContextMatchExercise({
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null);
   const [, setWrongAttempts] = useState(0);
   const targetMistakesRef = useRef(0);
+  // Word of the latest pairing: when it is the target, its sentence was the one left over (found by elimination)
+  const lastPairedRef = useRef<string | null>(null);
+  const [byElimination, setByElimination] = useState(false);
 
   const onFallbackRef = useRef(onFallback);
   useEffect(() => {
@@ -113,6 +116,7 @@ export default function ContextMatchExercise({
     }
 
     // Match selected word to this sentence
+    lastPairedRef.current = selectedWordId;
     setMatches((prev) => ({
       ...prev,
       [selectedWordId]: sentencePair.wordId,
@@ -135,14 +139,18 @@ export default function ContextMatchExercise({
       matches[word.id] !== word.id || pairs.some((p) => p.wordId !== word.id && matches[p.wordId] === word.id);
 
     if (allCorrect) {
+      // The target was paired last, so every other pair was already there: its sentence was forced
+      const eliminated = lastPairedRef.current === word.id;
+      setByElimination(eliminated);
       setIsCorrect(true);
       setIsAnswered(true);
       onSpeak(word.word);
 
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
       const mistakes = targetMistakesRef.current;
+      // Hard with 0 wrong attempts is read by the session as a hint, so an eliminated target grades Hard
       // Reported at once: the session keeps this card on screen until the learner continues
-      onComplete(mistakes === 0, mistakes, Rating.Good);
+      onComplete(mistakes === 0 && !eliminated, mistakes, eliminated ? Rating.Hard : Rating.Good);
     } else {
       if (targetWrong) targetMistakesRef.current += 1;
       setIsCorrect(false);
@@ -295,7 +303,11 @@ export default function ContextMatchExercise({
         {isAnswered && isCorrect ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
-            <span className="font-semibold">Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Nhấn Enter hoặc Tiếp tục.</span>
+            <span className="font-semibold">
+              {byElimination
+                ? `Đúng hết, nhưng "${word.word}" là cặp cuối còn lại nên chưa tính là nhớ chắc. Nhấn Enter hoặc Tiếp tục.`
+                : "Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Nhấn Enter hoặc Tiếp tục."}
+            </span>
           </div>
         ) : isCorrect === false && !isAnswered ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">

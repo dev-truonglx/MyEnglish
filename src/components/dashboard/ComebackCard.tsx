@@ -8,7 +8,7 @@ interface ComebackCardProps {
 
 /** Review tab after a break: today's share of the backlog instead of the whole pile */
 export default function ComebackCard({ comeback, onStart }: ComebackCardProps) {
-  const { plan, dayNumber, daysLeft, todayDone, todayRemaining, backlog, caughtUp } = comeback;
+  const { plan, dayNumber, daysLeft, catchesUpInPlan, newWordsPerDay, todayDone, todayRemaining, backlog, caughtUp } = comeback;
 
   if (caughtUp) {
     return (
@@ -27,6 +27,14 @@ export default function ComebackCard({ comeback, onStart }: ComebackCardProps) {
   const shareDone = Math.min(plan.dailyQuota, todayDone);
   const percent = Math.round((shareDone / plan.dailyQuota) * 100);
   const doneToday = todayRemaining === 0;
+  // Never more days than the plan has left: past it, the normal daily counts come back
+  const daysText = !catchesUpInPlan
+    ? daysLeft > 0
+      ? `Kế hoạch còn ${daysLeft} ngày`
+      : "Hôm nay là ngày cuối của kế hoạch"
+    : doneToday
+    ? `Còn khoảng ${daysLeft} ngày nữa là bắt kịp`
+    : `Khoảng ${daysLeft} ngày để bắt kịp`;
 
   return (
     <div className="rounded-2xl border border-amber-200 dark:border-amber-500/30 bg-white dark:bg-gradient-to-r dark:from-zinc-900 dark:via-zinc-900/90 dark:to-zinc-950 p-6 space-y-4 shadow-sm">
@@ -39,8 +47,8 @@ export default function ComebackCard({ comeback, onStart }: ComebackCardProps) {
             {dayNumber === 1 && todayDone === 0 ? "Chào mừng bạn quay lại 👋" : doneToday ? "Xong phần hôm nay" : "Tiếp tục phần hôm nay"}
           </h3>
           <p className="text-xs text-slate-600 dark:text-zinc-400 max-w-md">
-            Bạn đã nghỉ {plan.missedDays} ngày nên có {backlog} thẻ đang chờ. Không cần làm hết một lúc: FSRS đã xếp
-            những thẻ dễ quên nhất lên trước, và mỗi ngày chỉ cần một phần.
+            Bạn đã nghỉ {plan.missedDays} ngày nên có {backlog} thẻ đang chờ. Không cần làm hết một lúc: những thẻ dễ
+            quên nhất đã được xếp lên trước, và mỗi ngày chỉ cần một phần.
           </p>
         </div>
         <div className="w-12 h-12 shrink-0 rounded-2xl bg-amber-100 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">
@@ -53,12 +61,16 @@ export default function ComebackCard({ comeback, onStart }: ComebackCardProps) {
           <span>
             Hôm nay: {shareDone}/{plan.dailyQuota} thẻ
           </span>
-          <span>{doneToday ? `Còn khoảng ${daysLeft} ngày nữa là bắt kịp` : `Khoảng ${daysLeft} ngày để bắt kịp`}</span>
+          <span>{daysText}</span>
         </div>
         <div className="h-2 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
           <div className="h-full bg-gradient-to-r from-amber-400 to-orange-500 transition-all" style={{ width: `${percent}%` }} />
         </div>
-        <p className="text-[11px] text-slate-500 dark:text-zinc-500">Từ mới tạm dừng cho đến khi bắt kịp.</p>
+        <p className="text-[11px] text-slate-500 dark:text-zinc-500">
+          {newWordsPerDay > 0
+            ? `Số thẻ tồn đang giảm: mỗi ngày học thêm ${newWordsPerDay} từ mới.`
+            : "Từ mới tạm dừng cho đến khi số thẻ tồn bắt đầu giảm."}
+        </p>
       </div>
 
       {doneToday ? (
