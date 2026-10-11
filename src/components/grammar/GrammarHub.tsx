@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from "react"
 import { BookOpen, Check, ChevronDown, Clock, Copy, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
 import type { GrammarBookFile } from "@/types/grammarBook";
 import {
+  ensureGrammarBookSeeded,
   getAllBookChapters,
   getBookLoadError,
   getHiddenItemKeys,
@@ -92,6 +93,7 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
     const seq = ++loadSeq.current;
     try {
       await initGrammarStorage();
+      await ensureGrammarBookSeeded().catch(() => {});
       const chs = await getAllBookChapters();
       const nextPlan = await getTodayGrammarPlan();
       if (seq !== loadSeq.current) return;

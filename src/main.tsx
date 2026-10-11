@@ -6,6 +6,8 @@ import { initTheme } from "./services/theme";
 import { restoreLocalStorageFromDb, startLocalStorageBackup } from "./services/storageBackup";
 import { getInitialWindowLabel } from "./lib/windowLabel";
 
+import { ensureReleaseMigrationV27 } from "./services/releaseMigration";
+
 // Initialize theme (dark/light/system) before first paint
 initTheme();
 
@@ -14,6 +16,9 @@ async function bootstrap() {
   // Wait for it fully: a backup started before restore finished could overwrite SQLite with defaults.
   if ("__TAURI_INTERNALS__" in window) {
     try {
+      if (getInitialWindowLabel() === "main") {
+        await ensureReleaseMigrationV27();
+      }
       await restoreLocalStorageFromDb();
       // Windows share localStorage, so only the main window mirrors it back
       if (getInitialWindowLabel() === "main") startLocalStorageBackup();

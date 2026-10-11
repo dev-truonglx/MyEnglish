@@ -1,0 +1,40 @@
+88
+species, barracks
+7. Số nhiều của các danh từ mượn từ nước ngoài (Foreign plurals).
+- Các danh từ tận cùng bằng a khi ở số nhiều a đổi thành ae.
+Ex: formula  formulae alumna  alumnae
+- Các danh từ tận cùng bằng us khi ở số nhiều us đổi thành i.
+Ex: focus  foci alumnus  alumni
+- Các danh từ tận cùng bằng um khi ở số nhiều um đổi thành a.
+Ex: bacterium  bacteria curriculum 
+curricula dictum  dicta
+- Các danh từ tận cùng bằng on khi ở số nhiều on đổi thành a.
+Ex: criterion  criteria phenomenon  phenomena
+- Các danh từ tận cùng bằng ma khi ở số nhiều ma đổi thành mata.
+Ex: dogma  dogmata stigma 
+stigmata
+- Các danh từ tận cùng bằng ex, ix, yx, is, sis khi ở số nhiều các đuôi này đổi thành es.
+Ex: basis  bases crisis  crises
+8. Hai hình thức số nhiều với hai nghĩa khác nhau.
+Ex: brother  brothers (anh em ruột thịt); brethen (đồng đội, đồng đạo)
+cloth  cloths (vải vóc); clothes (quần áo)
+penny  pennies (các đồng xu), pence (số tiền xu)
+staff  staffs (nhân viên); staves (khuôn nhạc)
+9. Số nhiều của các danh từ kép.
+- Các danh từ kép viết dính thành một chữ hoặc viết rời thành hai chữ có gạch nối được coi là danh từ
+đơn và nếu phần cuối là danh từ thì số nhiều cũng đổi như từ đơn.
+Ex: toothbrush  toothbrushes horseman  horsemen
+- Các danh từ kép mà phần đầu là một danh từ theo sau có sở hữu cách, nhóm giới từ, trạng từ hay
+tính từ thì danh từ ấy đổi sang số nhiều.
+Ex: brother-in-law  brothers-in-law passer-by  passers-by
+10. Mâu thuẫn giữa hình thức số và ý nghĩa.
+- Hình thức số ít nhưng ngụ ý số nhiều.
+Ex: army, police, cattle, people, government, team, family,...
+- Hình thức số nhiều nhưng ngụ ý số ít.
+Ex: means, measles, news, the United States, mathematics, physics,...
+IV. Sự tương hợp giữa chủ ngữ và động từ (Subject and Verb Agreement)
+1. Động từ số ít (singular Verb)
+♦ Noun + Noun (The same idea, person, thing)
+Ex: My best friend and adviser, Tom, is coming tonight.
+♦ Each
+singular noun

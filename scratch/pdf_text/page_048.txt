@@ -1,0 +1,42 @@
+48
+- Ta cũng có thể bỏ whom, which và đặt giới từ ra sau động từ của mệnh đề quan hệ xác định
+(defining relative clause).
+Ex: The man Mary is talking to is Mr Pike.
+The shop I got my stereo from has lots of bargains.
+- Khi dùng that hoặc who, ta không đưa giới từ ra trước.
+Ex: The man that/ who Mary is talking to is Mr Pike.
+(NOT The man to that/ who Mary is talking is Mr Pike)
+- Khi giới từ đứng cuối mệnh đề quan hệ là thành phần của cụm động từ (phrasal verbs) thì ta không
+đem giới từ ra trước whom, which.
+Ex: This is the book which I’m looking for.
+That is the child whom you have to look after.
+- Khi dùng whom, which các giới từ cũng có thể đứng sau động từ (ngoại trừ
+without). Ex: The man whom Mary is talking to is Mr Pike.
+That is the man without whom we’ll get lost.
+(NOT ... the man whom we’ll get lost
+without)
+IV. Dạng rút gon của mệnh đề quan hệ
+1. Mệnh đề quan hệ có thể được rút gọn bằng cách dùng cụm phân từ (participle phrases). Có 2 loại cụm
+phân từ:
+
+Cụm phân từ hiện tại (present participle phrase) là cụm từ bắt đầu bằng hiện tại phân từ (present
+participle: V-ing).
+
+Cụm phân từ quá khứ (past participle phrase) là cụm từ bắt đầu bằng quá khứ phân từ (past
+participle: V3).
+♦ Cách rút gọn mệnh đề quan hệ bằng cụm phân từ (participle phrases):
+- Nếu động từ trong mệnh đề quan hệ ở thể chủ động (active), ta dùng cụm phân từ hiện tại (present
+participle phrase) thay cho mệnh đề đó (bỏ đại từ quan hệ và trợ động từ, đưa động từ chính về nguyên
+mẫu rồi thêm -ing).
+Ex: The man who is sitting next to you is my uncle.
+ The man sitting next to you is my uncle.
+Do you know the boy who broke the windows last night?
+ Do you know the boy breaking the windows last night?
+- Nếu động từ trong mệnh đề quan hệ ở thể bị động (passive), ta dùng cụm phân từ quá khứ (past
+participial phrase) thay cho mệnh đề đó (bỏ đại từ quan hệ và trợ động từ bắt đầu cụm từ bằng V3).
+Ex: The books which were written by To Hoai are interesting.
+ The books written by To Hoai are interesting.
+A bridge which was built only two years ago has been declared unsafe.
+ A bridge built only two years ago has been declared unsafe.
+2. Mệnh đề quan hệ có thể được rút gọn bằng cách dùng động từ nguyên mẫu có to (to-infinitive) hoặc
+cụm động từ nguyên mẫu (infinitive phrase: for + O + to-inf)

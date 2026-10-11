@@ -1,0 +1,36 @@
+185
+Active : Subject + HAVE + object (person) + bare-infinitive + object
+Passive : Subject + HAVE + object (thing) + past participle (+ by + object (person))
+Active : Subject + GET + object (person) + to infinitive + object (thing)
+Passive : Subject + GET + object (thing) + past participle (+ by + obj. (person))
+Active : Subject + verb + object + bare infinitive/ V-ing + ...
+Passive : Subject + be + past participle + to infinitive/ V-ing +...
+Active :
+Passive:
+Subject + verb + (that) + clause (S2 + V2 + O2...)
+It + be + verb (past participle)
+S2 + be + verb (past participle)
++ (that) + clause
++ to infinitive...
++ to have + past participle
+Active : Verb + object + adjunct.
+Passive : Let + object + be + past participle + adjunct.
+■ Một số dạng câu bị động:
+1. Thể sai khiến (Causative form): HAVE, GET
+Ex: I had him repair my bicycle yesterday.
+ I had my bicycle repaired yesterday.
+Ex: I get her to make some coffee.
+ I get some coffee made.
+2. Động từ chỉ giác quan (Verbs of perception): see, watch, hear, look, taste, …
+Ex: They saw her come in.
+ She was seen to come in.
+They saw the lorry running down the hill.
+ The lorry was seen running down the hill.
+3. Động từ chỉ ý kiến (Verbs of opinion): say, think, believe, report, rumour, …
+Ex: People say that he is a famous doctor.
+ It is said that he is a famous doctor.
+ He is said to be a famous doctor.
+Ex: They thought that Mary had gone away.
+ It was thought that Mary had gone away.
+ Mary was thought to have gone away.
+4. Câu mệnh lệnh (Imperative sentences)

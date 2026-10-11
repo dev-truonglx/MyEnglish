@@ -12,7 +12,9 @@ import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
-import { loadCatalogDistractors } from "@/services/vocabCatalog";
+import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
+import { ensureGrammarBookSeeded } from "@/services/grammarBook";
+import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
 import { needsVocabMigration } from "@/services/vocabReset";
 import { isSimpleMode } from "@/services/learnerProfile";
 import { countWordStatus, isRememberedLong } from "@/services/wordStatus";
@@ -200,6 +202,19 @@ export default function MainDashboard({
       setTimeout(() => setCopiedSnippet(false), 2000);
     }
   };
+
+  useEffect(() => {
+    ensureReleaseMigrationV27()
+      .then((wiped) => {
+        if (wiped) {
+          refreshWords();
+          setActivityVersion((v) => v + 1);
+        }
+      })
+      .catch(() => {});
+    ensureCatalogSeeded().catch(() => {});
+    ensureGrammarBookSeeded().catch(() => {});
+  }, []);
 
   useEffect(() => {
     const onActivity = () => setActivityVersion((v) => v + 1);

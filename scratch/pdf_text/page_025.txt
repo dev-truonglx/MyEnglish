@@ -1,0 +1,40 @@
+25
+IF-CLAUSE
+Thể phủ định
+Thể khẳng định
+UNLESS
+khẳng định (mệnh đề chính không thay đổi)
+khẳng định (đổi động từ trong mệnh đề chính sang thể phủ định)
+water. If I were you, I would come
+there.
+He would have passed his exam if he had studied hard.
+ Mệnh đề điều kiện có thể đứng trước hoặc sau mệnh đề chính.
+2. Trong mệnh đề điều kiện, ta có thể thay liên từ IF bằng UNLESS (nếu... không, trừ phi). Unless
+tương đương với ‘If ... not’.
+Ex: If you don’t study hard, you’ll fail in the exam.
+ Unless you study hard, you’ll fail in the
+exam. If she doesn’t water these trees, they will
+die.
+ Unless she waters these trees, they will die.
+ Khi đổi câu điều kiện IF sang UNLESS, nhớ lưu ý không được đổi mệnh đề IF ở thể khẳng định
+sang thể phủ định mà phải đổi mệnh đề chính theo thể ngược lại.
+Ex: If I have time, I’ll help you.
+ Unless I have time, I won’t help you.
+If we had more rain, our crops would grow faster.
+ Unless we had more rain, our crops wouldn’t grow
+faster. If I won a big prize in a lottery, I’d build a school for
+the poor.
+ Unless I won a big prize in a lottery, I wouldn’t build a school for the poor.
+ Ta có thể gút lại công thức sau:
+3. Ta cũng có thể diễn tả câu điều kiện mà không cần dùng IF hay UNLESS bằng cách đảo chủ ngữ
+ra sau should, were hoặc had. Lưu ý không được làm với động từ khác.
+Ex: If you should run into Peter, tell him he owes me a letter.
+ Should you run into Peter, tell him he owes me a
+letter. If they were stronger, they could lift the table.
+ Were they stronger, they could lift the table.
+If he had studied hard, he would have passed his exam.
+ Had he studied hard, he would have passed his exam.
+4. Provided (that), On condition (that), As long as, so long as (miễn là, với điều kiện là), Suppose,
+Supposing (giả sử như), In case (trong trường búp), Even if (ngay cả khi, dù cho)... có thể dùng
+thay cho If trong câu điều kiện.
+Ex: In case I forget, please remind me of my promise.

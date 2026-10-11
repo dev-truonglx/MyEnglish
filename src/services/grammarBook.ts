@@ -1170,6 +1170,44 @@ export async function clearGrammarBook(): Promise<void> {
   notifyBookUpdated([]);
 }
 
+let bookSeeding: Promise<void> | null = null;
+
+/**
+ * Seed all 31 chapters into SQLite from the bundled grammarCatalog.json if the database has 0 chapters.
+ * Safe to call concurrently: multiple calls share a single operation.
+ */
+export function ensureGrammarBookSeeded(): Promise<void> {
+  bookSeeding ??= seedGrammarBook().finally(() => {
+    bookSeeding = null;
+  });
+  return bookSeeding;
+}
+
+async function seedGrammarBook(): Promise<void> {
+  try {
+    const db = await bookDatabase();
+    const rows = await db.select<Array<{ count: number }>>("SELECT count(*) as count FROM grammar_book_chapters;");
+    if (rows[0] && rows[0].count > 0) return;
+
+    const catalog = await import("@/data/grammarCatalog.json").then(
+      (m) => m.default as unknown as { version: number; files: GrammarBookFile[] }
+    );
+    if (!catalog?.files || catalog.files.length === 0) return;
+
+    const merged = mergeChapterParts(catalog.files);
+    for (const chapter of merged.values()) {
+      try {
+        await writeChapter(db, chapter, { mode: "replace" });
+      } catch (err) {
+        console.warn(`Failed to seed grammar chapter ${chapter.chapterId}:`, err);
+      }
+    }
+    notifyBookUpdated(Array.from(merged.keys()));
+  } catch (err) {
+    console.warn("Failed to seed grammar book:", err);
+  }
+}
+
 let cachedChapters: GrammarBookFile[] | null = null;
 let loading: Promise<GrammarBookFile[]> | null = null;
 /** Bumped by clearBookCache: a load started before it neither fills the cache nor is handed out */
@@ -1210,9 +1248,15 @@ async function loadChapters(generation: number): Promise<GrammarBookFile[]> {
   const result: GrammarBookFile[] = [];
   try {
     const db = await bookDatabase();
-    const [chapterRows, lessonRows, setRows, itemRows] = await Promise.all(
+    let [chapterRows, lessonRows, setRows, itemRows] = await Promise.all(
       BOOK_TABLES.map((t) => db.select<BookRow[]>(`SELECT id, chapter_id, ord, data FROM ${t} ORDER BY ord ASC;`))
     );
+    if (chapterRows.length === 0 && process.env.NODE_ENV !== "test") {
+      await ensureGrammarBookSeeded();
+      [chapterRows, lessonRows, setRows, itemRows] = await Promise.all(
+        BOOK_TABLES.map((t) => db.select<BookRow[]>(`SELECT id, chapter_id, ord, data FROM ${t} ORDER BY ord ASC;`))
+      );
+    }
     const byChapter = (rows: BookRow[]) => {
       const map = new Map<string, BookRow[]>();
       for (const r of rows) map.set(r.chapter_id, [...(map.get(r.chapter_id) ?? []), r]);
