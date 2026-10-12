@@ -16,6 +16,32 @@ export const GRAMMAR_SELECTION_KEY = "myenglish_grammar_selection_v1";
 export const GRAMMAR_EXCLUDED_KEY = "myenglish_grammar_path_excluded_v1";
 const INTRO_DATES_KEY = "myenglish_grammar_intro_dates_v1";
 
+/** Default initial tense: Present Simple (Thì hiện tại đơn) for beginners / foundation */
+export const DEFAULT_INITIAL_TENSE_IDS = ["ch01-l01"] as const;
+
+/** Marker recorded when the user confirms their starting tense choice */
+export const GRAMMAR_TENSES_INIT_KEY = "myenglish_grammar_tenses_init_v1";
+
+export function hasChosenInitialTenses(): boolean {
+  try {
+    return localStorage.getItem(GRAMMAR_TENSES_INIT_KEY) === "1";
+  } catch {
+    return true;
+  }
+}
+
+export function markInitialTensesDone(): void {
+  try {
+    localStorage.setItem(GRAMMAR_TENSES_INIT_KEY, "1");
+    persistKeyNow(GRAMMAR_TENSES_INIT_KEY);
+  } catch {}
+}
+
+export function saveInitialTenses(lessonIds: string[]): void {
+  saveSelectedLessonIds(lessonIds);
+  markInitialTensesDone();
+}
+
 function readIdList(key: string): string[] | null {
   try {
     const raw = localStorage.getItem(key);
@@ -63,7 +89,7 @@ export function getSelectedLessonIds(): string[] {
 }
 
 export function hasChosenGrammarLessons(): boolean {
-  return getSelectedLessonIds().length > 0 || getExcludedLessonIds().length > 0;
+  return hasChosenInitialTenses() || getSelectedLessonIds().length > 0 || getExcludedLessonIds().length > 0;
 }
 
 /**
@@ -93,6 +119,7 @@ export function saveSelectedLessonIds(lessonIds: string[]): void {
       writeIdList(GRAMMAR_SELECTION_KEY, unique);
       localStorage.removeItem(GRAMMAR_EXCLUDED_KEY);
     }
+    markInitialTensesDone();
     window.dispatchEvent(new CustomEvent("myenglish-grammar-selection-updated", { detail: { lessonIds: unique } }));
     window.dispatchEvent(new CustomEvent("myenglish-grammar-updated"));
   } catch (err) {

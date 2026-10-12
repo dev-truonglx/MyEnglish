@@ -189,7 +189,9 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
         entries,
         mode: lessonExerciseMode(lesson.id),
         title: `Bài tập: ${name}`,
-        subtitle: `${entries.length} câu chỉ dùng ${name}`,
+        subtitle: !studied
+          ? `${entries.length} câu luyện tập tự do · Làm "Kiểm tra ngay" để tính % tiến độ`
+          : `${entries.length} câu chỉ dùng ${name}`,
         onFinish: () => {},
       });
     } catch (err) {
@@ -279,6 +281,60 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
           </label>
         </div>
       </header>
+
+      {/* Nút to / Banner nổi bật: Kiểm tra ngay */}
+      {!noQuestions && (
+        <div
+          className={`rounded-2xl border p-4 sm:p-5 transition-all shadow-sm ${
+            !studied
+              ? "border-cyan-300 bg-gradient-to-r from-cyan-50/90 via-sky-50/80 to-blue-50/70 dark:border-cyan-800 dark:from-cyan-950/40 dark:via-sky-950/30 dark:to-blue-950/30 ring-1 ring-cyan-200/50 dark:ring-cyan-900/40"
+              : "border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900/80"
+          }`}
+        >
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="space-y-1.5 min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-600 text-white shadow-sm">
+                  <Zap className="h-4 w-4 fill-current" />
+                </span>
+                <h2 className="text-sm font-bold text-slate-900 dark:text-white sm:text-base">
+                  {!studied ? "Kiểm tra nhanh để kích hoạt & tính % tiến độ" : "Kiểm tra & Cập nhật độ thuộc"}
+                </h2>
+                {!studied ? (
+                  <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                    Chưa kích hoạt · 0%
+                  </span>
+                ) : (
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    Đã học · {progress.mastery}%
+                  </span>
+                )}
+              </div>
+              <p className="text-xs leading-relaxed text-slate-600 dark:text-zinc-400">
+                {!studied
+                  ? "Làm bài kiểm tra ngắn (tối đa 8 câu) để hệ thống đánh giá trình độ ban đầu, tính % độ thuộc và đưa thì này vào lịch ôn tập giãn cách FSRS."
+                  : `Điểm kiểm tra gần nhất: ${progress.score}% · Độ thuộc: ${progress.mastery}%. Làm lại bài kiểm tra để cập nhật điểm số và lịch ôn tập.`}
+              </p>
+            </div>
+
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                onClick={startQuickCheck}
+                disabled={starting !== null}
+                className="inline-flex w-full sm:w-auto items-center justify-center gap-2.5 rounded-xl bg-cyan-600 px-6 py-3 text-sm font-bold !text-white shadow-md shadow-cyan-600/25 transition hover:bg-cyan-500 hover:shadow-lg hover:shadow-cyan-600/30 active:scale-[0.98] disabled:opacity-50"
+              >
+                {starting === "learn" ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4 fill-current" />
+                )}
+                <span>Kiểm tra ngay (tối đa 8 câu)</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-1 rounded-xl border border-slate-200/80 bg-slate-100 p-1 dark:border-zinc-700 dark:bg-zinc-800">
         {TABS.map(({ id, label, icon: Icon }) => (

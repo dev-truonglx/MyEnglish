@@ -20,6 +20,11 @@ function isBackedUpKey(key: string): boolean {
   return key.startsWith(KEY_PREFIX) && !EXCLUDED_KEYS.has(key);
 }
 
+/** Clear the in-memory cache of mirrored keys (used during full app data reset) */
+export function clearBackupCache(): void {
+  lastBackedUp.clear();
+}
+
 /** null when localStorage can't be read (never treat that as "every key was deleted") */
 function readLocalEntries(): Array<[string, string]> | null {
   const entries: Array<[string, string]> = [];

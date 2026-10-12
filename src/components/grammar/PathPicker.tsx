@@ -488,7 +488,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
         <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
           {isPractice
             ? "Chọn 1 thì, 2 thì hoặc nhiều thì: app lấy các câu chỉ dùng những thì này."
-            : "Bỏ chọn bài bạn chưa muốn học; bài mới đến theo thứ tự sách, mỗi ngày một bài."}
+            : "Bật hoặc tắt bài và chương bạn muốn học trên lộ trình; bài mới đến theo thứ tự sách, mỗi ngày một bài."}
         </p>
         {!isPractice && pathNote && <p className="text-xs text-amber-600 dark:text-amber-400">{pathNote}</p>}
         <ul className="flex flex-wrap items-center gap-x-3.5 gap-y-1 pt-1 text-[11px] text-slate-500 dark:text-zinc-400">
