@@ -113,14 +113,35 @@ export function popupQuota(
 /** Shown under the feedback when the stored card had already been graded elsewhere (popup, main window) */
 const PRACTICE_NOT_DUE_NOTE = "Câu này chỉ tính luyện thêm: từ đã được ôn ở nơi khác";
 
-function getPosLabel(pos?: string | null): string | null {
+export function getPosLabel(pos?: string | null): string | null {
   if (!pos) return null;
-  const p = pos.toLowerCase();
-  if (p.includes("verb") || p === "v") return "Động từ (verb)";
-  if (p.includes("noun") || p === "n") return "Danh từ (noun)";
-  if (p.includes("adj") || p === "a") return "Tính từ (adj)";
-  if (p.includes("adv")) return "Trạng từ (adv)";
-  if (p.includes("idiom") || p.includes("phrase")) return "Cụm từ / Thành ngữ";
+  const p = pos.toLowerCase().trim();
+  const parts = p.split(",").map((s) => s.trim()).filter(Boolean);
+  const labels: string[] = [];
+
+  for (const part of parts) {
+    let label = "";
+    if (part === "pronoun") label = "Đại từ (pronoun)";
+    else if (part === "determiner") label = "Từ hạn định (determiner)";
+    else if (part.includes("adv") || part === "adverb") label = "Trạng từ (adv)";
+    else if (part.includes("adj") || part === "a" || part === "adjective") label = "Tính từ (adj)";
+    else if (part === "noun" || part === "n") label = "Danh từ (noun)";
+    else if (part.includes("modal verb")) label = "Động từ khuyết thiếu";
+    else if (part.includes("verb") || part === "v") label = "Động từ (verb)";
+    else if (part.includes("preposition")) label = "Giới từ (prep)";
+    else if (part.includes("conjunction")) label = "Liên từ (conj)";
+    else if (part.includes("idiom") || part.includes("phrase")) label = "Cụm từ / Thành ngữ";
+    else label = part;
+
+    if (label && !labels.includes(label)) {
+      labels.push(label);
+    }
+  }
+
+  if (labels.length > 0) {
+    return labels.slice(0, 2).join(", ");
+  }
+
   return pos;
 }
 
@@ -1475,6 +1496,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 <LetterTilesExercise
                   key={`${currentWord.id}-${currentIndex}`}
                   word={currentWord}
+                  hideHeader
                   onSpeak={(t) => handleSpeak(t)}
                   onComplete={(_ok, attempts, rating) => handleTilesComplete(attempts, rating)}
                 />

@@ -11,6 +11,7 @@ interface LetterTilesExerciseProps {
   /** Rating: Hard when the first-letter hint was used, else Good; attempts = wrong tries */
   onComplete: (isCorrect: boolean, attempts: number, rating: Rating) => void;
   onSpeak: (text: string) => void;
+  hideHeader?: boolean;
 }
 
 /** Characters placed automatically (the learner only builds the letters) */
@@ -69,7 +70,7 @@ export function buildTiles(
  * builds the English word from shuffled letters of that word (plus 3-4 distractor letters). Easier than typing from scratch,
  * so a beginner can start producing words without failing on every spelling detail.
  */
-export default function LetterTilesExercise({ word, onComplete, onSpeak }: LetterTilesExerciseProps) {
+export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHeader = false }: LetterTilesExerciseProps) {
   const target = word.word.trim();
   const slots = useMemo(() => [...target.toLowerCase()], [target]);
   const [tiles, setTiles] = useState<Tile[]>(() => buildTiles(target));
@@ -211,13 +212,22 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
   }, [tiles, picked, pick, undo]);
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-5 animate-in fade-in duration-200">
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-2 shadow-sm">
-        <div className="text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn), target)}</h2>
-        {word.part_of_speech && <p className="text-xs italic text-slate-400">{word.part_of_speech}</p>}
-        {example?.sentence_vn && <p className="text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
-      </div>
+    <div className="w-full max-w-xl mx-auto space-y-4 animate-in fade-in duration-200">
+      {!hideHeader ? (
+        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-2 shadow-sm">
+          <div className="text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
+          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn), target)}</h2>
+          {word.part_of_speech && <p className="text-xs italic text-slate-400">{word.part_of_speech}</p>}
+          {example?.sentence_vn && <p className="text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400 pt-1">
+          <span>Xếp chữ cái thành từ tiếng Anh:</span>
+          <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
+            {letterCount} chữ cái
+          </span>
+        </div>
+      )}
 
       {/* Slots */}
       <div className={`flex flex-wrap justify-center gap-1.5 ${state === "wrong" ? "animate-shake" : ""}`}>
