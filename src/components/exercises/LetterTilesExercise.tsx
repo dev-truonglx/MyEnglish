@@ -15,21 +15,47 @@ interface LetterTilesExerciseProps {
 
 /** Characters placed automatically (the learner only builds the letters) */
 export const FIXED = /[\s\-'’.,/()]/;
+/** Extra letters that are not in the word, so the user must identify the correct letters among distractors */
+export const EXTRA_POOL = "etaoinsrhldcumfpgwybvkxjqz";
 
 export interface Tile {
   id: number;
   ch: string;
 }
 
-export function buildTiles(target: string, random: () => number = Math.random): Tile[] {
+export function buildTiles(
+  target: string,
+  random: () => number = Math.random,
+  distractorCount?: number
+): Tile[] {
   const letters = [...target.toLowerCase()].filter((c) => !FIXED.test(c));
-  const all = letters.map((ch, id) => ({ id, ch }));
+  // 3-4 distractor letters unless explicitly specified
+  const count = distractorCount !== undefined ? distractorCount : (Math.floor(random() * 2) + 3);
+
+  const distinctExtras = [...EXTRA_POOL].filter((c) => !letters.includes(c));
+  for (let i = distinctExtras.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [distinctExtras[i], distinctExtras[j]] = [distinctExtras[j], distinctExtras[i]];
+  }
+  const extras = distinctExtras.slice(0, count);
+
+  // Fallback in case distinct characters are fewer than count
+  if (extras.length < count) {
+    const fallback = [...EXTRA_POOL];
+    for (let i = fallback.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [fallback[i], fallback[j]] = [fallback[j], fallback[i]];
+    }
+    extras.push(...fallback.slice(0, count - extras.length));
+  }
+
+  const all = [...letters, ...extras].map((ch, id) => ({ id, ch }));
   // Fisher-Yates, then make sure the tiles do not already spell the word in order
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];
   }
-  if (all.map((t) => t.ch).join("") === letters.join("") && all.length > 1) {
+  if (all.slice(0, letters.length).map((t) => t.ch).join("") === letters.join("") && all.length > 1) {
     const diffIdx = all.findIndex((t, idx) => idx > 0 && t.ch !== all[0].ch);
     if (diffIdx > 0) {
       [all[0], all[diffIdx]] = [all[diffIdx], all[0]];
@@ -40,7 +66,7 @@ export function buildTiles(target: string, random: () => number = Math.random): 
 
 /**
  * First step of the recall ladder (see selectExerciseType): the Vietnamese meaning is shown, the learner
- * builds the English word from shuffled letters of that word. Easier than typing from scratch,
+ * builds the English word from shuffled letters of that word (plus 3-4 distractor letters). Easier than typing from scratch,
  * so a beginner can start producing words without failing on every spelling detail.
  */
 export default function LetterTilesExercise({ word, onComplete, onSpeak }: LetterTilesExerciseProps) {
@@ -153,7 +179,14 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
     }
     setState("building");
     setPicked([]);
-    setTiles((prev) => [...prev].sort(() => Math.random() - 0.5));
+    setTiles((prev) => {
+      const copy = [...prev];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    });
   };
 
   // Keyboard: type a letter to pick a matching tile, Backspace to undo
