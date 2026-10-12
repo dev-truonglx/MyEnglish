@@ -648,13 +648,19 @@ export type { PopupGrammarItem };
 
 /**
  * Grammar questions for the popup (see getPopupGrammarItems in grammarSession: reviews of studied lessons only,
- * due lessons first, pairs per lesson; new lessons are learnt in the hub). The levels argument is no longer used.
+ * due lessons first, pairs per lesson; new lessons are learnt in the hub).
  */
 export async function getGrammarExercisesForReview(
-  _selectedLevels?: unknown,
-  count: number = 3
+  countOrLevels: number | unknown = 3,
+  maybeCount?: number
 ): Promise<PopupGrammarItem[]> {
   await initGrammarStorage().catch(() => {});
+  const count =
+    typeof countOrLevels === "number"
+      ? countOrLevels
+      : typeof maybeCount === "number"
+      ? maybeCount
+      : 3;
   const { getPopupGrammarItems } = await import("./grammarSession");
   return getPopupGrammarItems(count);
 }

@@ -44,7 +44,6 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   autoPlayAudio: false, // DO NOT play audio when displayed
   snoozedUntil: null,
   includeGrammar: true,
-  grammarLevels: ["A1", "A2", "B1"],
   respectFocus: true,
   preferPrimaryMonitor: false,
   contextMoments: true,
@@ -152,11 +151,7 @@ export function getReminderSettings(): ReminderSettings {
       typeof parsed.wordsPerSession === "number" && [3, 5, 10].includes(parsed.wordsPerSession)
         ? parsed.wordsPerSession
         : 3;
-    const grammarLevels: GrammarLevel[] =
-      Array.isArray(parsed.grammarLevels) && parsed.grammarLevels.length > 0
-        ? parsed.grammarLevels
-        : ["A1", "A2", "B1"];
-    const includeGrammar = parsed.includeGrammar !== undefined ? Boolean(parsed.includeGrammar) : true;
+    const includeGrammar = true; // Automatically interleave grammar questions when available
     const triggerCondition: ReminderTrigger =
       parsed.triggerCondition === "due_then_random" || parsed.triggerCondition === "all_words"
         ? parsed.triggerCondition
@@ -168,7 +163,6 @@ export function getReminderSettings(): ReminderSettings {
       triggerCondition,
       wordsPerSession,
       includeGrammar,
-      grammarLevels,
       autoPlayAudio: false, // enforce no sound on display
     };
   } catch {

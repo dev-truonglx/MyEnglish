@@ -4,7 +4,6 @@ import { getAllGrammarProgress, isLessonMastered } from "./grammarService";
 import { getEffectiveLessonIds } from "./grammarPath";
 import { calculateRetrievability, getXPState, isWordKnown } from "./smartReview";
 import { calculateStreakAndGoal } from "./streak";
-import { saveReminderSettings } from "./reminderSettings";
 import { isPlaceholderMeaning } from "./db";
 import { normalizeCefr } from "./cefr";
 import { LEVEL_OVERRIDE_KEY } from "./learnerProfile";
@@ -338,22 +337,9 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
 }
 
 /**
- * Automatically sync evaluated proficiency level to reminder pop-up settings
- * so exercises appearing in pop-ups are always strictly calibrated to current level.
+ * Deprecated: Pop-up grammar review is now automatically managed by studied lessons in Grammar Hub.
+ * Kept for backward compatibility.
  */
-export function syncProficiencyWithReminderSettings(level: GrammarLevel): void {
-  try {
-    // Configure pop-up to focus on current level plus foundational level if not A1
-    const levelsToInclude: GrammarLevel[] = [level];
-    if (level === "A2") levelsToInclude.unshift("A1");
-    if (level === "B1") levelsToInclude.unshift("A2");
-    if (level === "B2") levelsToInclude.unshift("B1");
-    if (level === "C1") levelsToInclude.unshift("B2");
-
-    saveReminderSettings({
-      grammarLevels: levelsToInclude,
-    });
-  } catch (err) {
-    console.warn("Failed to sync proficiency with reminder settings:", err);
-  }
+export function syncProficiencyWithReminderSettings(_level: GrammarLevel): void {
+  // No-op: grammar is automatically interleaved based on studied lessons
 }
