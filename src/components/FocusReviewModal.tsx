@@ -562,7 +562,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setSettings(currentSettings);
 
       const targetCount = Math.max(3, currentSettings.wordsPerSession || 3);
-      const includeGrammar = currentSettings.includeGrammar ?? true;
+      const includeGrammar = true; // Automatically interleave grammar questions when studied lessons exist
 
       // New words of the chosen levels enter the deck's buffer before the due words are read
       await topUpNewWords().catch(() => {});
@@ -574,7 +574,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       const [dueWordsRaw, allWordsRaw, grammarCandidates, catalogDistractors, newToday] = await Promise.all([
         getDueWords().catch(() => [] as WordDetail[]),
         getAllWords().catch(() => [] as WordDetail[]),
-        includeGrammar ? getGrammarExercisesForReview(undefined, targetCount).catch(() => []) : Promise.resolve([]),
+        getGrammarExercisesForReview(targetCount).catch(() => []),
         loadCatalogDistractors(getStudyLevels(), 600).catch(() => [] as WordDetail[]),
         getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 })),
       ]);

@@ -14,33 +14,33 @@ interface LetterTilesExerciseProps {
 }
 
 /** Characters placed automatically (the learner only builds the letters) */
-const FIXED = /[\s\-'’.]/;
-/** Extra letters that are not in the word, so the last tile is never a give-away */
-const EXTRA_POOL = "etaoinsrhldcumpbgk";
+export const FIXED = /[\s\-'’.,/()]/;
 
-interface Tile {
+export interface Tile {
   id: number;
   ch: string;
 }
 
-function buildTiles(target: string, random: () => number = Math.random): Tile[] {
+export function buildTiles(target: string, random: () => number = Math.random): Tile[] {
   const letters = [...target.toLowerCase()].filter((c) => !FIXED.test(c));
-  const extras = [...EXTRA_POOL].filter((c) => !letters.includes(c)).sort(() => random() - 0.5).slice(0, 2);
-  const all = [...letters, ...extras].map((ch, id) => ({ id, ch }));
+  const all = letters.map((ch, id) => ({ id, ch }));
   // Fisher-Yates, then make sure the tiles do not already spell the word in order
   for (let i = all.length - 1; i > 0; i--) {
     const j = Math.floor(random() * (i + 1));
     [all[i], all[j]] = [all[j], all[i]];
   }
-  if (all.slice(0, letters.length).map((t) => t.ch).join("") === letters.join("") && all.length > 1) {
-    [all[0], all[all.length - 1]] = [all[all.length - 1], all[0]];
+  if (all.map((t) => t.ch).join("") === letters.join("") && all.length > 1) {
+    const diffIdx = all.findIndex((t, idx) => idx > 0 && t.ch !== all[0].ch);
+    if (diffIdx > 0) {
+      [all[0], all[diffIdx]] = [all[diffIdx], all[0]];
+    }
   }
   return all;
 }
 
 /**
  * First step of the recall ladder (see selectExerciseType): the Vietnamese meaning is shown, the learner
- * builds the English word from shuffled letters (plus two extra ones). Easier than typing from scratch,
+ * builds the English word from shuffled letters of that word. Easier than typing from scratch,
  * so a beginner can start producing words without failing on every spelling detail.
  */
 export default function LetterTilesExercise({ word, onComplete, onSpeak }: LetterTilesExerciseProps) {
@@ -53,6 +53,20 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
   const [state, setState] = useState<"building" | "wrong" | "correct">("building");
   const doneRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setTiles(buildTiles(target));
+    setPicked([]);
+    setWrongAttempts(0);
+    setHint(false);
+    setState("building");
+    doneRef.current = false;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  }, [target]);
+
   useEffect(() => () => {
     if (timerRef.current) clearTimeout(timerRef.current);
   }, []);
