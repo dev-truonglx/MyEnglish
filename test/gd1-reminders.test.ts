@@ -173,4 +173,14 @@ describe("reminder tick", () => {
     await worker.tick();
     expect(shown()).toBe(true);
   });
+
+  it("due_then_random triggers reminders for practice even when 0 words are due", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-05T10:00:00"));
+    const { worker, srs, id } = await setup({ triggerCondition: "due_then_random" });
+    // Graduate the word far in the future so work.total is 0
+    await srs.recordReview(id, srs.Rating.Easy);
+    await worker.tick();
+    expect(shown()).toBe(true);
+  });
 });

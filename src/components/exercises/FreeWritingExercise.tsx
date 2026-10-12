@@ -96,7 +96,15 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
         maxLength={300}
         rows={3}
         autoFocus
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
         spellCheck={false}
+        data-gramm="false"
+        data-enable-grammarly="false"
+        data-lpignore="true"
+        data-1p-ignore="true"
+        data-form-type="other"
         placeholder="Một câu ngắn là đủ. Ví dụ: I fixed a bug today."
         className="w-full px-4 py-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm text-slate-900 dark:text-white focus:outline-none focus:border-violet-500"
       />

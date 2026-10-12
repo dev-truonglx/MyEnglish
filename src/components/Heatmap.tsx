@@ -216,7 +216,7 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
 
         {/* Goal Edit Inline Form */}
         {isEditingGoal && (
-          <form onSubmit={handleSaveGoal} className="pt-2 flex items-center gap-2 text-xs">
+          <form onSubmit={handleSaveGoal} autoComplete="off" className="pt-2 flex items-center gap-2 text-xs">
             <span className="text-slate-600 dark:text-zinc-400">Đặt mục tiêu số câu/ngày:</span>
             <input
               type="number"
@@ -224,6 +224,15 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
               max="100"
               value={goalInput}
               onChange={(e) => setGoalInput(e.target.value)}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-gramm="false"
+              data-enable-grammarly="false"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               className="w-16 px-2 py-1 rounded bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
             />
             <button

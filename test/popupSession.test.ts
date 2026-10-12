@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Rating } from "ts-fsrs";
-import { buildPopupChoices, needsIntro, popupAnswerRating } from "@/services/popupSession";
+import { buildPopupChoices, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
 import { toCard } from "@/services/cards";
 import { generateMultipleChoiceQuestion, selectExerciseType } from "@/services/smartReview";
 import {
@@ -111,3 +111,26 @@ describe("#6 ignored reminders back off", () => {
     expect(snoozeIgnoredNudge()).toBe(30);
   });
 });
+
+describe("#7 smart popup exercise mode ladder", () => {
+  it("gives letter_tiles to brand new words", () => {
+    const fresh = makeWord("fresh");
+    expect(selectSmartPopupMode(fresh)).toBe("letter_tiles");
+  });
+
+  it("gives letter_tiles to words with only 1 rep or low stability (< 2 days)", () => {
+    const young = makeWord("young", { srs: reviewSrs(1, 1) });
+    expect(selectSmartPopupMode(young)).toBe("letter_tiles");
+  });
+
+  it("gives typing recall to practiced words with stability >= 2 days and reps > 1", () => {
+    const mature = makeWord("mature", { srs: reviewSrs(5, 3) });
+    expect(selectSmartPopupMode(mature)).toBe("typing");
+  });
+
+  it("falls back to letter_tiles for leeches with low stability", () => {
+    const leech = makeWord("leech", { srs: reviewSrs(1, 4, { lapses: 5 }) });
+    expect(selectSmartPopupMode(leech)).toBe("letter_tiles");
+  });
+});
+

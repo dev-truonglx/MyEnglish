@@ -104,6 +104,8 @@ export default function ClozeCard({
                   data-gramm="false"
                   data-enable-grammarly="false"
                   data-lpignore="true"
+                  data-1p-ignore="true"
+                  data-form-type="other"
                   placeholder={lengthRevealed ? `Gõ từ còn thiếu (${answerForm.length} ký tự) và nhấn Enter ↵` : "Gõ từ còn thiếu và nhấn Enter ↵"}
                   className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-xl px-4 py-3 text-base font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-wide shadow-sm transition-all ${
                     isCorrect

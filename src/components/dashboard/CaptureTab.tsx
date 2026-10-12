@@ -71,7 +71,7 @@ export default function CaptureTab({
       </div>
 
       {/* Input Card */}
-      <form onSubmit={handleCaptureSubmit} className="space-y-4">
+      <form onSubmit={handleCaptureSubmit} autoComplete="off" className="space-y-4">
         <div className="rounded-2xl border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2.5 md:p-3 shadow-xl shadow-slate-200/50 dark:shadow-cyan-950/30 backdrop-blur-md flex items-center gap-3 transition-all focus-within:border-cyan-500 focus-within:ring-2 focus-within:ring-cyan-500/20">
           <div className="w-9 h-9 rounded-xl bg-cyan-500/10 dark:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center shrink-0">
             <Terminal className="w-4 h-4" />
@@ -83,6 +83,15 @@ export default function CaptureTab({
             placeholder="Nhập từ tiếng Anh (e.g. idempotent, telemetry, volatile, sanitize)..."
             className="flex-1 bg-transparent px-1 py-2 text-sm md:text-base text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none font-mono"
             autoFocus
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            data-gramm="false"
+            data-enable-grammarly="false"
+            data-lpignore="true"
+            data-1p-ignore="true"
+            data-form-type="other"
           />
           <button
             type="submit"

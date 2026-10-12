@@ -30,7 +30,7 @@ import {
 import { getGrammarExercisesForReview } from "@/services/grammarService";
 import { recordGrammarAnswer as recordBookGrammarAnswer, type SessionEntry } from "@/services/grammarSession";
 import type { WordDetail, ReviewCard } from "@/types/database";
-import { practiceCards } from "@/services/cards";
+import { directionForExercise, practiceCards } from "@/services/cards";
 import {
   getRecentIntros,
   postponeNewCard,
@@ -39,7 +39,7 @@ import {
   markWordKnown,
   schedulingDecision,
 } from "@/services/reviewRecorder";
-import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating } from "@/services/popupSession";
+import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
 import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors, loadCatalogMeanings } from "@/services/vocabCatalog";
 import { parseTerms } from "@/types/database";
@@ -68,7 +68,6 @@ import {
   summarizeTodayWork,
   loadTypicalResponseTimes,
   matchTypedAnswer,
-  selectExerciseType,
   formInSentence,
   maskAllWordForms,
   needsRelearnIntro,
@@ -337,16 +336,26 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   ): Promise<Celebration | null> => {
     const responseTimeMs = Date.now() - itemStartRef.current;
     const rating = popupAnswerRating(correct, exerciseType, responseTimeMs, nearMiss, synonymTriedRef.current);
-    const cardKey = `${word.id}:${word.direction}`;
+    const targetDirection = directionForExercise(exerciseType);
+    const cardToGrade: ReviewCard =
+      word.direction === targetDirection
+        ? word
+        : {
+            ...word,
+            direction: targetDirection,
+            srs: word.srsProduction ?? word.srs,
+            srsRecognition: word.srsRecognition ?? word.srs,
+          };
+    const cardKey = `${cardToGrade.id}:${cardToGrade.direction}`;
     const decision = schedulingDecision({
-      card: word,
+      card: cardToGrade,
       exerciseType,
       alreadyGraded: scheduledThisSessionRef.current.has(cardKey),
       introducedAt: introducedAtRef.current.get(cardKey) ?? null,
     });
     if (decision.scheduled) scheduledThisSessionRef.current.add(cardKey);
     const recorded = await recordCardAnswer({
-      card: word,
+      card: cardToGrade,
       exerciseType,
       rating,
       wrongAttempts: correct ? 0 : 1,
@@ -357,7 +366,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     let nextReview = recorded.result?.nextReviewDate ?? null;
     if (decision.reason === "intro_too_recent") {
       // Quizzed right after its introduction: the first graded review comes in a later session
-      nextReview = await postponeNewCard(word.id, word.direction).catch(() => null);
+      nextReview = await postponeNewCard(word.id, cardToGrade.direction).catch(() => null);
     }
     // Graded elsewhere since the queue was built: practice, already counted where it was graded. The note is
     // only shown while this card is still on screen (Enter may have moved on before the answer was saved).
@@ -368,7 +377,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       scheduledAnswersRef.current++;
       if (correct && rating >= Rating.Good) recordFirstTryCorrect();
     }
-    const praise = celebrationFor({ ...recorded, direction: word.direction, word: word.word });
+    const praise = celebrationFor({ ...recorded, direction: cardToGrade.direction, word: word.word });
     noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, praise?.kind ?? null, !gradedElsewhere);
     return praise;
   };
@@ -600,9 +609,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       // Nothing due: weakest studied words first (practice only). Practice only uses words already studied:
       // a waiting word needs its introduction.
       const studiedWords = allWords.filter((w) => (w.srs?.reps ?? 0) > 0);
-      let selectedWords: ReviewCard[] = dueCards.slice(0, wordTarget);
-      if (selectedWords.length === 0) {
-        selectedWords = practiceCards(smartSortReviewQueue(studiedWords).slice(0, wordTarget));
+      let selectedWords: ReviewCard[] = [];
+
+      if (currentSettings.triggerCondition === "all_words" && studiedWords.length > 0) {
+        const shuffled = [...studiedWords].sort(() => 0.5 - Math.random());
+        selectedWords = practiceCards(shuffled.slice(0, wordTarget));
+      } else {
+        selectedWords = dueCards.slice(0, wordTarget);
+        if (selectedWords.length === 0) {
+          selectedWords = practiceCards(smartSortReviewQueue(studiedWords).slice(0, wordTarget));
+        }
       }
 
       // Bổ sung thêm từ nếu chưa đủ wordTarget
@@ -759,17 +775,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     if (currentItem.kind === "word") {
       const wordObj = currentItem.word;
-      // The card decides the question: recognition cards are picked among options; recall cards follow the
-      // same ladder as flashcards (young: build the word from letters, then type it)
-      setActiveMode(
-        wordObj.direction !== "production"
-          ? "multiple_choice"
-          : selectExerciseType(wordObj) === "letter_tiles"
-            ? "letter_tiles"
-            : "typing"
-      );
+      // Chế độ thông minh (Smart mode): Thang bậc ghi nhớ Active Recall
+      // - Từ mới hoặc mới ôn tập 1-2 lần (reps <= 1 hoặc stability < 2): Ghép ô chữ cái (Letter tiles)
+      // - Từ đã quen hơn (reps > 1 và stability >= 2): Gõ từ tiếng Anh theo nghĩa tiếng Việt (Typing recall)
+      const smartMode = selectSmartPopupMode(wordObj);
+      setActiveMode(smartMode);
 
-      // 4 English options; the deck was already loaded with the queue
+      // Nạp danh sách options dự phòng (cho trường hợp trắc nghiệm hoặc gợi ý)
       const pool = allWordsRef.current.length > 0 ? Promise.resolve(allWordsRef.current) : getAllWords();
       pool.then((all) => {
         if (cancelled) return;
@@ -957,6 +969,23 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         }
       } catch (err) {
         console.warn("Failed to record grammar typing review:", err);
+      }
+    }
+  };
+
+  // Xử lý khi user chọn "Không nhớ" trong bài tập gõ từ
+  const handleDontRemember = async () => {
+    if (isAnswered || !currentItem) return;
+    if (currentItem.kind === "word") {
+      const wordObj = currentItem.word;
+      setIsAnswered(true);
+      setIsCorrect(false);
+      try {
+        await gradeWord(wordObj, false, "spelling");
+        setFeedbackMsg(`Từ chính xác là: "${wordObj.word}". Hãy ghi nhớ để thử lại nhé!`);
+        requeueItem(currentItem);
+      } catch (err) {
+        console.warn("Failed to record 'don't remember' review:", err);
       }
     }
   };
@@ -1453,7 +1482,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
               {/* Gõ từ vựng */}
               {activeMode === "typing" && currentWord && (
-                <form onSubmit={handleTypingSubmit} className="space-y-3.5 pt-1">
+                <form onSubmit={handleTypingSubmit} autoComplete="off" className="space-y-3.5 pt-1">
                   <div className="space-y-1.5">
                     <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
                       <span>Nhập từ tiếng Anh tương ứng:</span>
@@ -1477,6 +1506,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         data-gramm="false"
                         data-enable-grammarly="false"
                         data-lpignore="true"
+                        data-1p-ignore="true"
+                        data-form-type="other"
                         value={typedInput}
                         onChange={(e) => setTypedInput(e.target.value)}
                         placeholder="Gõ từ tiếng Anh vào đây..."
@@ -1486,13 +1517,25 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   </div>
 
                   {!isAnswered ? (
-                    <button
-                      type="submit"
-                      disabled={!typedInput.trim()}
-                      className="w-full py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-sm shadow-cyan-600/20"
-                    >
-                      Kiểm tra đáp án (Enter)
-                    </button>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="submit"
+                        disabled={!typedInput.trim()}
+                        className="flex-1 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-40 text-white text-xs font-bold transition-all shadow-sm shadow-cyan-600/20"
+                      >
+                        Kiểm tra đáp án (Enter)
+                      </button>
+                      {currentItem.kind === "word" && (
+                        <button
+                          type="button"
+                          onClick={handleDontRemember}
+                          className="px-4 py-3 rounded-xl border border-slate-200 dark:border-zinc-800 text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 text-xs font-semibold transition-all shrink-0"
+                          title="Xem đáp án và học lại từ này"
+                        >
+                          Không nhớ
+                        </button>
+                      )}
+                    </div>
                   ) : null}
                 </form>
               )}
@@ -1714,7 +1757,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
                 {/* Gõ đáp án ngữ pháp (chia động từ / điền vào chỗ trống) */}
                 {activeMode === "typing" && (
-                  <form onSubmit={handleTypingSubmit} className="space-y-3.5 pt-1">
+                  <form onSubmit={handleTypingSubmit} autoComplete="off" className="space-y-3.5 pt-1">
                     <div className="space-y-1.5">
                       <div className="flex justify-between items-center text-xs font-semibold text-slate-600 dark:text-zinc-400">
                         <span>Nhập đáp án hoặc dạng đúng của từ:</span>
@@ -1740,6 +1783,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                           data-gramm="false"
                           data-enable-grammarly="false"
                           data-lpignore="true"
+                          data-1p-ignore="true"
+                          data-form-type="other"
                           value={typedInput}
                           onChange={(e) => setTypedInput(e.target.value)}
                           placeholder="Nhập từ hoặc đáp án chính xác..."

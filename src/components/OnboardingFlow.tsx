@@ -11,6 +11,7 @@ import {
   type LevelChoice,
 } from "@/services/onboarding";
 import { ANCHOR_TIMES, type ReminderAnchor } from "@/services/reminderMoments";
+import type { ReminderTrigger } from "@/services/reminderSettings";
 import { DEFAULT_INITIAL_TENSE_IDS, saveInitialTenses } from "@/services/grammarPath";
 import TenseSelectionPicker from "./grammar/TenseSelectionPicker";
 import PlacementTest from "./PlacementTest";
@@ -53,6 +54,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const [selectedTenses, setSelectedTenses] = useState<string[]>([...DEFAULT_INITIAL_TENSE_IDS]);
   const [minutes, setMinutes] = useState<DailyMinutes>(10);
   const [reminders, setReminders] = useState(true);
+  const [triggerCondition, setTriggerCondition] = useState<ReminderTrigger>("due_only");
   const [anchors, setAnchors] = useState<ReminderAnchor[]>(["after_lunch"]);
   const [transitions, setTransitions] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -72,7 +74,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
     setError(null);
     try {
       if (level) applyLevelChoice(level);
-      applyDailyPlan(minutes, reminders, { anchors, transitions });
+      applyDailyPlan(minutes, reminders, { anchors, transitions }, triggerCondition);
       setStudyLevels(studyLevels);
       saveInitialTenses(selectedTenses);
       await topUpNewWords();
@@ -259,8 +261,55 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
                     <input type="checkbox" checked={transitions} onChange={(e) => setTransitions(e.target.checked)} className="accent-cyan-600" />
                     Lúc mở máy buổi sáng, hoặc vừa xong cuộc họp
                   </label>
+
+                  <div className="pt-2 border-t border-slate-100 dark:border-zinc-800/80 space-y-2">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-zinc-300 block">
+                      Điều kiện kích hoạt hiển thị:
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setTriggerCondition("due_only")}
+                        className={`p-2.5 rounded-xl border text-left flex flex-col gap-0.5 transition-all ${
+                          triggerCondition === "due_only"
+                            ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                            : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">Chỉ khi có từ đến hạn</span>
+                        <span className="text-[10px] opacity-75">Tôn trọng chu kỳ FSRS, hết từ thì dừng nhắc</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTriggerCondition("due_then_random")}
+                        className={`p-2.5 rounded-xl border text-left flex flex-col gap-0.5 transition-all ${
+                          triggerCondition === "due_then_random"
+                            ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                            : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">Đến hạn → Hết thì ngẫu nhiên</span>
+                        <span className="text-[10px] opacity-75">Ưu tiên từ đến hạn, hết thì ôn thêm</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setTriggerCondition("all_words")}
+                        className={`p-2.5 rounded-xl border text-left flex flex-col gap-0.5 transition-all ${
+                          triggerCondition === "all_words"
+                            ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                            : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                        }`}
+                      >
+                        <span className="text-xs font-bold">Luôn nhắc ngẫu nhiên</span>
+                        <span className="text-[10px] opacity-75">Duy trì phản xạ từ vựng liên tục</span>
+                      </button>
+                    </div>
+                  </div>
+
                   <p className="text-xs text-slate-500 dark:text-zinc-500">
-                    Một thẻ nhỏ ở góc màn hình, không chiếm bàn phím. Không nhắc ban đêm, không nhắc khi đã xong mục tiêu ngày.
+                    Một thẻ nhỏ ở góc màn hình, không chiếm bàn phím. Không nhắc ban đêm.
                   </p>
                 </div>
               )}

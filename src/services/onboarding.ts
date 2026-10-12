@@ -4,7 +4,7 @@
  */
 import { saveStudyLimits } from "./srs";
 import { setDailyGoal } from "./streak";
-import { saveReminderSettings, type ReminderInterval } from "./reminderSettings";
+import { saveReminderSettings, type ReminderInterval, type ReminderTrigger } from "./reminderSettings";
 import type { ReminderAnchor } from "./reminderMoments";
 import type { GrammarLevel } from "@/types/grammar";
 import { setUserOverrideLevel, syncProficiencyWithReminderSettings } from "./userProficiency";
@@ -44,7 +44,8 @@ export interface StudyTimes {
 export function applyDailyPlan(
   minutes: DailyMinutes,
   reminders: boolean,
-  times: StudyTimes = { anchors: [], transitions: true }
+  times: StudyTimes = { anchors: [], transitions: true },
+  triggerCondition: ReminderTrigger = "due_only"
 ): DailyPlan {
   const plan = DAILY_PLANS[minutes];
   saveStudyLimits({ newCardsPerDay: plan.newCardsPerDay, maxSessionSize: plan.maxSessionSize });
@@ -55,6 +56,7 @@ export function applyDailyPlan(
     intervalMinutes: reminders ? interval : 0,
     anchors: reminders ? times.anchors : [],
     contextMoments: times.transitions,
+    triggerCondition,
   });
   return plan;
 }

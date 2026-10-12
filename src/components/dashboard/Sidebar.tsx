@@ -23,6 +23,9 @@ import {
   AudioLines,
   Layers,
   Dumbbell,
+  Bell,
+  Hourglass,
+  Clock,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import type { PipelineItem } from "@/services/pipeline";
@@ -33,11 +36,73 @@ import { getXPState, type XPState } from "@/services/smartReview";
 import { getDueGrammarLessons } from "@/services/grammarService";
 import { useWordsStore } from "@/stores/wordsStore";
 import { AI_VOCAB_ENABLED } from "@/services/features";
+import {
+  getLastPopupDisplayTime,
+  getNextReminderTime,
+  getReminderSettings,
+  isSnoozed,
+  reminderPause,
+  getNudgesShownToday,
+  triggerReviewPopup,
+  type ReminderSettings,
+} from "@/services/reminderSettings";
 import { SIMPLE_NAV_GROUPS, type DashboardTab, type LibraryStats, type NavGroupId } from "./shared";
 
 /** The Quick Input shortcut as the learner's keyboard shows it */
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const QUICK_INPUT_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
+
+export function formatDisplayTime(ms: number): string {
+  if (!ms || ms <= 0) return "Chưa có";
+  const d = new Date(ms);
+  const now = new Date();
+  const isToday =
+    d.getDate() === now.getDate() &&
+    d.getMonth() === now.getMonth() &&
+    d.getFullYear() === now.getFullYear();
+
+  const timeStr = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  if (isToday) return timeStr;
+
+  const yesterday = new Date(now);
+  yesterday.setDate(now.getDate() - 1);
+  const isYesterday =
+    d.getDate() === yesterday.getDate() &&
+    d.getMonth() === yesterday.getMonth() &&
+    d.getFullYear() === yesterday.getFullYear();
+
+  const shortTime = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
+  if (isYesterday) return `Hôm qua ${shortTime}`;
+  return `${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })} ${shortTime}`;
+}
+
+export function formatCountdown(totalSec: number): string {
+  if (totalSec <= 0) return "Đến giờ!";
+  if (totalSec < 60) return `${totalSec}s`;
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  if (m < 60) {
+    return s > 0 ? `${m}m ${s < 10 ? "0" : ""}${s}s` : `${m}m`;
+  }
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
+}
+
+export function getPauseReason(settings: ReminderSettings, goalMet: boolean): string | null {
+  if (isSnoozed()) {
+    return "Đang hoãn";
+  }
+  const pause = reminderPause(settings, {
+    hour: new Date().getHours(),
+    goalReached: goalMet,
+    shownToday: getNudgesShownToday(),
+  });
+  if (pause === "night") return "Nghỉ ban đêm";
+  if (pause === "goal_reached") return "Đã xong mục tiêu";
+  if (pause === "daily_cap") return "Đủ số lần hôm nay";
+  return null;
+}
 
 interface SidebarProps {
   activeTab: DashboardTab;
@@ -66,6 +131,13 @@ export default function Sidebar({
   const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const [xpState, setXpState] = useState<XPState>(getXPState);
+
+  // Realtime Popup Reminder status & countdown
+  const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(getReminderSettings);
+  const [lastDisplayMs, setLastDisplayMs] = useState<number>(getLastPopupDisplayTime);
+  const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime);
+  const [now, setNow] = useState<number>(() => Date.now());
+  const [testingPopup, setTestingPopup] = useState(false);
 
   const {
     status: updateStatus,
@@ -108,6 +180,46 @@ export default function Sidebar({
     };
     window.addEventListener("myenglish-theme-changed", onThemeChanged);
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
+  }, []);
+
+  useEffect(() => {
+    const syncReminder = () => {
+      setReminderSettings(getReminderSettings());
+      setLastDisplayMs(getLastPopupDisplayTime());
+      setNextReminderMs(getNextReminderTime());
+    };
+    syncReminder();
+
+    window.addEventListener("myenglish-reminder-settings-updated", syncReminder);
+    window.addEventListener("myenglish-popup-displayed", syncReminder);
+
+    const secondTimer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        setNow(Date.now());
+      }
+    }, 1000);
+
+    const syncTimer = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        syncReminder();
+      }
+    }, 5000);
+
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        setNow(Date.now());
+        syncReminder();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+
+    return () => {
+      window.removeEventListener("myenglish-reminder-settings-updated", syncReminder);
+      window.removeEventListener("myenglish-popup-displayed", syncReminder);
+      document.removeEventListener("visibilitychange", onVisible);
+      clearInterval(secondTimer);
+      clearInterval(syncTimer);
+    };
   }, []);
 
   const countBadge = (n: number, highlight = false) =>
@@ -437,6 +549,136 @@ export default function Sidebar({
             )}
           </div>
         </button>
+
+        {/* Realtime Popup reminder status widget */}
+        {(() => {
+          const isReminderEnabled = reminderSettings.enabled && reminderSettings.intervalMinutes > 0;
+          const snoozed = isSnoozed();
+          const pauseReason = isReminderEnabled && !snoozed ? getPauseReason(reminderSettings, Boolean(streakStats.goalReached)) : null;
+          const remainingSeconds = Math.max(0, Math.ceil((nextReminderMs - now) / 1000));
+
+          let statusBadge: ReactNode;
+          if (!isReminderEnabled) {
+            statusBadge = (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">
+                Tắt
+              </span>
+            );
+          } else if (snoozed) {
+            statusBadge = (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800/60">
+                <Hourglass className="w-2.5 h-2.5 animate-spin" />
+                Hoãn
+              </span>
+            );
+          } else if (pauseReason) {
+            statusBadge = (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800/60">
+                Tạm dừng
+              </span>
+            );
+          } else {
+            statusBadge = (
+              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                Bật
+              </span>
+            );
+          }
+
+          return (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => setActiveTab("guide")}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setActiveTab("guide");
+                }
+              }}
+              title={`Nhắc nhở Pop-up ôn tập${isReminderEnabled ? ` (chu kỳ ${reminderSettings.intervalMinutes} phút)` : " (Đang tắt)"} • Bấm để mở Cài đặt`}
+              className="w-full text-left rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 hover:bg-slate-50 dark:hover:bg-zinc-800/50 p-2.5 space-y-2 shadow-sm transition-colors group cursor-pointer"
+            >
+              {/* Header row */}
+              <div className="flex items-center justify-between gap-1.5">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Bell
+                    className={`w-3.5 h-3.5 shrink-0 ${
+                      !isReminderEnabled || pauseReason
+                        ? "text-slate-400 dark:text-zinc-500"
+                        : "text-cyan-600 dark:text-cyan-400"
+                    }`}
+                  />
+                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 truncate">
+                    Nhắc nhở Pop-up
+                  </span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {statusBadge}
+                  <button
+                    type="button"
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setTestingPopup(true);
+                      try {
+                        await triggerReviewPopup();
+                      } finally {
+                        setTimeout(() => setTestingPopup(false), 800);
+                      }
+                    }}
+                    disabled={testingPopup}
+                    title="Bật pop-up ngay bây giờ để thử"
+                    className="p-1 rounded-md text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-950/60 transition-colors cursor-pointer"
+                  >
+                    <Sparkles className={`w-3 h-3 ${testingPopup ? "animate-spin text-cyan-600" : ""}`} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Next reminder row */}
+              <div className="flex items-center justify-between text-xs gap-1.5">
+                <span className="text-slate-500 dark:text-zinc-400 text-[11px] shrink-0">Lần tới:</span>
+                {!isReminderEnabled ? (
+                  <span className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">Chỉ mở thủ công</span>
+                ) : pauseReason ? (
+                  <span
+                    className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold truncate text-right"
+                    title={pauseReason}
+                  >
+                    {pauseReason}
+                  </span>
+                ) : (
+                  <div className="flex items-center gap-1.5 font-mono">
+                    <span className="font-bold text-slate-900 dark:text-zinc-100 text-[11px]">
+                      {formatDisplayTime(nextReminderMs)}
+                    </span>
+                    <span
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+                        remainingSeconds <= 60
+                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 animate-pulse"
+                          : "bg-cyan-100/80 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300"
+                      }`}
+                    >
+                      {remainingSeconds <= 0 ? "Đến giờ!" : formatCountdown(remainingSeconds)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Last display row */}
+              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 pt-1.5 border-t border-slate-100 dark:border-zinc-800/60">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-slate-400 dark:text-zinc-500 shrink-0" />
+                  <span>Lần gần nhất:</span>
+                </span>
+                <span className="font-mono font-medium text-slate-700 dark:text-zinc-300">
+                  {formatDisplayTime(lastDisplayMs)}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Quick Input & theme switcher (always visible) */}

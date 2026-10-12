@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 export type ReminderInterval = 0 | 15 | 30 | 45 | 60 | 120; // 0 = disabled, others in minutes
-export type ReminderTrigger = "due_only" | "all_words";
+export type ReminderTrigger = "due_only" | "due_then_random" | "all_words";
 export type QuizMode = "multiple_choice" | "typing" | "flashcard";
 export type SnoozeDuration = 5 | 10 | 15 | 30; // in minutes
 export type BlurOverlayLevel = "light" | "medium" | "heavy";
@@ -157,10 +157,15 @@ export function getReminderSettings(): ReminderSettings {
         ? parsed.grammarLevels
         : ["A1", "A2", "B1"];
     const includeGrammar = parsed.includeGrammar !== undefined ? Boolean(parsed.includeGrammar) : true;
+    const triggerCondition: ReminderTrigger =
+      parsed.triggerCondition === "due_then_random" || parsed.triggerCondition === "all_words"
+        ? parsed.triggerCondition
+        : "due_only";
 
     return {
       ...DEFAULT_REMINDER_SETTINGS,
       ...parsed,
+      triggerCondition,
       wordsPerSession,
       includeGrammar,
       grammarLevels,

@@ -95,6 +95,15 @@ export default function DashboardHeader({
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Tìm từ hoặc nghĩa... (nhấn / để tìm)"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           className="w-full bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 rounded-lg pl-9 pr-14 py-1.5 text-xs text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
         />
         {searchQuery ? (

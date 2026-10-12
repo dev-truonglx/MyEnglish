@@ -5,11 +5,14 @@ import "./index.css";
 import { initTheme } from "./services/theme";
 import { restoreLocalStorageFromDb, startLocalStorageBackup } from "./services/storageBackup";
 import { getInitialWindowLabel } from "./lib/windowLabel";
+import { initStrictInputGuards } from "./lib/inputGuards";
 
 import { ensureReleaseMigrationV27 } from "./services/releaseMigration";
 
 // Initialize theme (dark/light/system) before first paint
 initTheme();
+// Enforce strict raw keyboard input across all inputs in the system
+initStrictInputGuards();
 
 async function bootstrap() {
   // Restore learning progress mirrored in SQLite before services read localStorage.
