@@ -128,7 +128,7 @@ export default function Sidebar({
     // Words met so far (the words waiting to be introduced are not the learner's yet)
     {
       tab: "library",
-      label: "Sổ từ",
+      label: "Từ đã học",
       icon: BookOpen,
       badge: countBadge(
         words.filter(

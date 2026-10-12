@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Keyboard, Loader2, BookOpen, CheckCircle2, FileUp } from "lucide-react";
+import { Keyboard, Loader2 } from "lucide-react";
 import type { StudyLevel } from "@/services/vocabCatalog";
 import { defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import {
@@ -11,8 +11,8 @@ import {
   type LevelChoice,
 } from "@/services/onboarding";
 import { ANCHOR_TIMES, type ReminderAnchor } from "@/services/reminderMoments";
-import { getAllBookChapters } from "@/services/grammarBook";
-import GrammarImportDialog from "./grammar/GrammarImportDialog";
+import { DEFAULT_INITIAL_TENSE_IDS, saveInitialTenses } from "@/services/grammarPath";
+import TenseSelectionPicker from "./grammar/TenseSelectionPicker";
 import PlacementTest from "./PlacementTest";
 import { LevelPicker, mixDescription } from "./dashboard/VocabTab";
 
@@ -40,7 +40,7 @@ interface OnboardingFlowProps {
  * First run, in the order a teacher would ask:
  *  1. level (quick adaptive test, or pick one; "mất gốc" = A0)
  *  2. vocabulary levels: the Oxford deck from A1, mixed with the next levels up to the learner's own
- *  3. grammar: the learner's own grammar book, imported from JSON files (optional, can be done later)
+ *  3. starting tenses: choose which tenses to learn first (default: Present Simple)
  *  4. minutes per day and WHEN to study
  * then the first session right away.
  */
@@ -50,9 +50,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const [level, setLevel] = useState<LevelChoice | null>(null);
   const [placementOpen, setPlacementOpen] = useState(false);
   const [placementDone, setPlacementDone] = useState(false);
-  const [grammarModalOpen, setGrammarModalOpen] = useState(false);
-  const [grammarStatus, setGrammarStatus] = useState<string | null>(null);
-  const [grammarSuccess, setGrammarSuccess] = useState(false);
+  const [selectedTenses, setSelectedTenses] = useState<string[]>([...DEFAULT_INITIAL_TENSE_IDS]);
   const [minutes, setMinutes] = useState<DailyMinutes>(10);
   const [reminders, setReminders] = useState(true);
   const [anchors, setAnchors] = useState<ReminderAnchor[]>(["after_lunch"]);
@@ -69,18 +67,6 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
     setStep(2);
   };
 
-  // After an import: say how much of the book is now in the app
-  const handleGrammarImported = async () => {
-    setGrammarSuccess(true);
-    try {
-      const chapters = await getAllBookChapters();
-      const lessons = chapters.reduce((n, c) => n + (c.lessons?.length ?? 0), 0);
-      setGrammarStatus(`Đã có ${chapters.length} chương, ${lessons} bài ngữ pháp trong app.`);
-    } catch {
-      setGrammarStatus("Đã nhập dữ liệu sách ngữ pháp.");
-    }
-  };
-
   const finish = async (startNow: boolean) => {
     setBusy(true);
     setError(null);
@@ -88,6 +74,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
       if (level) applyLevelChoice(level);
       applyDailyPlan(minutes, reminders, { anchors, transitions });
       setStudyLevels(studyLevels);
+      saveInitialTenses(selectedTenses);
       await topUpNewWords();
       markOnboardingDone();
       onFinish(startNow);
@@ -98,9 +85,10 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   };
 
   const skipAll = async () => {
-    // Defaults: A1 words, 10 minutes a day
+    // Defaults: A1 words, 10 minutes a day, Present Simple tense
     setStudyLevels(["A1"]);
     applyDailyPlan(10, reminders, { anchors, transitions });
+    saveInitialTenses([...DEFAULT_INITIAL_TENSE_IDS]);
     await topUpNewWords().catch(() => {});
     markOnboardingDone();
     onFinish(false);
@@ -204,47 +192,13 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
         {step === 3 && (
           <div className="space-y-4">
             <div className="space-y-1">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Ngữ pháp theo sách của bạn</h2>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Chọn thì bạn muốn bắt đầu học</h2>
               <p className="text-sm text-slate-500 dark:text-zinc-400">
-                Dữ liệu ngữ pháp lấy từ chính cuốn sách của bạn: chuyển các chương sang file JSON (prompt có sẵn trong tab Ngữ pháp), rồi nhập vào đây. File chỉ lưu trên máy này. Chưa có thì để sau cũng được.
+                Mặc định là <b>Thì hiện tại đơn</b> — khởi đầu lý tưởng cho người mất gốc để xây chắc nền tảng mà không bị ngợp. Bạn có thể tích chọn thêm nhiều thì nếu muốn, và luôn có thể đổi lại trong tab Ngữ pháp sau này.
               </p>
             </div>
 
-            <div className="space-y-3">
-              <button
-                onClick={() => setGrammarModalOpen(true)}
-                className="w-full p-4 rounded-xl border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-500/10 text-left flex items-start gap-3.5 hover:bg-cyan-100 dark:hover:bg-cyan-500/20 transition-colors"
-              >
-                <div className="p-2 rounded-lg bg-cyan-600 text-white shrink-0">
-                  <FileUp className="w-5 h-5" />
-                </div>
-                <div className="min-w-0">
-                  <span className="block text-sm font-semibold text-cyan-900 dark:text-cyan-200">
-                    {grammarSuccess ? "Nhập thêm file" : "Nhập dữ liệu sách"}
-                  </span>
-                  <span className="block text-xs text-cyan-700/80 dark:text-cyan-300/80 mt-0.5">
-                    Chọn các file .json đã chuyển từ sách; app kiểm tra rồi mới nhập
-                  </span>
-                </div>
-              </button>
-
-              {grammarStatus && (
-                <div
-                  className={`flex items-center gap-2 p-3 rounded-xl text-xs ${
-                    grammarSuccess
-                      ? "bg-emerald-50 dark:bg-emerald-500/10 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800"
-                      : "bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800"
-                  }`}
-                >
-                  {grammarSuccess ? (
-                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-                  ) : (
-                    <BookOpen className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  )}
-                  <span>{grammarStatus}</span>
-                </div>
-              )}
-            </div>
+            <TenseSelectionPicker value={selectedTenses} onChange={setSelectedTenses} />
 
             <div className="flex items-center justify-between pt-1">
               <button
@@ -253,22 +207,13 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
               >
                 Quay lại
               </button>
-              <div className="flex items-center gap-3">
-                {!grammarSuccess && (
-                  <button
-                    onClick={() => setStep(4)}
-                    className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-                  >
-                    Để sau
-                  </button>
-                )}
-                <button
-                  onClick={() => setStep(4)}
-                  className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold"
-                >
-                  Tiếp
-                </button>
-              </div>
+              <button
+                onClick={() => setStep(4)}
+                disabled={selectedTenses.length === 0}
+                className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-40"
+              >
+                Tiếp
+              </button>
             </div>
           </div>
         )}
@@ -357,14 +302,6 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             setLevel(choice);
             setPlacementDone(true);
           }}
-        />
-      )}
-
-      {grammarModalOpen && (
-        <GrammarImportDialog
-          isOpen={grammarModalOpen}
-          onClose={() => setGrammarModalOpen(false)}
-          onImportComplete={() => void handleGrammarImported()}
         />
       )}
     </div>

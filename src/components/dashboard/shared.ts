@@ -59,7 +59,7 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
     label: "Từ vựng",
     tabs: [
       { tab: "review", label: "Ôn tập" },
-      { tab: "library", label: "Sổ từ" },
+      { tab: "library", label: "Từ đã học" },
       { tab: "capture", label: AI_VOCAB_ENABLED ? "Thêm từ bằng AI" : "Lộ trình từ vựng" },
     ],
   },

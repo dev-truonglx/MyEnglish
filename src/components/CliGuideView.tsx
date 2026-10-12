@@ -1,5 +1,6 @@
 import DisplaySettings from "./dashboard/DisplaySettings";
 import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
+import ResetAppDataModal from "./dashboard/ResetAppDataModal";
 import Jargon from "./Jargon";
 import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
 import { ANCHOR_TIMES, getQuietHours, type ReminderAnchor } from "@/services/reminderMoments";
@@ -28,6 +29,8 @@ import {
   Sparkles,
   GraduationCap,
   Power,
+  RotateCcw,
+  AlertTriangle,
 } from "lucide-react";
 import {
   getSavedAutostartPreference,
@@ -107,6 +110,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [lastDisplayMs, setLastDisplayMs] = useState<number>(getLastPopupDisplayTime());
   const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime());
   const [goalMet, setGoalMet] = useState<boolean>(isDailyGoalMet);
+  const [showResetModal, setShowResetModal] = useState(false);
 
   const formatDisplayTime = (ms: number) => {
     if (!ms || ms <= 0) return "Chưa từng hiển thị";
@@ -1582,7 +1586,42 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         </div>
       </section>
 
-      {/* 4. CÔNG CỤ CHO NHÀ PHÁT TRIỂN: thu gọn, người học không cần dùng */}
+      {/* 4. QUẢN LÝ DỮ LIỆU & ĐẶT LẠI */}
+      <section className="space-y-3">
+        <div className="flex items-center gap-2">
+          <RotateCcw className="w-5 h-5 text-rose-600 dark:text-rose-400" />
+          <h2 className="text-base font-bold text-slate-900 dark:text-white">
+            4. Quản lý dữ liệu & Đặt lại ứng dụng
+          </h2>
+        </div>
+        <p className="text-xs text-slate-500 dark:text-zinc-400">
+          Xóa toàn bộ quá trình học để bắt đầu lại từ đầu như một bản cài đặt mới, hoặc nạp lại dữ liệu gốc.
+        </p>
+
+        <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div className="space-y-1 max-w-xl">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-500" />
+                <span>Đặt lại ứng dụng từ đầu (Reset Data)</span>
+              </h3>
+              <p className="text-xs text-slate-600 dark:text-zinc-400 leading-relaxed">
+                Xóa toàn bộ quá trình học, lịch sử ôn tập FSRS, từ vựng cá nhân, chuỗi Streak và điểm XP.
+                Ứng dụng sẽ tự động nạp lại trọn bộ 5.000 từ vựng Oxford và 31 chương ngữ pháp, sau đó mở lại màn hình khảo sát ban đầu (chọn trình độ, thì bắt đầu học, kế hoạch mỗi ngày).
+              </p>
+            </div>
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="px-4 py-2.5 rounded-xl border border-rose-300 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2 shrink-0 transition-all shadow-sm"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>Đặt lại dữ liệu...</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      {/* 5. CÔNG CỤ CHO NHÀ PHÁT TRIỂN: thu gọn, người học không cần dùng */}
       <details className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-700 bg-slate-50/60 dark:bg-zinc-950/40 p-4">
         <summary className="cursor-pointer select-none text-xs font-bold text-slate-600 dark:text-zinc-400">
           Công cụ cho nhà phát triển (kiểm thử thông báo, tạo từ đến hạn)
@@ -1662,6 +1701,11 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
           </div>
         </div>
       </details>
+
+      <ResetAppDataModal
+        isOpen={showResetModal}
+        onClose={() => setShowResetModal(false)}
+      />
     </div>
   );
 }

@@ -281,7 +281,7 @@ export default function DashboardHeader({
       </div>
     </header>
 
-    {/* Simple mode: the tabs of the current sidebar entry (e.g. Ôn tập · Sổ từ · Lộ trình từ vựng) */}
+    {/* Simple mode: the tabs of the current sidebar entry (e.g. Ôn tập · Từ đã học · Lộ trình từ vựng) */}
     {group && subTabs && (
       <div className="h-10 shrink-0 border-b border-slate-200 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/30 px-6 flex items-center">
         <div

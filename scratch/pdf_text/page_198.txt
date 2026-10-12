@@ -1,0 +1,40 @@
+198
+Subject + Verb + Direct Object + Preposition + Indirect Object
+d.
+Ex: Tom can speak English.
+(S) (V) (O)
+e.
+Ex: She has just sent him a letter.
+(S) (V) (OI) (Od)
+♦ Direct Object (Od) : tân ngữ trực tiếp
+♦ Indirect Object (OI): tân ngữ gián tiếp
+Ex: She has just sent a letter to him.
+(S) (V) (Od) (Pre)(OI)
+♦ Một số động từ thường có 2 tân ngữ như: give, send, show, buy,...
+f.
+Ex: They named their son Tony.
+(S) (V) (O) (Co)
+g.
+Ex: He fell into the stream.
+(S) (V) (Pre) (Opre.)
+h.
+Ex: We took a taxi to Ben Thanh Market.
+(S) (V) (O) (A)
+EXERCISES
+IV. Underline and identify the subject (S), verb (V), object (O), complement (C), preposition (Pre.) and
+adjunct (A) in the following sentences.
+1. He wrote a letter.
+2. She is a pupil.
+3. She is pretty.
+4. She is reading.
+5. They are here.
+6. He was reading thoughtfully.
+7. Mrs. Brown wrote some letters to her husband.
+8. He wrote for the youth.
+9. She gave me some books.
+10. They took the class to the zoo.
+Subject + Verb + Object
+Subject + Verb + Indirect Object + Direct Object
+Subject + Verb + Object + Object Complement
+Subject + Verb + Preposition + Prepositional
+Subject + Verb + Object + Adjunct

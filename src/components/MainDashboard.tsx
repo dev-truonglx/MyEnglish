@@ -12,7 +12,10 @@ import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
-import { loadCatalogDistractors } from "@/services/vocabCatalog";
+import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
+import { ensureGrammarBookSeeded } from "@/services/grammarBook";
+import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
+import { hasChosenInitialTenses } from "@/services/grammarPath";
 import { needsVocabMigration } from "@/services/vocabReset";
 import { isSimpleMode } from "@/services/learnerProfile";
 import { countWordStatus, isRememberedLong } from "@/services/wordStatus";
@@ -45,6 +48,7 @@ const PronunciationTab = lazy(() => import("./dashboard/PronunciationTab"));
 const TodayTab = lazy(() => import("./dashboard/TodayTab"));
 const VocabTab = lazy(() => import("./dashboard/VocabTab"));
 const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
+const GrammarTenseSetupModal = lazy(() => import("./grammar/GrammarTenseSetupModal"));
 
 function TabFallback() {
   return (
@@ -202,6 +206,19 @@ export default function MainDashboard({
   };
 
   useEffect(() => {
+    ensureReleaseMigrationV27()
+      .then((wiped) => {
+        if (wiped) {
+          refreshWords();
+          setActivityVersion((v) => v + 1);
+        }
+      })
+      .catch(() => {});
+    ensureCatalogSeeded().catch(() => {});
+    ensureGrammarBookSeeded().catch(() => {});
+  }, []);
+
+  useEffect(() => {
     const onActivity = () => setActivityVersion((v) => v + 1);
     window.addEventListener("myenglish-activity-updated", onActivity);
     return () => window.removeEventListener("myenglish-activity-updated", onActivity);
@@ -297,6 +314,20 @@ export default function MainDashboard({
     setActivityVersion((v) => v + 1);
   };
 
+  // Starting tense setup for users who have not chosen initial tenses (startup on new version)
+  const [showTenseSetup, setShowTenseSetup] = useState(false);
+  useEffect(() => {
+    const onboarding = showOnboarding || shouldShowOnboarding(words.length, loading);
+    if (vocabSetupChecked && !loading && !onboarding && vocabSetup === null && !hasChosenInitialTenses()) {
+      setShowTenseSetup(true);
+    }
+  }, [vocabSetupChecked, loading, showOnboarding, vocabSetup, words.length]);
+  const handleTenseSetupDone = async () => {
+    setShowTenseSetup(false);
+    await refreshWords();
+    setActivityVersion((v) => v + 1);
+  };
+
   // Wrong options for multiple choice: the learner's words plus unseen deck words of their levels
   const [catalogDistractors, setCatalogDistractors] = useState<WordDetail[]>([]);
   useEffect(() => {
@@ -309,6 +340,7 @@ export default function MainDashboard({
 
   const handleOnboardingFinish = async (startNow: boolean) => {
     setShowOnboarding(false);
+    setShowTenseSetup(false);
     // The levels were just chosen in the first-run flow: never ask for them again right after it
     setVocabSetup((v) => (v === "levels" && hasChosenStudyLevels() ? null : v));
     await refreshWords();
@@ -1107,6 +1139,12 @@ export default function MainDashboard({
       {!showOnboarding && vocabSetup && (
         <Suspense fallback={null}>
           <VocabSetupScreen mode={vocabSetup} onDone={handleVocabSetupDone} />
+        </Suspense>
+      )}
+
+      {!showOnboarding && !vocabSetup && showTenseSetup && (
+        <Suspense fallback={null}>
+          <GrammarTenseSetupModal onDone={handleTenseSetupDone} />
         </Suspense>
       )}
 

@@ -1,0 +1,45 @@
+200
+19. don’t they? 20. does she?
+III. 1. What’s your name?
+2. How old are you?
+3. When were you born?
+4. Where were you born?
+5. What is your address?
+6. What’s the weather like in HCM City in March?
+7. How long does it take to ride to Vung Tau by motorcycle?
+8. What time is it?
+9. Whose car is it?
+10. How do you go to school?
+11. How do you speak English?
+12. Who drank my lemon juice?
+13. How much do you weigh?
+14. What’s the date?
+15. How long is it?
+16. Are you a teacher?
+17. How often do you go shopping?
+18. How long have you learnt English?
+19. Why was he absent from school?
+20. What does Mr. Pike enjoy?
+IV. 1. He /wrote /a letter.
+S V O
+2. She /is /a pupil.
+S V C
+3. She /is / pretty.
+S V C
+4. She / is reading.
+S V
+5. They /are / here.
+S V A
+6. He / was reading / thoughtfully.
+S V A
+7. Mrs Brown / wrote / some letters /to / her husband.
+S V Od pre. OI
+8. He / wrote / for / the youth.
+S V pre. Opre.
+9. She / gave / me / some books.
+S V OI Od
+10. They / took / the class / to the zoo.
+S V O A
+11. They / treated / him / badly.
+A V O A
+12. We / consider / him / the class leader.
