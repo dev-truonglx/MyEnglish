@@ -360,6 +360,15 @@ function CatalogSearch({ onChanged }: { onChanged: () => void }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Tìm trong 5.004 từ Oxford (ví dụ: deploy, meeting)…"
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           className="flex-1 bg-transparent text-sm text-slate-900 dark:text-zinc-100 focus:outline-none"
         />
       </label>

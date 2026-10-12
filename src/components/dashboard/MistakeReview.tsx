@@ -84,6 +84,7 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
           else if (ok) next(Rating.Good);
           else next(Rating.Again);
         }}
+        autoComplete="off"
         className="space-y-2"
       >
         <label className="block text-xs text-slate-600 dark:text-zinc-400">Gõ lại phần tô đỏ cho đúng:</label>
@@ -93,6 +94,15 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
           onChange={(e) => setInput(e.target.value)}
           disabled={result !== null}
           autoFocus
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
           placeholder="Cách viết đúng…"
         />

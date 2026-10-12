@@ -690,7 +690,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
                   Điều kiện kích hoạt hiển thị:
                 </span>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                   <button
                     onClick={() => handleUpdateReminder({ triggerCondition: "due_only" })}
                     className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
@@ -701,6 +701,18 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   >
                     <span className="text-xs font-bold">Chỉ khi có từ đến hạn (FSRS)</span>
                     <span className="text-[10px] opacity-75">Tôn trọng chu kỳ phân bổ khoa học</span>
+                  </button>
+
+                  <button
+                    onClick={() => handleUpdateReminder({ triggerCondition: "due_then_random" })}
+                    className={`p-2.5 rounded-xl border text-left flex flex-col gap-1 transition-all ${
+                      reminderSettings.triggerCondition === "due_then_random"
+                        ? "border-cyan-500 bg-cyan-50/60 dark:bg-cyan-950/30 text-cyan-900 dark:text-cyan-200 ring-1 ring-cyan-500"
+                        : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    <span className="text-xs font-bold">Đến hạn → Hết thì ngẫu nhiên</span>
+                    <span className="text-[10px] opacity-75">Ưu tiên đúng hạn, hết thì ôn thêm</span>
                   </button>
 
                   <button
@@ -1094,12 +1106,21 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 </button>
               )}
             </div>
-            <form onSubmit={handleSaveCustomPath} className="flex flex-col sm:flex-row items-center gap-2">
+            <form onSubmit={handleSaveCustomPath} autoComplete="off" className="flex flex-col sm:flex-row items-center gap-2">
               <input
                 type="text"
                 value={customCliPath}
                 onChange={(e) => setCustomCliPath(e.target.value)}
                 placeholder="Ví dụ: C:\Users\<tên bạn>\.gemini\antigravity-cli (hoặc C:\Users\<tên bạn>\.gemini\antigravity-cli\agy.exe)"
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+                data-gramm="false"
+                data-enable-grammarly="false"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
                 className="flex-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
               />
               <button

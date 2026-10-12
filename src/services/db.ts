@@ -276,6 +276,21 @@ export async function createGrammarBookTables(exec: (sql: string) => Promise<unk
     await exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, chapter_id TEXT, ord INTEGER, data TEXT);`);
     await exec(`CREATE INDEX IF NOT EXISTS idx_${table}_ch ON ${table}(chapter_id, ord);`);
   }
+  await exec(`
+    CREATE TABLE IF NOT EXISTS grammar_exercise_imports (
+      id TEXT PRIMARY KEY,
+      timestamp INTEGER NOT NULL,
+      chapter_id TEXT NOT NULL,
+      lesson_id TEXT,
+      title TEXT NOT NULL,
+      item_count INTEGER NOT NULL,
+      item_ids TEXT NOT NULL,
+      set_ids TEXT NOT NULL,
+      raw_json TEXT NOT NULL,
+      status TEXT DEFAULT 'active'
+    );
+  `);
+  await exec(`CREATE INDEX IF NOT EXISTS idx_grammar_imports_ch ON grammar_exercise_imports(chapter_id, timestamp);`);
 }
 
 /**

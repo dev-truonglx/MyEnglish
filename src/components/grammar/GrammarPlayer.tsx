@@ -677,6 +677,11 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
                     autoCapitalize="off"
                     autoCorrect="off"
                     spellCheck={false}
+                    data-gramm="false"
+                    data-enable-grammarly="false"
+                    data-lpignore="true"
+                    data-1p-ignore="true"
+                    data-form-type="other"
                     aria-label={`Ô trống ${i + 1}`}
                     style={{ width: `${Math.min(40, Math.max(10, value.length + 3))}ch`, maxWidth: "100%" }}
                     className={`inline-block align-middle h-9 mx-1 px-2 rounded-lg border-2 text-sm font-semibold text-center text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none ${
@@ -707,7 +712,15 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
           value={values[0] ?? ""}
           onChange={(e) => setValues([e.target.value])}
           placeholder="Gõ cả câu vào đây..."
+          autoComplete="off"
+          autoCapitalize="off"
+          autoCorrect="off"
           spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           aria-label="Câu trả lời"
           className={`w-full px-3 py-2.5 rounded-xl border-2 text-sm font-semibold leading-relaxed text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none resize-none ${
             tone === "idle" ? "border-slate-300 dark:border-zinc-700 focus:border-cyan-500" : tone === "ok" ? "border-emerald-500" : "border-rose-500"

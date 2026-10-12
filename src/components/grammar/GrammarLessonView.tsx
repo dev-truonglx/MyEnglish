@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, BookOpen, CheckCircle2, Clock, Layers, Loader2, Play, Zap } from "lucide-react";
+import { ArrowLeft, BookOpen, CheckCircle2, Clock, Layers, Loader2, Play, Sparkles, Zap } from "lucide-react";
 import type { GrammarBookFile, GrammarBookLesson } from "@/types/grammarBook";
 import { getEffectiveLessonIds, toggleLessonSelection } from "@/services/grammarPath";
 import { getLessonProgress } from "@/services/grammarService";
@@ -18,6 +18,7 @@ import { getBookChapter } from "@/services/grammarBook";
 import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 import HandbookView from "./HandbookView";
 import GrammarPlayer from "./GrammarPlayer";
+import GrammarExerciseImportModal from "./GrammarExerciseImportModal";
 import { LessonStatusChip, MasteryBar } from "./PathPicker";
 
 export type GrammarLessonTab = "handbook" | "practice" | "diagnostic";
@@ -51,6 +52,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
   const [player, setPlayer] = useState<PlayerState | null>(null);
   const [starting, setStarting] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
   // Null while the lesson's questions are being looked up
   const [hasExercises, setHasExercises] = useState<boolean | null>(null);
   // The quick check found no question usable now (e.g. all of them use a lesson not learnt yet)
@@ -270,7 +272,16 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
               Ôn lại: {nextReview.label}
             </span>
           )}
-          <label className="ml-auto inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:text-zinc-300">
+          <button
+            type="button"
+            onClick={() => setImportModalOpen(true)}
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50/70 hover:bg-cyan-100/80 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300 dark:hover:bg-cyan-900/50 cursor-pointer"
+            title="Thêm bài tập bằng AI cho riêng bài học này"
+          >
+            <Sparkles className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
+            <span>Thêm bài tập AI</span>
+          </button>
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:text-zinc-300">
             <input
               type="checkbox"
               checked={onPath}
@@ -418,6 +429,17 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
           )}
         </div>
       )}
+
+      <GrammarExerciseImportModal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        initialChapterId={chapterId}
+        initialLessonId={lesson.id}
+        initialLessonTitle={lesson.titleVn || lesson.title}
+        onImportComplete={() => {
+          lessonHasExercises(lesson.id).then((found) => setHasExercises(found));
+        }}
+      />
     </div>
   );
 }

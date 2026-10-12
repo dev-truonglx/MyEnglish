@@ -61,11 +61,10 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
   const example = pickExample(word);
 
   const builtLetters = picked.map((id) => tiles.find((t) => t.id === id)?.ch ?? "");
-  // Fill the slots: fixed characters in place, built letters in the others
-  const display = (() => {
+  const slotIndices = useMemo(() => {
     let k = 0;
-    return slots.map((c) => (FIXED.test(c) ? c : builtLetters[k++] ?? ""));
-  })();
+    return slots.map((c) => (FIXED.test(c) ? -1 : k++));
+  }, [slots]);
 
   const check = useCallback(
     (ids: number[]) => {
@@ -106,14 +105,38 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
     [letterCount, check]
   );
 
+  const unpickAt = useCallback(
+    (index: number) => {
+      if (doneRef.current || state === "correct") return;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
+      setState("building");
+      setPicked((prev) => {
+        if (index < 0 || index >= prev.length) return prev;
+        return prev.filter((_, i) => i !== index);
+      });
+    },
+    [state]
+  );
+
   const undo = useCallback(() => {
-    if (doneRef.current) return;
+    if (doneRef.current || state === "correct") return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setState("building");
     setPicked((prev) => prev.slice(0, -1));
-  }, []);
+  }, [state]);
 
   const clear = () => {
-    if (doneRef.current) return;
+    if (doneRef.current || state === "correct") return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setState("building");
     setPicked([]);
     setTiles((prev) => [...prev].sort(() => Math.random() - 0.5));
@@ -151,40 +174,78 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
 
       {/* Slots */}
       <div className={`flex flex-wrap justify-center gap-1.5 ${state === "wrong" ? "animate-shake" : ""}`}>
-        {display.map((c, i) =>
-          FIXED.test(slots[i]) ? (
-            <span key={i} className="w-4" />
-          ) : (
+        {slots.map((slotChar, i) => {
+          const isFixed = FIXED.test(slotChar);
+          if (isFixed) {
+            return (
+              <span key={i} className="w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500">
+                {slotChar === " " ? "" : slotChar}
+              </span>
+            );
+          }
+
+          const nonFixedIdx = slotIndices[i];
+          const hasLetter = nonFixedIdx >= 0 && nonFixedIdx < picked.length;
+          const letter = hasLetter ? builtLetters[nonFixedIdx] : "";
+          const isFirstSlotHint = hint && i === 0 && !hasLetter;
+
+          if (hasLetter && state !== "correct") {
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => unpickAt(nonFixedIdx)}
+                title="Bấm để xóa chữ này"
+                className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
+                  state === "wrong"
+                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:border-rose-400 hover:bg-rose-50"
+                    : "border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30 text-slate-900 dark:text-white hover:border-rose-400 hover:bg-rose-50/80 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 hover:scale-105 active:scale-95"
+                }`}
+              >
+                {letter}
+              </button>
+            );
+          }
+
+          return (
             <span
               key={i}
-              className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono ${state === "correct"
-                ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
-                : state === "wrong"
-                  ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
-                  : c
-                    ? "border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30 text-slate-900 dark:text-white"
-                    : "border-dashed border-slate-300 dark:border-zinc-700"
-                }`}
+              className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono select-none ${
+                state === "correct"
+                  ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+                  : state === "wrong"
+                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
+                    : "border-dashed border-slate-300 dark:border-zinc-700 text-slate-400"
+              }`}
             >
-              {c || (hint && i === 0 ? <span className="text-slate-300 dark:text-zinc-600">{slots[0]}</span> : "")}
+              {letter || (isFirstSlotHint ? <span className="text-slate-300 dark:text-zinc-600">{slots[0]}</span> : "")}
             </span>
-          )
-        )}
+          );
+        })}
       </div>
 
       {/* Tiles */}
       <div className="flex flex-wrap justify-center gap-2">
         {tiles.map((t) => {
           const used = picked.includes(t.id);
+          const pickedIdx = picked.indexOf(t.id);
           return (
             <button
               key={t.id}
-              onClick={() => pick(t.id)}
-              disabled={used || state === "correct"}
-              className={`w-11 h-11 rounded-xl text-lg font-bold font-mono shadow-sm transition-all ${used
-                ? "bg-slate-100 dark:bg-zinc-800 text-transparent border border-slate-200 dark:border-zinc-800"
-                : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95"
-                }`}
+              onClick={() => {
+                if (used) {
+                  unpickAt(pickedIdx);
+                } else {
+                  pick(t.id);
+                }
+              }}
+              disabled={state === "correct"}
+              title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
+              className={`w-11 h-11 rounded-xl text-lg font-bold font-mono shadow-sm transition-all ${
+                used
+                  ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 hover:border-rose-400 hover:text-rose-500 hover:bg-rose-50/40 dark:hover:bg-rose-950/20 active:scale-95 cursor-pointer"
+                  : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95 cursor-pointer"
+              }`}
             >
               {t.ch}
             </button>
@@ -213,7 +274,7 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak }: Lette
         ) : state === "wrong" ? (
           <span className="font-semibold text-amber-700 dark:text-amber-300">Gần rồi, đổi vài chữ rồi thử lại nhé</span>
         ) : (
-          <span className="text-slate-400">Có thể gõ phím chữ cái để chọn</span>
+          <span className="text-slate-400">Bấm vào chữ đã ghép để xóa · Có thể gõ phím</span>
         )}
       </div>
     </div>

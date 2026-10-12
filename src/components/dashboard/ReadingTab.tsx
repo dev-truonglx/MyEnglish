@@ -147,6 +147,15 @@ export default function ReadingTab() {
           onChange={(e) => setText(e.target.value)}
           placeholder={`Dán văn bản tiếng Anh vào đây (${PASTE_KEYS})…`}
           rows={14}
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           className="w-full p-4 rounded-2xl border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-y"
         />
         <div className="flex items-center justify-between">

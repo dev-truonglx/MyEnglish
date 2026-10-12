@@ -234,3 +234,22 @@ pre code {
     animation: none !important;
   }
 }
+
+/* =========================================================
+   DISABLE AUTOFILL / CONTACTS / CREDENTIALS DECORATIONS
+   ========================================================= */
+input::-webkit-credentials-auto-fill-button,
+input::-webkit-contacts-auto-fill-button {
+  visibility: hidden;
+  display: none !important;
+  pointer-events: none;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+textarea:-webkit-autofill,
+textarea:-webkit-autofill:hover,
+textarea:-webkit-autofill:focus {
+  transition: background-color 50000s ease-in-out 0s;
+}

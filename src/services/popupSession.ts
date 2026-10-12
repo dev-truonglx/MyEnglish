@@ -4,7 +4,28 @@
  */
 import { Rating } from "ts-fsrs";
 import type { ReviewCard, WordDetail } from "@/types/database";
-import { cleanMeaningForOption, deriveRating, generateMultipleChoiceQuestion, isNewCard, type ExerciseType } from "./smartReview";
+import {
+  cleanMeaningForOption,
+  deriveRating,
+  generateMultipleChoiceQuestion,
+  isLeech,
+  isNewCard,
+  TILES_STABILITY_DAYS,
+  type ExerciseType,
+} from "./smartReview";
+
+/**
+ * Smart mode for vocabulary in popup:
+ * - Brand-new or young word (reps <= 1, stability < 2 days, or leech): "letter_tiles" (assemble shuffled letters)
+ * - Practiced word (reps > 1 and stability >= 2 days): "typing" (active recall typing with first letter hint)
+ */
+export function selectSmartPopupMode(card: WordDetail): "letter_tiles" | "typing" {
+  const { state = 0, reps = 0, stability = 0 } = card.srs || {};
+  if (state === 0 || reps <= 1 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) {
+    return "letter_tiles";
+  }
+  return "typing";
+}
 
 export interface PopupChoice {
   id: string;

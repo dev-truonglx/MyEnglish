@@ -179,6 +179,15 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
           onChange={(e) => updateText(e.target.value)}
           rows={4}
           placeholder="Yesterday I fixed the login bug. Today I am working on the payment API. No blockers."
+          autoComplete="off"
+          autoCorrect="off"
+          autoCapitalize="off"
+          spellCheck={false}
+          data-gramm="false"
+          data-enable-grammarly="false"
+          data-lpignore="true"
+          data-1p-ignore="true"
+          data-form-type="other"
           className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 resize-y"
         />
         <div className="flex items-center justify-between">

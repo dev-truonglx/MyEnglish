@@ -17,9 +17,9 @@ describe("onboarding", () => {
     applyDailyPlan(5, true);
     expect(getStudyLimits()).toEqual({ newCardsPerDay: 3, maxSessionSize: 20 });
     expect(getDailyGoal()).toBe(DAILY_PLANS[5].dailyGoal);
-    expect(getReminderSettings()).toMatchObject({ enabled: true, intervalMinutes: 60 });
-    applyDailyPlan(15, false);
+    expect(getReminderSettings()).toMatchObject({ enabled: true, intervalMinutes: 60, triggerCondition: "due_only" });
+    applyDailyPlan(15, false, { anchors: [], transitions: false }, "due_then_random");
     expect(getStudyLimits().newCardsPerDay).toBe(8);
-    expect(getReminderSettings()).toMatchObject({ enabled: false, intervalMinutes: 0 });
+    expect(getReminderSettings()).toMatchObject({ enabled: false, intervalMinutes: 0, triggerCondition: "due_then_random" });
   });
 });

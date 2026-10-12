@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpen, Check, ChevronDown, Clock, Copy, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
+import { BookOpen, ChevronDown, Clock, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
 import type { GrammarBookFile } from "@/types/grammarBook";
 import {
   ensureGrammarBookSeeded,
@@ -13,10 +13,10 @@ import {
 import { getTodayGrammarPlan, type TodayGrammarPlan } from "@/services/grammarPath";
 import { getGrammarSummaryStats, initGrammarStorage } from "@/services/grammarService";
 import { buildPracticeSession, buildReviewSession, type SessionEntry } from "@/services/grammarSession";
-import importPrompt from "../../../docs/grammar-import-prompt.md?raw";
 import PathPicker, { type PathPickerMode } from "./PathPicker";
 import GrammarLessonView, { type GrammarLessonTab } from "./GrammarLessonView";
 import GrammarImportDialog from "./GrammarImportDialog";
+import GrammarExerciseImportModal from "./GrammarExerciseImportModal";
 import GrammarPlayer from "./GrammarPlayer";
 import { PAGE_CONTAINER } from "../dashboard/shared";
 
@@ -43,12 +43,6 @@ interface PlayerState {
   subtitle?: string;
 }
 
-/** The prompt the learner pastes into an AI: the text inside the ````text fence of the doc (whole file as a fallback) */
-function getPromptText(): string {
-  const match = /````text\r?\n([\s\S]*?)\r?\n````/.exec(importPrompt);
-  return (match ? match[1] : importPrompt).trim();
-}
-
 export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) {
   const [chapters, setChapters] = useState<GrammarBookFile[]>([]);
   const [plan, setPlan] = useState<TodayGrammarPlan | null>(null);
@@ -60,9 +54,9 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
   const [activeLesson, setActiveLesson] = useState<{ chapterId: string; lessonId: string; tab: GrammarLessonTab } | null>(null);
   const [player, setPlayer] = useState<PlayerState | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [exerciseImportOpen, setExerciseImportOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState<PathPickerMode>("path");
   const [starting, setStarting] = useState(false);
-  const [copied, setCopied] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
   const loadSeq = useRef(0);
@@ -197,16 +191,6 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
     later(() => pickerRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
 
-  const copyPrompt = async () => {
-    try {
-      await navigator.clipboard.writeText(getPromptText());
-      setCopied(true);
-      later(() => setCopied(false), 2000);
-    } catch {
-      showNotice("Không sao chép được, hãy thử lại");
-    }
-  };
-
   if (player) {
     return (
       <div className={PAGE_CONTAINER}>
@@ -257,14 +241,25 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
   return (
     <div className={PAGE_CONTAINER}>
       <div className="mx-auto max-w-4xl space-y-5 pb-6">
-        <div className="space-y-1">
-          <h1 className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">
-            <GraduationCap className="h-6 w-6 shrink-0 text-cyan-600 dark:text-cyan-400" />
-            <span>Ngữ pháp</span>
-          </h1>
-          <p className="text-xs text-slate-500 dark:text-zinc-400 sm:text-sm">
-            Học theo sách của bạn: mỗi ngày một bài mới, ôn lại đúng lúc sắp quên.
-          </p>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="space-y-1">
+            <h1 className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">
+              <GraduationCap className="h-6 w-6 shrink-0 text-cyan-600 dark:text-cyan-400" />
+              <span>Ngữ pháp</span>
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 sm:text-sm">
+              Học theo sách của bạn: mỗi ngày một bài mới, ôn lại đúng lúc sắp quên.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setExerciseImportOpen(true)}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 px-3.5 py-2 text-xs font-bold !text-white shadow-sm transition-all shrink-0 cursor-pointer"
+          >
+            <Sparkles className="h-4 w-4" />
+            <span>Nhập bài tập AI & Lịch sử</span>
+          </button>
         </div>
 
         {loading && !hasBook ? (
@@ -306,19 +301,11 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
             <div className="flex flex-col items-stretch justify-center gap-2.5 sm:flex-row sm:items-center">
               <button
                 type="button"
-                onClick={() => setImportOpen(true)}
+                onClick={() => setExerciseImportOpen(true)}
                 className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
               >
-                <Upload className="h-4 w-4" />
-                Nhập dữ liệu sách
-              </button>
-              <button
-                type="button"
-                onClick={copyPrompt}
-                className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
-              >
-                {copied ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
-                {copied ? "Đã sao chép" : "Sao chép prompt chuyển đổi"}
+                <Sparkles className="h-4 w-4" />
+                Nhập bài tập AI / Lịch sử
               </button>
             </div>
             <p className="text-xs text-slate-500 dark:text-zinc-500">Các file chỉ được lưu trên máy này, không gửi đi đâu.</p>
@@ -404,22 +391,23 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-slate-200 pt-4 text-xs dark:border-zinc-800">
+            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-slate-200 pt-4 text-xs dark:border-zinc-800">
               <button
                 type="button"
-                onClick={() => setImportOpen(true)}
-                className="inline-flex items-center gap-1.5 font-semibold text-slate-600 transition hover:text-cyan-700 dark:text-zinc-400 dark:hover:text-cyan-400"
+                onClick={() => setExerciseImportOpen(true)}
+                className="inline-flex items-center gap-1.5 font-bold text-cyan-600 transition hover:text-cyan-700 dark:text-cyan-400 dark:hover:text-cyan-300"
               >
-                <Upload className="h-3.5 w-3.5" />
-                Nhập thêm / cập nhật dữ liệu
+                <Sparkles className="h-3.5 w-3.5" />
+                Nhập bài tập AI & Lịch sử
               </button>
               <button
                 type="button"
-                onClick={copyPrompt}
-                className="inline-flex items-center gap-1.5 font-semibold text-slate-600 transition hover:text-cyan-700 dark:text-zinc-400 dark:hover:text-cyan-400"
+                onClick={() => setImportOpen(true)}
+                className="inline-flex items-center gap-1.5 text-slate-400 transition hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-400 ml-auto"
+                title="Nhập dữ liệu gốc từ sách PDF"
               >
-                {copied ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : <Copy className="h-3.5 w-3.5" />}
-                {copied ? "Đã sao chép" : "Sao chép prompt"}
+                <Upload className="h-3 w-3" />
+                <span>Nhập dữ liệu sách</span>
               </button>
             </div>
 
@@ -429,6 +417,7 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
       </div>
 
       <GrammarImportDialog isOpen={importOpen} onClose={() => setImportOpen(false)} onImportComplete={() => void loadData()} />
+      <GrammarExerciseImportModal isOpen={exerciseImportOpen} onClose={() => setExerciseImportOpen(false)} onImportComplete={() => void loadData()} />
 
       {notice && (
         <div

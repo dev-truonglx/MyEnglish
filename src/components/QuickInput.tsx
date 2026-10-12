@@ -254,7 +254,7 @@ export default function QuickInput({
       }`}
     >
       <div className="w-full max-w-[620px] rounded-2xl bg-white/95 dark:bg-slate-900/90 backdrop-blur-xl p-2.5 transition-all">
-        <form onSubmit={handleSubmit} className="relative flex items-center gap-2.5">
+        <form onSubmit={handleSubmit} autoComplete="off" className="relative flex items-center gap-2.5">
           {/* Logo / Sparkle Badge */}
           <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-gradient-to-br from-cyan-500 to-blue-600 text-white shadow-md shadow-cyan-500/20 shrink-0">
             {submitting ? (
@@ -279,7 +279,14 @@ export default function QuickInput({
               disabled={submitting}
               className="w-full bg-transparent text-sm text-slate-900 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none font-medium pr-8 font-mono"
               autoComplete="off"
-              spellCheck="false"
+              autoCorrect="off"
+              autoCapitalize="off"
+              spellCheck={false}
+              data-gramm="false"
+              data-enable-grammarly="false"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
             />
             {word && (
               <button
