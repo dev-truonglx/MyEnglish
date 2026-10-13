@@ -60,13 +60,19 @@ describe("grading never rewards speed with Easy", () => {
 
 describe("scheduling decision", () => {
   const due = toCard(makeWord("due", { srs: reviewSrs(3, 4) }), "recognition");
+  const dueProd = toCard(
+    makeWord("dueProd", { srs: reviewSrs(10, 2), srsProduction: { ...(reviewSrs(3, 4) as never), word_id: "dueProd" } }),
+    "production"
+  );
   const notDue = toCard(makeWord("later", { srs: reviewSrs(30, 1) }), "recognition");
 
-  it("only the first answer to a due card through a matching exercise is scheduled", () => {
+  it("only the first answer to a due card through a valid exercise is scheduled", () => {
     expect(schedulingDecision({ card: due, exerciseType: "multiple_choice" })).toEqual({ scheduled: true });
+    expect(schedulingDecision({ card: due, exerciseType: "spelling" })).toEqual({ scheduled: true });
+    expect(schedulingDecision({ card: due, exerciseType: "letter_tiles" })).toEqual({ scheduled: true });
     expect(schedulingDecision({ card: due, exerciseType: "multiple_choice", alreadyGraded: true }).reason).toBe("already_graded");
     expect(schedulingDecision({ card: notDue, exerciseType: "multiple_choice" }).reason).toBe("not_due");
-    expect(schedulingDecision({ card: due, exerciseType: "spelling" }).reason).toBe("exercise_mismatch");
+    expect(schedulingDecision({ card: dueProd, exerciseType: "multiple_choice" }).reason).toBe("exercise_mismatch");
     expect(schedulingDecision({ card: due, exerciseType: "sentence_builder" }).reason).toBe("exercise_mismatch");
     expect(schedulingDecision({ card: due, exerciseType: "multiple_choice", practiceMode: true }).reason).toBe("practice_mode");
   });

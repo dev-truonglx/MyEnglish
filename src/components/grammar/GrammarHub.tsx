@@ -22,6 +22,7 @@ import { PAGE_CONTAINER } from "../dashboard/shared";
 
 interface GrammarHubProps {
   initialLessonId?: string | null;
+  resetKey?: number;
 }
 
 type Stats = ReturnType<typeof getGrammarSummaryStats>;
@@ -43,7 +44,7 @@ interface PlayerState {
   subtitle?: string;
 }
 
-export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) {
+export default function GrammarHub({ initialLessonId = null, resetKey }: GrammarHubProps) {
   const [chapters, setChapters] = useState<GrammarBookFile[]>([]);
   const [plan, setPlan] = useState<TodayGrammarPlan | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -61,6 +62,7 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
 
   const loadSeq = useRef(0);
   const initialHandled = useRef(false);
+  const prevResetKey = useRef(resetKey);
   const pickerRef = useRef<HTMLDivElement | null>(null);
   const timers = useRef<number[]>([]);
   const noticeTimer = useRef<number | null>(null);
@@ -118,6 +120,17 @@ export default function GrammarHub({ initialLessonId = null }: GrammarHubProps) 
     window.addEventListener("myenglish-grammar-updated", onUpdate);
     return () => window.removeEventListener("myenglish-grammar-updated", onUpdate);
   }, [loadData]);
+
+  useEffect(() => {
+    if (prevResetKey.current === resetKey) return;
+    prevResetKey.current = resetKey;
+    setActiveLesson(null);
+    setPlayer(null);
+    setImportOpen(false);
+    setExerciseImportOpen(false);
+    setPickerMode("path");
+    void loadData();
+  }, [resetKey, loadData]);
 
   const retryLoad = () => {
     setLoading(true);

@@ -27,10 +27,11 @@ const DRAFT_KEY = "myenglish_standup_draft_v1";
 
 interface WritingTabProps {
   onOpenGrammarLesson: (lessonId: string) => void;
+  resetKey?: number;
 }
 
 /** Writing: a daily standup corrected by AI, and the notebook of the learner's own mistakes */
-export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
+export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTabProps) {
   const words = useWordsStore((s) => s.words);
   const [text, setText] = useState(() => {
     try {
@@ -56,6 +57,10 @@ export default function WritingTab({ onOpenGrammarLesson }: WritingTabProps) {
     listMistakes(12).then(setRecent).catch(() => {});
   };
   useEffect(reload, []);
+
+  useEffect(() => {
+    setReviewing(null);
+  }, [resetKey]);
 
   // Checked once per visit: without an AI CLI the correction button is off, not an error after a click
   const [cliReady, setCliReady] = useState<boolean | null>(null);

@@ -109,11 +109,12 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
 
   const check = useCallback(
     (ids: number[]) => {
+      if (doneRef.current) return;
       const built = ids.map((id) => tiles.find((t) => t.id === id)?.ch ?? "").join("");
       const expected = slots.filter((c) => !FIXED.test(c)).join("");
       if (built === expected) {
-        setState("correct");
         doneRef.current = true;
+        setState("correct");
         onSpeak(target);
         // Reported at once: the session keeps the built word on screen until the learner continues
         onComplete(true, wrongAttempts, hint ? Rating.Hard : Rating.Good);

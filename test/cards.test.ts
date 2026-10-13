@@ -18,10 +18,12 @@ describe("card helpers", () => {
     for (const t of PRODUCTION) expect(directionForExercise(t)).toBe("production");
   });
 
-  it("treats sentence building as practice only and rejects mismatched evidence", () => {
+  it("treats sentence building as practice only, rejects recognition on production, and accepts production on both", () => {
     expect(exerciseDirection("sentence_builder")).toBeNull();
     expect(isValidEvidence("sentence_builder", "recognition")).toBe(false);
-    expect(isValidEvidence("spelling", "recognition")).toBe(false);
+    expect(isValidEvidence("sentence_builder", "production")).toBe(false);
+    expect(isValidEvidence("spelling", "recognition")).toBe(true);
+    expect(isValidEvidence("letter_tiles", "recognition")).toBe(true);
     expect(isValidEvidence("multiple_choice", "production")).toBe(false);
     expect(isValidEvidence("cloze", "production")).toBe(true);
   });

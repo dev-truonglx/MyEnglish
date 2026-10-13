@@ -287,8 +287,7 @@ export default function Sidebar({
             label: g.label,
             ...groupLook[g.id],
             active,
-            // Already on one of its tabs: stay there
-            onClick: () => !active && setActiveTab(g.tabs[0].tab),
+            onClick: () => setActiveTab(g.tabs[0].tab),
           };
         })
       : navItems.map((item) => ({ ...item, key: item.tab, active: activeTab === item.tab, onClick: () => setActiveTab(item.tab) }));

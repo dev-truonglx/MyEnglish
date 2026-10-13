@@ -118,9 +118,21 @@ describe("#7 smart popup exercise mode ladder", () => {
     expect(selectSmartPopupMode(fresh)).toBe("letter_tiles");
   });
 
-  it("gives letter_tiles to words with only 1 rep or low stability (< 2 days)", () => {
+  it("gives letter_tiles to Review words with only 1 rep or low stability (< 2 days)", () => {
     const young = makeWord("young", { srs: reviewSrs(1, 1) });
     expect(selectSmartPopupMode(young)).toBe("letter_tiles");
+  });
+
+  it("switches to typing for Learning (state 1) or Relearning (state 3) steps after the first rep so the card can graduate", () => {
+    const learningStep = makeWord("have to", {
+      srs: { state: 1, reps: 1, lapses: 0, stability: 1.29, difficulty: 5, next_review_date: new Date().toISOString() },
+    });
+    expect(selectSmartPopupMode(learningStep)).toBe("typing");
+
+    const relearningStep = makeWord("so", {
+      srs: { state: 3, reps: 4, lapses: 1, stability: 0.8, difficulty: 6, next_review_date: new Date().toISOString() },
+    });
+    expect(selectSmartPopupMode(relearningStep)).toBe("typing");
   });
 
   it("gives typing recall to practiced words with stability >= 2 days and reps > 1", () => {
@@ -128,9 +140,66 @@ describe("#7 smart popup exercise mode ladder", () => {
     expect(selectSmartPopupMode(mature)).toBe("typing");
   });
 
-  it("falls back to letter_tiles for leeches with low stability", () => {
+  it("falls back to letter_tiles for Review leeches with low stability", () => {
     const leech = makeWord("leech", { srs: reviewSrs(1, 4, { lapses: 5 }) });
     expect(selectSmartPopupMode(leech)).toBe("letter_tiles");
   });
+
+  it("graduates a new word from letter_tiles -> typing -> Review (state = 2) without getting stuck in Learning", async () => {
+    const { freshServices } = await import("./helpers");
+    const { db, srs } = await freshServices();
+    const id = await db.insertEnrichedWord({
+      word: "have to",
+      meaning_vn: "phải",
+      synonyms: [],
+      antonyms: [],
+      examples: [],
+    });
+
+    // Step 1: Brand new word in popup -> letter_tiles -> answered correctly on 1st try -> Rating.Good
+    let [word] = await db.getWordsByIds([id]);
+    expect(selectSmartPopupMode(word)).toBe("letter_tiles");
+    const r1 = popupAnswerRating(true, "letter_tiles", 3000, false);
+    expect(r1).toBe(Rating.Good);
+    const step1 = await srs.recordReview(id, r1, "recognition");
+    expect(step1.state).toBe(1); // Learning
+
+    // Step 2: Learning step in popup -> typing -> answered correctly -> Rating.Good -> graduates to State.Review (2)
+    [word] = await db.getWordsByIds([id]);
+    expect(selectSmartPopupMode(word)).toBe("typing");
+    const r2 = popupAnswerRating(true, "spelling", 3000, false);
+    expect(r2).toBe(Rating.Good);
+    const step2 = await srs.recordReview(id, r2, "recognition");
+    expect(step2.state).toBe(2); // Graduated to Review!
+    expect(step2.stability).toBeGreaterThanOrEqual(2);
+    expect(step2.scheduled_days).toBeGreaterThanOrEqual(2);
+  });
+
+  it("auto-repairs cards previously trapped in State.Learning by old letter_tiles Hard loop on initSchema", async () => {
+    const { freshServices } = await import("./helpers");
+    const { db } = await freshServices();
+    const conn = await db.getDatabase();
+    const id = await db.insertEnrichedWord({
+      word: "so",
+      meaning_vn: "vì vậy",
+      synonyms: [],
+      antonyms: [],
+      examples: [],
+    });
+    await conn.execute(
+      `UPDATE srs_reviews
+       SET state = 1, reps = 10, lapses = 0, stability = 0.42, difficulty = 9.86, learning_steps = 1,
+           last_review = '2026-10-13T03:40:46.892Z', next_review_date = '2026-10-13T03:46:46.892Z'
+       WHERE word_id = $1`,
+      [id]
+    );
+    await db.initSchema(conn);
+    const [repaired] = await db.getWordsByIds([id]);
+    expect(repaired.srs.state).toBe(2);
+    expect(repaired.srs.stability).toBeGreaterThanOrEqual(3);
+    expect(repaired.srs.difficulty).toBe(5);
+    expect(repaired.srs.scheduled_days).toBe(3);
+  });
 });
+
 

@@ -16,11 +16,16 @@ import {
 
 /**
  * Smart mode for vocabulary in popup:
- * - Brand-new or young word (reps <= 1, stability < 2 days, or leech): "letter_tiles" (assemble shuffled letters)
- * - Practiced word (reps > 1 and stability >= 2 days): "typing" (active recall typing with first letter hint)
+ * - Learning / relearning step after initial review ((state === 1 || state === 3) && reps >= 1): "typing"
+ *   so the card proves active recall to graduate from short-term learning steps
+ * - Brand-new or young word (state === 0, reps <= 1, stability < 2 days, or leech): "letter_tiles"
+ * - Practiced word (reps > 1 and stability >= 2 days): "typing"
  */
 export function selectSmartPopupMode(card: WordDetail): "letter_tiles" | "typing" {
   const { state = 0, reps = 0, stability = 0 } = card.srs || {};
+  if ((state === 1 || state === 3) && reps >= 1) {
+    return "typing";
+  }
   if (state === 0 || reps <= 1 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) {
     return "letter_tiles";
   }

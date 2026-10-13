@@ -30,7 +30,7 @@ import {
 import { getGrammarExercisesForReview } from "@/services/grammarService";
 import { recordGrammarAnswer as recordBookGrammarAnswer, type SessionEntry } from "@/services/grammarSession";
 import type { WordDetail, ReviewCard } from "@/types/database";
-import { directionForExercise, practiceCards } from "@/services/cards";
+import { practiceCards } from "@/services/cards";
 import {
   getRecentIntros,
   postponeNewCard,
@@ -357,26 +357,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   ): Promise<Celebration | null> => {
     const responseTimeMs = Date.now() - itemStartRef.current;
     const rating = popupAnswerRating(correct, exerciseType, responseTimeMs, nearMiss, synonymTriedRef.current);
-    const targetDirection = directionForExercise(exerciseType);
-    const cardToGrade: ReviewCard =
-      word.direction === targetDirection
-        ? word
-        : {
-            ...word,
-            direction: targetDirection,
-            srs: word.srsProduction ?? word.srs,
-            srsRecognition: word.srsRecognition ?? word.srs,
-          };
-    const cardKey = `${cardToGrade.id}:${cardToGrade.direction}`;
+    const cardKey = `${word.id}:${word.direction}`;
     const decision = schedulingDecision({
-      card: cardToGrade,
+      card: word,
       exerciseType,
       alreadyGraded: scheduledThisSessionRef.current.has(cardKey),
       introducedAt: introducedAtRef.current.get(cardKey) ?? null,
     });
     if (decision.scheduled) scheduledThisSessionRef.current.add(cardKey);
     const recorded = await recordCardAnswer({
-      card: cardToGrade,
+      card: word,
       exerciseType,
       rating,
       wrongAttempts: correct ? 0 : 1,
@@ -387,7 +377,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     let nextReview = recorded.result?.nextReviewDate ?? null;
     if (decision.reason === "intro_too_recent") {
       // Quizzed right after its introduction: the first graded review comes in a later session
-      nextReview = await postponeNewCard(word.id, cardToGrade.direction).catch(() => null);
+      nextReview = await postponeNewCard(word.id, word.direction).catch(() => null);
     }
     // Graded elsewhere since the queue was built: practice, already counted where it was graded. The note is
     // only shown while this card is still on screen (Enter may have moved on before the answer was saved).
@@ -398,7 +388,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       scheduledAnswersRef.current++;
       if (correct && rating >= Rating.Good) recordFirstTryCorrect();
     }
-    const praise = celebrationFor({ ...recorded, direction: cardToGrade.direction, word: word.word });
+    const praise = celebrationFor({ ...recorded, direction: word.direction, word: word.word });
     noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, praise?.kind ?? null, !gradedElsewhere);
     return praise;
   };

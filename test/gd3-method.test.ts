@@ -128,8 +128,11 @@ describe("leeches recover (M2)", () => {
 });
 
 describe("letter tiles (M9)", () => {
-  it("a correct build is Hard at most", () => {
-    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 2000 })).toBe(Rating.Hard);
+  it("grades Good on first try without hint, Hard with hint or slow response, and Again on wrong attempts", () => {
+    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 2000 })).toBe(Rating.Good);
+    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, usedHint: true, responseTimeMs: 2000 })).toBe(Rating.Hard);
+    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, nearMiss: true, responseTimeMs: 2000 })).toBe(Rating.Hard);
+    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 30000 })).toBe(Rating.Hard);
     expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 1, responseTimeMs: 2000 })).toBe(Rating.Again);
     expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 2000 })).toBe(Rating.Good);
   });

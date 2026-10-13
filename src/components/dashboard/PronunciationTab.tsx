@@ -256,10 +256,14 @@ function LessonView({ lesson, onBack }: { lesson: PronunciationLesson; onBack: (
 }
 
 /** Pronunciation lessons for beginners: sounds Vietnamese speakers miss, endings, stress, IT words */
-export default function PronunciationTab() {
+export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
   const [lessons, setLessons] = useState<PronunciationLesson[]>([]);
   const [progress, setProgress] = useState<PronunciationProgress>(getPronunciationProgress);
   const [openId, setOpenId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setOpenId(null);
+  }, [resetKey]);
 
   useEffect(() => {
     loadPronunciationLessons().then(setLessons).catch(() => setLessons([]));

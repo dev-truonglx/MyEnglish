@@ -246,7 +246,7 @@ export async function initSchema(db: Database): Promise<void> {
   await initReviewLogsTable(db);
 }
 
-/** Repair words left without an SRS row (e.g. a write failed halfway); otherwise they would never become due */
+/** Repair words left without an SRS row (e.g. a write failed halfway) or stuck in Learning from old letter_tiles Hard grading */
 async function repairMissingSrsRows(db: Database): Promise<void> {
   try {
     await db.execute(`
@@ -265,6 +265,24 @@ async function repairMissingSrsRows(db: Database): Promise<void> {
           SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'intro'
         );
     `);
+    for (const table of ["srs_reviews", "srs_production"]) {
+      await db.execute(`
+        UPDATE ${table}
+        SET state = 2,
+            stability = MAX(COALESCE(stability, 0), 3.0),
+            difficulty = CASE WHEN difficulty > 8.0 THEN 5.0 ELSE difficulty END,
+            scheduled_days = MAX(COALESCE(scheduled_days, 0), 3),
+            interval = MAX(COALESCE(interval, 0), 3),
+            learning_steps = 0,
+            next_review_date = CASE
+              WHEN state IN (1, 3) THEN strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(last_review, CURRENT_TIMESTAMP), '+3 days')
+              ELSE next_review_date
+            END
+        WHERE reps >= 4
+          AND COALESCE(stability, 0) < 2.0
+          AND (state IN (1, 3) OR (state = 2 AND lapses = 0 AND difficulty > 8.0));
+      `);
+    }
   } catch (e) {
     console.warn("SRS row repair notice:", e);
   }

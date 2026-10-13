@@ -35,9 +35,17 @@ export function directionForExercise(exerciseType: ExerciseType): CardDirection 
   return exerciseDirection(exerciseType) ?? "recognition";
 }
 
-/** Whether an answer to this exercise may update the FSRS schedule of a card of this direction. */
+/**
+ * Whether an answer to this exercise may update the FSRS schedule of a card of this direction.
+ *  - A production exercise (producing the English word from its meaning) proves both production and recognition.
+ *  - A recognition exercise only proves recognition.
+ *  - Practice-only exercises (null direction) never move a schedule.
+ */
 export function isValidEvidence(exerciseType: ExerciseType, direction: CardDirection): boolean {
-  return exerciseDirection(exerciseType) === direction;
+  const exDir = exerciseDirection(exerciseType);
+  if (exDir === null) return false;
+  if (exDir === "production") return true;
+  return exDir === direction;
 }
 
 /** Recognition schedule of a word or card (on a production card `srs` is the production schedule). */

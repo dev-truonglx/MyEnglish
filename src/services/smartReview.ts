@@ -814,8 +814,6 @@ export interface AnswerOutcome {
  *  - picked a synonym of the target, hint, small typo -> Hard
  *  - correct on first try -> Good
  *  - a correct but very slow answer (relative to the learner's own speed) -> Hard
- *  - letter tiles built correctly -> Hard at most: picking the word's own letters is a cued step, not the
- *    recall typing proves (M9)
  *  - automatic grading never gives Easy (Easy stays a manual choice on recall flip cards).
  *    Speed-based Easy was tried twice: in simulation G,G,E,E schedules 19 -> 136 days against
  *    11 -> 46 for G,G,G,G, far beyond what a 2-second multiple-choice answer proves.
@@ -823,7 +821,6 @@ export interface AnswerOutcome {
 export function deriveRating(outcome: AnswerOutcome): Rating {
   // A wrong answer is a memory failure, even after a synonym was tried first
   if (outcome.wrongAttempts > 0) return Rating.Again;
-  if (outcome.exerciseType === "letter_tiles") return Rating.Hard;
   if (outcome.confusedWithSynonym || outcome.usedHint || outcome.nearMiss) return Rating.Hard;
   // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
   const slowMs = slowThresholdMs(outcome.exerciseType);

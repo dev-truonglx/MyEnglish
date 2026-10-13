@@ -109,6 +109,8 @@ export default function MainDashboard({
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
   // The app opens on "Hôm nay": one clear thing to do, not the whole word library
   const [activeTab, setActiveTab] = useState<DashboardTab>("today");
+  // Incremented whenever a sidebar / header tab item is clicked so active tabs return to their main screen
+  const [tabResetKey, setTabResetKey] = useState(0);
   // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
   const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(null);
   useEffect(() => {
@@ -131,13 +133,24 @@ export default function MainDashboard({
   const [sessionId, setSessionId] = useState(0);
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
 
+  const handleSelectTab = useCallback((tab: DashboardTab) => {
+    setActiveTab((prev) => {
+      if (prev === "review" && tab === "review") {
+        setIsReviewing(false);
+      }
+      return tab;
+    });
+    setTabResetKey((k) => k + 1);
+    setGrammarLessonToOpen(null);
+  }, []);
+
   // The word panel belongs to the screen it was opened from: a tab change closes it, unless the same click
   // picked the word (Capture's "Xem chi tiết" opens the library with it). A new session closes it too, so the
   // meaning of a word being asked is never on screen.
   const selectedBeforeRef = useRef(selectedWord);
   useEffect(() => {
     if (selectedWord && selectedWord === selectedBeforeRef.current) setSelectedWord(null);
-  }, [activeTab]);
+  }, [activeTab, tabResetKey]);
   useEffect(() => {
     if (sessionId > 0) setSelectedWord(null);
   }, [sessionId]);
@@ -911,7 +924,7 @@ export default function MainDashboard({
       {/* LEFT SIDEBAR */}
       <Sidebar
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSelectTab}
         pipelineQueue={pipelineQueue}
         dueCount={dueCount}
         streakStats={streakStats}
@@ -928,7 +941,7 @@ export default function MainDashboard({
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
           activeTab={activeTab}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleSelectTab}
           viewMode={viewMode}
           setViewMode={setViewMode}
           filterMode={filterMode}
@@ -953,7 +966,7 @@ export default function MainDashboard({
               streakStats={streakStats}
               onStart={() => handleStartReview(true)}
               onQuickStart={() => handleStartReview(true, undefined, 3)}
-              setActiveTab={setActiveTab}
+              setActiveTab={handleSelectTab}
               loading={loading}
               simpleMode={simpleMode}
             />
@@ -981,7 +994,7 @@ export default function MainDashboard({
             reviewBucketCounts={reviewBucketCounts}
             handleStartReview={handleStartReview}
             requestDeleteWord={requestDeleteWord}
-            setActiveTab={setActiveTab}
+            setActiveTab={handleSelectTab}
           />
         )}
 
@@ -1003,17 +1016,18 @@ export default function MainDashboard({
             toggleTermExpanded={toggleTermExpanded}
             copiedSnippet={copiedSnippet}
             handleCopyCode={handleCopyCode}
-            setActiveTab={setActiveTab}
+            setActiveTab={handleSelectTab}
           />
         )}
 
         <Suspense fallback={<TabFallback />}>
         {/* READING MODE: real text with the learner's words highlighted */}
-        {activeTab === "reading" && <ReadingTab />}
+        {activeTab === "reading" && <ReadingTab resetKey={tabResetKey} />}
 
         {/* WRITING: daily standup corrected by AI + the learner's mistake notebook */}
         {activeTab === "writing" && (
           <WritingTab
+            resetKey={tabResetKey}
             onOpenGrammarLesson={(id) => {
               setGrammarLessonToOpen(id);
               setActiveTab("grammar");
@@ -1056,16 +1070,16 @@ export default function MainDashboard({
           <CliGuideView
             onRefreshWords={refreshWords}
             onNavigateTab={(tab) => {
-              setActiveTab(tab);
+              handleSelectTab(tab);
             }}
           />
         )}
 
         {/* PRONUNCIATION: final sounds, -s/-ed endings, th, stress, IT words */}
-        {activeTab === "pronunciation" && <PronunciationTab />}
+        {activeTab === "pronunciation" && <PronunciationTab resetKey={tabResetKey} />}
 
         {/* TAB 6: GRAMMAR HUB (A1 - C1 ROADMAP & DIAGNOSTIC PRACTICE) */}
-        {activeTab === "grammar" && <GrammarHub key={grammarLessonToOpen ?? "hub"} initialLessonId={grammarLessonToOpen} />}
+        {activeTab === "grammar" && <GrammarHub key={grammarLessonToOpen ?? "hub"} initialLessonId={grammarLessonToOpen} resetKey={tabResetKey} />}
         </Suspense>
 
         {/* INTERACTIVE FLASHCARD SESSION: stays mounted (hidden) on other tabs, so leaving the tab neither

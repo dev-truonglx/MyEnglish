@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { BookOpenText, Check, Pencil, Plus, Quote, Sparkles, X } from "lucide-react";
 import { useWordsStore } from "@/stores/wordsStore";
 import { analyzeText, logEncounters, type BankStatus, type ReadingAnalysis } from "@/services/reading";
@@ -45,7 +45,7 @@ function saveDraft(text: string): void {
  * Reading mode: paste real text and see your words in it. Bank words open their details; unfamiliar words
  * are picked and added with the sentence they appear in; a learning word's sentence can be kept as an example.
  */
-export default function ReadingTab() {
+export default function ReadingTab({ resetKey }: { resetKey?: number }) {
   const words = useWordsStore((s) => s.words);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
   const refreshWords = useWordsStore((s) => s.refreshWords);
@@ -58,6 +58,10 @@ export default function ReadingTab() {
   const [message, setMessage] = useState<string | null>(null);
   // A beginner only "knows" function words: everyday words (because, change, need…) are offered to learn
   const knownCommon = useMemo(() => (isFoundationMode() ? FUNCTION_WORDS : COMMON_WORDS), []);
+
+  useEffect(() => {
+    setReading(null);
+  }, [resetKey]);
 
   const analysis: ReadingAnalysis | null = useMemo(
     () => (reading ? analyzeText(reading, words, knownCommon) : null),
