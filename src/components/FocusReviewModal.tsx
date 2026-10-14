@@ -941,6 +941,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
             : `"${typedInput.trim()}" cùng nghĩa với từ cần tìm — đúng nghĩa nhưng cần một từ khác. Thử lại!`
         );
         setTypedInput("");
+        setTimeout(() => inputRef.current?.focus(), 50);
         return;
       }
 
@@ -1540,6 +1541,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         className="w-full px-4 py-3 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-base font-bold text-slate-900 dark:text-white placeholder:font-normal placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition-all shadow-xs"
                       />
                     </div>
+
+                    {!isAnswered && feedbackMsg && (
+                      <div className="p-2.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200/80 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs font-medium flex items-center gap-2 animate-in fade-in slide-in-from-top-1 duration-150">
+                        <AlertCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span>{feedbackMsg}</span>
+                      </div>
+                    )}
                   </div>
 
                   {!isAnswered ? (
