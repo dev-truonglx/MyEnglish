@@ -1,6 +1,6 @@
 import type { GrammarBookItem, GrammarExerciseSetType } from "@/types/grammarBook";
-import { answerReadings, normalizeTypedText } from "./smartReview";
-import { bookItemKey, countBlanks, getUserAcceptedAnswers } from "./grammarBook";
+import { normalizeTypedText } from "./smartReview";
+import { bookItemKey, countBlanks, getUserAcceptedAnswers, hasUnreadableAnswers, matchesAny } from "./grammarBook";
 import { persistKeyNow } from "./storageBackup";
 
 /**
@@ -117,17 +117,8 @@ export function acceptedAnswers(item: GrammarBookItem): string[][] {
   return Array.from({ length: blanks }, (_, i) => [...new Set([...(item.answers?.[i] ?? []), ...getUserAcceptedAnswers(key, i)])]);
 }
 
-function readings(text: string): string[] {
-  return answerReadings(text.trim());
-}
-
-/** True when the text matches one of the accepted answers (case, punctuation and contractions ignored) */
-export function matchesAny(text: string, accepted: string[]): boolean {
-  const user = new Set(readings(text));
-  // An empty answer means "nothing goes here": accept an empty box, "-", "x" or "Ø"
-  if (accepted.some((a) => a.trim() === "") && /^\s*[-xØ∅]?\s*$/i.test(text)) return true;
-  return accepted.some((a) => a.trim() !== "" && readings(a).some((r) => user.has(r)));
-}
+// The matcher lives next to the book (the import check uses it too)
+export { matchesAny };
 
 /** Wrong options for blank i: the AI's distractors minus anything that is in fact accepted, deduplicated */
 export function cleanDistractors(item: GrammarBookItem, blankIndex: number): string[] {
@@ -187,6 +178,8 @@ function hasVietnameseAnswer(item: GrammarBookItem): boolean {
 /** Items with no trustworthy key are marked by the learner; open "complete the sentence" sets and translations into Vietnamese too */
 export function isSelfGraded(item: GrammarBookItem, setType: GrammarExerciseSetType): boolean {
   if (item.selfGrade || item.noKey) return true;
+  // An answer cut off ("...") or written with a "/" that was not split could never be typed: never auto-graded
+  if (hasUnreadableAnswers(item)) return true;
   if (setType === "complete" || setType === "identify") return true;
   if (setType === "translate" && hasVietnameseAnswer(item)) return true;
   const blanks = countBlanks(item.prompt);
@@ -245,8 +238,12 @@ const LADDER: GrammarFormat[][] = [
   ["type"],
 ];
 
-export function formatForLevel(item: GrammarBookItem, setType: GrammarExerciseSetType, level: number): GrammarFormat {
-  const available = availableFormats(item, setType);
+export function formatForLevel(
+  item: GrammarBookItem,
+  setType: GrammarExerciseSetType,
+  level: number,
+  available: GrammarFormat[] = availableFormats(item, setType)
+): GrammarFormat {
   if (available[0] === "self") return "self";
   const wanted = LADDER[Math.max(0, Math.min(2, level))];
   return wanted.find((f) => available.includes(f)) ?? (level >= 2 ? nativeFormat(item, setType) : available[0]);
@@ -419,22 +416,28 @@ export function wrongBlanks(task: GrammarTask, values: string[]): number[] {
 
 const ITEM_LEVELS_KEY = "myenglish_grammar_item_levels_v1";
 
-function readLevels(): Record<string, number> {
+let levelsCache: { raw: string; map: Record<string, number> } | null = null;
+
+/** Parsed again only when the stored text changed (any window): the returned map is shared, never change it */
+export function readItemLevels(): Record<string, number> {
   try {
-    return JSON.parse(localStorage.getItem(ITEM_LEVELS_KEY) || "{}") || {};
+    const raw = localStorage.getItem(ITEM_LEVELS_KEY);
+    if (!raw) return {};
+    if (levelsCache?.raw !== raw) levelsCache = { raw, map: JSON.parse(raw) || {} };
+    return levelsCache.map;
   } catch {
     return {};
   }
 }
 
-export function getItemReviewLevel(itemKey: string): number {
-  const v = readLevels()[itemKey];
+export function getItemReviewLevel(itemKey: string, levels: Record<string, number> = readItemLevels()): number {
+  const v = levels[itemKey];
   return typeof v === "number" ? v : 0;
 }
 
 /** Correct (without a hint) moves the item one format up the ladder, a miss one down */
 export function updateItemReviewLevel(itemKey: string, isCorrect: boolean): number {
-  const map = readLevels();
+  const map = { ...readItemLevels() };
   const next = isCorrect ? Math.min(2, (map[itemKey] ?? 0) + 1) : Math.max(0, (map[itemKey] ?? 0) - 1);
   map[itemKey] = next;
   try {

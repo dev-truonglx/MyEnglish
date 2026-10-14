@@ -80,19 +80,26 @@ export interface FSRSSettings {
   maximumInterval: number; // e.g. 365 (days)
 }
 
+const DEFAULT_FSRS_SETTINGS: FSRSSettings = { requestRetention: 0.9, maximumInterval: 365 };
+
 /**
- * Retrieve user's configured FSRS parameters from storage
+ * Retrieve user's configured FSRS parameters from storage. A stored value that is not a sane number falls
+ * back to the default: NaN would make every review throw (an invalid due date).
  */
 export function getFSRSSettings(): FSRSSettings {
   try {
-    const savedRetention = localStorage.getItem(FSRS_RETENTION_KEY);
-    const savedMaxInterval = localStorage.getItem(FSRS_MAX_INTERVAL_KEY);
+    const retention = parseFloat(localStorage.getItem(FSRS_RETENTION_KEY) ?? "");
+    const maxInterval = parseInt(localStorage.getItem(FSRS_MAX_INTERVAL_KEY) ?? "", 10);
     return {
-      requestRetention: savedRetention ? parseFloat(savedRetention) : 0.9,
-      maximumInterval: savedMaxInterval ? parseInt(savedMaxInterval, 10) : 365,
+      requestRetention:
+        Number.isFinite(retention) && retention >= 0.5 && retention <= 0.99 ? retention : DEFAULT_FSRS_SETTINGS.requestRetention,
+      maximumInterval:
+        Number.isFinite(maxInterval) && maxInterval >= 1 && maxInterval <= 36500
+          ? maxInterval
+          : DEFAULT_FSRS_SETTINGS.maximumInterval,
     };
   } catch {
-    return { requestRetention: 0.9, maximumInterval: 365 };
+    return { ...DEFAULT_FSRS_SETTINGS };
   }
 }
 
@@ -271,10 +278,10 @@ export function getNextIntervalPreviews(
   } catch (err) {
     console.warn("Failed to calculate FSRS interval previews:", err);
     return {
-      [Rating.Again]: "1m",
-      [Rating.Hard]: "1d",
-      [Rating.Good]: "3d",
-      [Rating.Easy]: "7d",
+      [Rating.Again]: "1 phút",
+      [Rating.Hard]: "1 ngày",
+      [Rating.Good]: "3 ngày",
+      [Rating.Easy]: "7 ngày",
     };
   }
 }
@@ -497,6 +504,16 @@ export async function loadTodaySchedules(now: Date = new Date()): Promise<WordDe
       srsProduction: srsOf(r, "p_"),
     } as WordDetail;
   });
+}
+
+/** Grammar lessons due for review (on the learner's path); loaded lazily (grammarService imports this module) */
+async function countDueGrammarLessons(): Promise<number> {
+  try {
+    const { getDueGrammarLessons } = await import("./grammarService");
+    return getDueGrammarLessons().length;
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -859,7 +876,10 @@ class SRSBackgroundWorker {
 
   public async tick(forceTrigger: boolean = false) {
     if (this.isTicking && !forceTrigger) return;
-    this.isTicking = true;
+    // Only a normal tick owns the guard: a forced one running beside it must not clear it in its `finally`,
+    // or the next heartbeat would start a second normal tick while this one is still awaiting
+    const ownsGuard = !forceTrigger;
+    if (ownsGuard) this.isTicking = true;
 
     try {
       // Keep the menu-bar / tray count fresh (once a minute), whatever the reminder settings
@@ -896,10 +916,14 @@ class SRSBackgroundWorker {
         // Night, today's goal done, or enough reminders for one day: wait until tomorrow.
         // The goal counts only once no review is due any more (S5)
         const goalMet = (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal();
-        if (goalMet && settings.stopAfterGoal) work = await countTodayWork();
+        let grammarDue = 0;
+        if (goalMet && settings.stopAfterGoal) {
+          work = await countTodayWork();
+          grammarDue = await countDueGrammarLessons();
+        }
         const pause = reminderPause(settings, {
           hour: new Date(now).getHours(),
-          goalReached: goalMet && work?.reviews === 0,
+          goalReached: goalMet && work?.reviews === 0 && grammarDue === 0,
           shownToday: getNudgesShownToday(),
         });
         // A study time the learner chose is not cut by the daily cap (N4)
@@ -932,7 +956,8 @@ class SRSBackgroundWorker {
       if (!forceTrigger) {
         work = work ?? (await countTodayWork());
         if (settings.triggerCondition === "due_only") {
-          if (work.total === 0) return;
+          // Grammar lessons due count too: the popup fills with grammar when no word is due
+          if (work.total === 0 && (await countDueGrammarLessons()) === 0) return;
         } else {
           const db = await getDatabase();
           const rows = await db.select<{ cnt: number }[]>(`SELECT COUNT(*) as cnt FROM words;`);
@@ -1014,7 +1039,7 @@ class SRSBackgroundWorker {
     } catch (err) {
       console.warn("SRS worker tick failed:", err);
     } finally {
-      this.isTicking = false;
+      if (ownsGuard) this.isTicking = false;
     }
   }
 }

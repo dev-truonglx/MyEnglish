@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   BookOpen,
   Sparkles,
@@ -104,6 +104,29 @@ export function getPauseReason(settings: ReminderSettings, goalMet: boolean): st
   return null;
 }
 
+/** The clock to the next reminder ticks by itself, so the whole sidebar does not re-render every second */
+function NextReminderCountdown({ nextMs }: { nextMs: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState === "visible") setNow(Date.now());
+    }, 1000);
+    return () => clearInterval(id);
+  }, []);
+  const remainingSeconds = Math.max(0, Math.ceil((nextMs - now) / 1000));
+  return (
+    <span
+      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
+        remainingSeconds <= 60
+          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 animate-pulse"
+          : "bg-cyan-100/80 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300"
+      }`}
+    >
+      {remainingSeconds <= 0 ? "Đến giờ!" : formatCountdown(remainingSeconds)}
+    </span>
+  );
+}
+
 interface SidebarProps {
   activeTab: DashboardTab;
   setActiveTab: (tab: DashboardTab) => void;
@@ -136,20 +159,32 @@ export default function Sidebar({
   const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(getReminderSettings);
   const [lastDisplayMs, setLastDisplayMs] = useState<number>(getLastPopupDisplayTime);
   const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime);
-  const [now, setNow] = useState<number>(() => Date.now());
+  const [, setStatusTick] = useState(0);
   const [testingPopup, setTestingPopup] = useState(false);
 
-  const {
-    status: updateStatus,
-    newVersion,
-    downloadProgress,
-    dismissed: updateDismissed,
-    downloadAndInstall,
-    restartApp,
-    dismiss: dismissUpdate,
-    checkForUpdates,
-    errorMessage,
-  } = useUpdateStore();
+  // Only the fields shown here: the rest of the store (the update handle, release notes) changing re-renders nothing
+  const updateStatus = useUpdateStore((s) => s.status);
+  const newVersion = useUpdateStore((s) => s.newVersion);
+  const downloadProgress = useUpdateStore((s) => s.downloadProgress);
+  const updateDismissed = useUpdateStore((s) => s.dismissed);
+  const downloadAndInstall = useUpdateStore((s) => s.downloadAndInstall);
+  const restartApp = useUpdateStore((s) => s.restartApp);
+  const dismissUpdate = useUpdateStore((s) => s.dismiss);
+  const checkForUpdates = useUpdateStore((s) => s.checkForUpdates);
+  const errorMessage = useUpdateStore((s) => s.errorMessage);
+
+  // Words met so far, once per words change (not on every render of the sidebar)
+  const libraryWordCount = useMemo(
+    () =>
+      words.filter(
+        (w) =>
+          !w.catalog_id ||
+          (w.srs?.reps ?? 0) > 0 ||
+          (w.srs?.state ?? 0) > 0 ||
+          Boolean(w.srs?.last_review)
+      ).length,
+    [words]
+  );
 
   const handleThemeChange = (mode: ThemeMode) => {
     setCurrentTheme(mode);
@@ -184,7 +219,9 @@ export default function Sidebar({
 
   useEffect(() => {
     const syncReminder = () => {
-      setReminderSettings(getReminderSettings());
+      // Same values keep the old object: the 5 s poll must not re-render the sidebar for nothing
+      const next = getReminderSettings();
+      setReminderSettings((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
       setLastDisplayMs(getLastPopupDisplayTime());
       setNextReminderMs(getNextReminderTime());
     };
@@ -193,23 +230,19 @@ export default function Sidebar({
     window.addEventListener("myenglish-reminder-settings-updated", syncReminder);
     window.addEventListener("myenglish-popup-displayed", syncReminder);
 
-    const secondTimer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        setNow(Date.now());
-      }
-    }, 1000);
-
     const syncTimer = setInterval(() => {
       if (document.visibilityState === "visible") {
         syncReminder();
       }
     }, 5000);
 
+    // Status (snoozed / paused / night) is read at render time: a slow re-render keeps it current
+    const statusTimer = setInterval(() => {
+      if (document.visibilityState === "visible") setStatusTick((t) => t + 1);
+    }, 15000);
+
     const onVisible = () => {
-      if (document.visibilityState === "visible") {
-        setNow(Date.now());
-        syncReminder();
-      }
+      if (document.visibilityState === "visible") syncReminder();
     };
     document.addEventListener("visibilitychange", onVisible);
 
@@ -217,8 +250,8 @@ export default function Sidebar({
       window.removeEventListener("myenglish-reminder-settings-updated", syncReminder);
       window.removeEventListener("myenglish-popup-displayed", syncReminder);
       document.removeEventListener("visibilitychange", onVisible);
-      clearInterval(secondTimer);
       clearInterval(syncTimer);
+      clearInterval(statusTimer);
     };
   }, []);
 
@@ -242,15 +275,7 @@ export default function Sidebar({
       tab: "library",
       label: "Từ đã học",
       icon: BookOpen,
-      badge: countBadge(
-        words.filter(
-          (w) =>
-            !w.catalog_id ||
-            (w.srs?.reps ?? 0) > 0 ||
-            (w.srs?.state ?? 0) > 0 ||
-            Boolean(w.srs?.last_review)
-        ).length
-      ),
+      badge: countBadge(libraryWordCount),
     },
     { tab: "grammar", label: "Ngữ pháp", icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     { tab: "pronunciation", label: "Phát âm", icon: AudioLines, iconClass: "text-violet-500" },
@@ -554,7 +579,6 @@ export default function Sidebar({
           const isReminderEnabled = reminderSettings.enabled && reminderSettings.intervalMinutes > 0;
           const snoozed = isSnoozed();
           const pauseReason = isReminderEnabled && !snoozed ? getPauseReason(reminderSettings, Boolean(streakStats.goalReached)) : null;
-          const remainingSeconds = Math.max(0, Math.ceil((nextReminderMs - now) / 1000));
 
           let statusBadge: ReactNode;
           if (!isReminderEnabled) {
@@ -652,15 +676,7 @@ export default function Sidebar({
                     <span className="font-bold text-slate-900 dark:text-zinc-100 text-[11px]">
                       {formatDisplayTime(nextReminderMs)}
                     </span>
-                    <span
-                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-                        remainingSeconds <= 60
-                          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 animate-pulse"
-                          : "bg-cyan-100/80 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300"
-                      }`}
-                    >
-                      {remainingSeconds <= 0 ? "Đến giờ!" : formatCountdown(remainingSeconds)}
-                    </span>
+                    <NextReminderCountdown nextMs={nextReminderMs} />
                   </div>
                 )}
               </div>

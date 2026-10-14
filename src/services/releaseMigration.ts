@@ -1,6 +1,6 @@
 import { getDatabase } from "./db";
 import { ensureCatalogSeeded } from "./vocabCatalog";
-import { ensureGrammarBookSeeded, clearBookCache } from "./grammarBook";
+import { ensureGrammarBookSeeded, notifyBookUpdated } from "./grammarBook";
 import { GRAMMAR_CONTENT_VERSION_KEY, TARGET_GRAMMAR_CONTENT_VERSION } from "./grammarReset";
 
 export const RELEASE_WIPE_VERSION_KEY = "myenglish_release_wipe_version";
@@ -16,6 +16,7 @@ const TABLES_TO_CLEAR = [
   "mistakes",
   "grammar_progress",
   "grammar_custom_exercises",
+  "grammar_exercise_imports",
   "grammar_book_items",
   "grammar_book_sets",
   "grammar_book_lessons",
@@ -103,7 +104,7 @@ async function runReleaseMigrationV27(): Promise<boolean> {
     }
 
     // 4. Reset in-memory book caches
-    clearBookCache();
+    notifyBookUpdated([]); // other windows (the review popup) drop their copy too
 
     // 5. Re-import all catalog data freshly
     await ensureCatalogSeeded().catch((err) => console.warn("[ReleaseMigration] Failed to seed vocab catalog:", err));

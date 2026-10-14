@@ -7,7 +7,7 @@ import {
   selectChapterLessons,
   toggleLessonSelection,
 } from "@/services/grammarPath";
-import { getLessonProgress } from "@/services/grammarService";
+import { getDueGrammarLessons, getLessonProgress } from "@/services/grammarService";
 import { lessonStatus } from "@/services/grammarSession";
 import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 import { buildTenseGrid, TENSE_COLUMNS, TENSE_ROWS } from "@/utils/tenseGrid";
@@ -405,23 +405,24 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
 
   const pathSet = useMemo(() => new Set(getEffectiveLessonIds()), [chapters, tick]);
 
-  const summaries = useMemo(
-    () =>
-      chapters.map((chapter) => {
-        const rows: LessonRow[] = (chapter.lessons ?? []).map((lesson) => {
-          const status = lessonStatus(lesson.id);
-          const progress = getLessonProgress(lesson.id);
-          return {
-            lesson,
-            status,
-            mastery: progress.mastery,
-            reviewText: status === "new" ? null : reviewText(formatNextReviewRelative(progress.nextReviewDate).label),
-          };
-        });
-        return { chapter, rows, studied: rows.filter((r) => r.status !== "new").length };
-      }),
-    [chapters, tick]
-  );
+  const summaries = useMemo(() => {
+    // The lessons due now, worked out once for the whole list instead of once per lesson
+    const now = new Date();
+    const due = new Set(getDueGrammarLessons(now));
+    return chapters.map((chapter) => {
+      const rows: LessonRow[] = (chapter.lessons ?? []).map((lesson) => {
+        const status = lessonStatus(lesson.id, now, due);
+        const progress = getLessonProgress(lesson.id);
+        return {
+          lesson,
+          status,
+          mastery: progress.mastery,
+          reviewText: status === "new" ? null : reviewText(formatNextReviewRelative(progress.nextReviewDate).label),
+        };
+      });
+      return { chapter, rows, studied: rows.filter((r) => r.status !== "new").length };
+    });
+  }, [chapters, tick]);
 
   // The first lesson of the path, in book order, that the learner has not met yet
   const nextLessonId = useMemo(() => {

@@ -226,7 +226,7 @@ export function getAchievements(context?: {
   let stored: Record<string, StoredAchievement> = {};
   try {
     const raw = localStorage.getItem(ACHIEVEMENTS_STORAGE_KEY);
-    if (raw) stored = JSON.parse(raw);
+    stored = parseStoredAchievements(raw);
   } catch {}
 
   const ctx = context || {};
@@ -329,10 +329,17 @@ export function recordFirstTryCorrect(): number {
   return next;
 }
 
+/** The stored unlocks as a plain object: a stored "null" or an array would throw on `stored[id]` */
+function parseStoredAchievements(raw: string | null): Record<string, StoredAchievement> {
+  if (!raw) return {};
+  const parsed: unknown = JSON.parse(raw);
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, StoredAchievement>) : {};
+}
+
 function readStoredAchievements(): Record<string, StoredAchievement> {
   try {
     const raw = localStorage.getItem(ACHIEVEMENTS_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
+    return parseStoredAchievements(raw);
   } catch {}
   return {};
 }

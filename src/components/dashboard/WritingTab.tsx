@@ -20,6 +20,7 @@ import {
 import { recordDailyActivity } from "@/services/streak";
 import { getActiveCefrLevel } from "@/services/pipeline";
 import { bankStatus } from "@/services/reading";
+import { shuffle } from "@/lib/utils";
 import { PAGE_CONTAINER } from "./shared";
 import MistakeReview from "./MistakeReview";
 
@@ -95,10 +96,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
   // A few words being learned, to try using them in today's update (output practice)
   const suggestions = useMemo(
     () =>
-      words
-        .filter((w) => bankStatus(w) === "learning" && !/\s/.test(w.word))
-        .sort(() => Math.random() - 0.5)
-        .slice(0, 4),
+      shuffle(words.filter((w) => bankStatus(w) === "learning" && !/\s/.test(w.word))).slice(0, 4),
     // Picked once per visit, not on every word refresh
     []
   );

@@ -63,6 +63,12 @@ const SEED_BATCH = 200;
 /**
  * Copy the bundled deck into SQLite when it is missing or older than CATALOG_VERSION. Cheap otherwise
  * (one query). Safe to call from several places: concurrent calls share one run.
+ *
+ * The copy is not one transaction (the SQL plugin pools connections), so it is built to be safe when read or
+ * repeated meanwhile: the deck is upserted over the old one (never emptied first), rows that left the deck are
+ * removed at the end, and the `count` and `version` markers are written last, in one statement. Readers treat
+ * a deck without the current version marker as not ready (see isCatalogReady); another window seeding at the
+ * same time only repeats the same upserts.
  */
 let seeding: Promise<void> | null = null;
 export function ensureCatalogSeeded(load: () => Promise<CatalogFile> = loadCatalogFile): Promise<void> {
@@ -72,13 +78,18 @@ export function ensureCatalogSeeded(load: () => Promise<CatalogFile> = loadCatal
   return seeding;
 }
 
+async function readCatalogVersion(db: Awaited<ReturnType<typeof getDatabase>>): Promise<number> {
+  const rows = await db.select<Array<{ value: string }>>(`SELECT value FROM vocab_catalog_meta WHERE key = 'version'`);
+  return Number(rows[0]?.value);
+}
+
 async function seedCatalog(load: () => Promise<CatalogFile>): Promise<void> {
   const db = await getDatabase();
-  const rows = await db.select<Array<{ value: string }>>(`SELECT value FROM vocab_catalog_meta WHERE key = 'version'`);
-  if (Number(rows[0]?.value) === CATALOG_VERSION) return;
+  if ((await readCatalogVersion(db)) === CATALOG_VERSION) return;
 
   const file = await load();
-  await db.execute(`DELETE FROM vocab_catalog`);
+  // Another window may have finished the copy while the deck was loading
+  if ((await readCatalogVersion(db)) === CATALOG_VERSION) return;
   for (let start = 0; start < file.words.length; start += SEED_BATCH) {
     const batch = file.words.slice(start, start + SEED_BATCH);
     const params: unknown[] = [];
@@ -92,14 +103,35 @@ async function seedCatalog(load: () => Promise<CatalogFile>): Promise<void> {
       params
     );
   }
+  // Words that left the deck (one statement; SQLite allows 32766 variables)
+  if (file.words.length > 0 && file.words.length <= 30000) {
+    await db.execute(
+      `DELETE FROM vocab_catalog WHERE id NOT IN (${file.words.map((_, i) => `$${i + 1}`).join(", ")})`,
+      file.words.map((w) => w.id)
+    );
+  }
   await db.execute(
-    `INSERT INTO vocab_catalog_meta (key, value) VALUES ('version', $1)
+    `INSERT INTO vocab_catalog_meta (key, value) VALUES ('count', $1), ('version', $2)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-    [String(file.version)]
+    [String(file.words.length), String(file.version)]
   );
 }
 
-interface CatalogRow {
+/**
+ * Whether the deck in SQLite is complete: the version marker (written last by the copy) is current and, when
+ * the copy recorded its size, that many rows are there. A reader that sees a deck mid-copy must not cache it.
+ */
+async function isCatalogReady(db: Awaited<ReturnType<typeof getDatabase>>, rowCount: number): Promise<boolean> {
+  const meta = await db.select<Array<{ key: string; value: string }>>(
+    `SELECT key, value FROM vocab_catalog_meta WHERE key IN ('version', 'count')`
+  );
+  const version = Number(meta.find((m) => m.key === "version")?.value);
+  if (!(version >= CATALOG_VERSION)) return false;
+  const expected = Number(meta.find((m) => m.key === "count")?.value);
+  return !Number.isFinite(expected) || rowCount >= expected;
+}
+
+export interface CatalogRow {
   id: string;
   word: string;
   cefr: string;
@@ -112,8 +144,16 @@ interface CatalogRow {
   data: string;
 }
 
-export function rowToEntry(row: CatalogRow): CatalogEntry {
-  const data = JSON.parse(row.data) as Omit<CatalogEntry, "id" | "word" | "cefr" | "list" | "order" | "freq" | "it" | "pos" | "vn">;
+/** null for a row whose JSON data is corrupt: one bad row must not break every lookup */
+export function rowToEntry(row: CatalogRow): CatalogEntry | null {
+  let data: Omit<CatalogEntry, "id" | "word" | "cefr" | "list" | "order" | "freq" | "it" | "pos" | "vn">;
+  try {
+    const parsed = JSON.parse(row.data);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+    data = parsed;
+  } catch {
+    return null;
+  }
   return {
     id: row.id,
     word: row.word,
@@ -128,6 +168,11 @@ export function rowToEntry(row: CatalogRow): CatalogEntry {
   };
 }
 
+/** The entries of the rows, skipping corrupt ones */
+export function rowsToEntries(rows: CatalogRow[]): CatalogEntry[] {
+  return rows.flatMap((r) => rowToEntry(r) ?? []);
+}
+
 const ENTRY_COLUMNS = "id, word, cefr, list, study_order, freq, it, pos, vn, data";
 
 export async function getCatalogEntries(ids: string[]): Promise<CatalogEntry[]> {
@@ -140,7 +185,7 @@ export async function getCatalogEntries(ids: string[]): Promise<CatalogEntry[]> 
       `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog WHERE id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")})`,
       chunk
     );
-    out.push(...rows.map(rowToEntry));
+    out.push(...rowsToEntries(rows));
   }
   const order = new Map(ids.map((id, i) => [id, i]));
   return out.sort((a, b) => (order.get(a.id) ?? 0) - (order.get(b.id) ?? 0));
@@ -156,18 +201,19 @@ export async function findCatalogWord(text: string, lemmas: string[] = []): Prom
   if (keys.length === 0) return [];
   const rows = await db.select<CatalogRow[]>(
     `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog
-     WHERE LOWER(word) IN (${keys.map((_, i) => `$${i + 1}`).join(", ")})
+     WHERE word COLLATE NOCASE IN (${keys.map((_, i) => `$${i + 1}`).join(", ")})
      ORDER BY CASE WHEN word = LOWER(word) THEN 0 ELSE 1 END, study_order`,
     keys
   );
-  if (rows.length > 0) return rows.map(rowToEntry);
+  if (rows.length > 0) return rowsToEntries(rows);
   // Other spellings and irregular forms live in the JSON data: a LIKE prefilter keeps this cheap
+  const needle = keys[0].replace(/[%_"]/g, "");
+  if (!needle) return [];
   const like = await db.select<CatalogRow[]>(
     `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog WHERE data LIKE $1 LIMIT 20`,
-    [`%"${keys[0].replace(/[%_"]/g, "")}"%`]
+    [`%"${needle}"%`]
   );
-  return like
-    .map(rowToEntry)
+  return rowsToEntries(like)
     .filter((e) => [...e.variants, ...e.irregular].some((f) => keys.includes(f.toLowerCase())));
 }
 
@@ -177,10 +223,10 @@ export async function searchCatalog(prefix: string, limit = 40): Promise<Catalog
   if (!q) return [];
   const db = await getDatabase();
   const rows = await db.select<CatalogRow[]>(
-    `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog WHERE LOWER(word) LIKE $1 ORDER BY LENGTH(word), study_order LIMIT $2`,
+    `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog WHERE word LIKE $1 ORDER BY LENGTH(word), study_order LIMIT $2`,
     [`${q.replace(/[%_]/g, "")}%`, limit]
   );
-  return rows.map(rowToEntry);
+  return rowsToEntries(rows);
 }
 
 let meaningsLoading: Promise<number> | null = null;
@@ -196,7 +242,8 @@ export function loadCatalogMeanings(): Promise<number> {
     const db = await getDatabase();
     const rows = await db.select<Array<{ word: string; vn: string }>>(`SELECT word, vn FROM vocab_catalog`);
     registerCatalogMeanings(rows);
-    if (rows.length === 0) meaningsLoading = null;
+    // A deck still being copied (or not there yet) is registered as far as it goes but not cached as loaded
+    if (rows.length === 0 || !(await isCatalogReady(db, rows.length))) meaningsLoading = null;
     return rows.length;
   })().catch((err) => {
     meaningsLoading = null;

@@ -86,6 +86,11 @@ describe("#3 popup answers are graded like flashcards", () => {
   it("never grades Easy automatically", () => {
     expect(popupAnswerRating(true, "multiple_choice", 300)).toBe(Rating.Good);
   });
+
+  it("the typing hint makes a right answer Hard, as in flashcard sessions", () => {
+    expect(popupAnswerRating(true, "cloze", 3000, false, false, true)).toBe(Rating.Hard);
+    expect(popupAnswerRating(false, "cloze", 3000, false, false, true)).toBe(Rating.Again);
+  });
 });
 
 describe("#6 ignored reminders back off", () => {
@@ -193,12 +198,39 @@ describe("#7 smart popup exercise mode ladder", () => {
        WHERE word_id = $1`,
       [id]
     );
+    // An install upgraded from before the one-time repair
+    await conn.execute(`DELETE FROM app_kv WHERE key = 'repair_stuck_learning_v1'`);
     await db.initSchema(conn);
     const [repaired] = await db.getWordsByIds([id]);
     expect(repaired.srs.state).toBe(2);
     expect(repaired.srs.stability).toBeGreaterThanOrEqual(3);
     expect(repaired.srs.difficulty).toBe(5);
     expect(repaired.srs.scheduled_days).toBe(3);
+  });
+
+  it("does not repeat the repair on later launches (a genuine lapse stays in Relearning)", async () => {
+    const { freshServices } = await import("./helpers");
+    const { db } = await freshServices();
+    const conn = await db.getDatabase();
+    await db.initSchema(conn); // first launch of the repaired build: runs once
+    const id = await db.insertEnrichedWord({
+      word: "so",
+      meaning_vn: "vì vậy",
+      synonyms: [],
+      antonyms: [],
+      examples: [],
+    });
+    await conn.execute(
+      `UPDATE srs_reviews
+       SET state = 3, reps = 6, lapses = 1, stability = 0.8, difficulty = 7, learning_steps = 0,
+           last_review = '2026-10-13T03:40:46.892Z', next_review_date = '2026-10-13T03:50:46.892Z'
+       WHERE word_id = $1`,
+      [id]
+    );
+    await db.initSchema(conn); // e.g. the popup window opening
+    const [card] = await db.getWordsByIds([id]);
+    expect(card.srs.state).toBe(3);
+    expect(card.srs.next_review_date).toBe("2026-10-13T03:50:46.892Z");
   });
 });
 

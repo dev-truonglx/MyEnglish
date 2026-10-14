@@ -54,8 +54,14 @@ describe("comeback: the plan's new words (not cut by the backlog)", () => {
     expect(smart.buildReviewSession(words, none, new Date(), { noNewCards: true }).filter(isNew)).toHaveLength(0);
 
     const two = smart.buildReviewSession(words, none, new Date(), { maxCards: 20, comebackNewCards: 2 });
-    expect(two).toHaveLength(20);
+    // maxCards is the reviews' cut (today's share); the plan's new cards come on top of it
+    expect(two).toHaveLength(22);
     expect(two.filter(isNew)).toHaveLength(2);
+
+    // A small share left today (4) keeps its reviews: the new cards no longer eat the session
+    const small = smart.buildReviewSession(words, none, new Date(), { maxCards: 4, comebackNewCards: 2 });
+    expect(small.filter(isNew)).toHaveLength(2);
+    expect(small.filter((c) => !isNew(c))).toHaveLength(4);
 
     const oneLeft = smart.buildReviewSession(words, { recognition: 1, production: 0 }, new Date(), { maxCards: 20, comebackNewCards: 2 });
     expect(oneLeft.filter(isNew)).toHaveLength(1);

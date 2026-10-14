@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   generateExercisePrompt,
   cleanRawJsonText,
@@ -10,6 +10,16 @@ import {
   type CustomExercisesPayload,
 } from "@/services/grammarCustomExercises";
 import { getDatabase } from "@/services/db";
+import * as book from "@/services/grammarBook";
+import type { GrammarBookFile } from "@/types/grammarBook";
+import p1 from "./fixtures/grammarBook/ch01-p1.json";
+import p2 from "./fixtures/grammarBook/ch01-p2.json";
+
+/** The sample chapter (lessons ch01-l01 .. l03) imported, as the AI batches need an imported chapter */
+async function importSampleChapter() {
+  const chapter = book.mergeChapterParts([structuredClone(p1), structuredClone(p2)] as unknown as GrammarBookFile[]).get("ch01")!;
+  await book.saveGrammarBookChapter(chapter);
+}
 
 describe("Grammar Custom Exercises & AI Prompt", () => {
   beforeEach(async () => {
@@ -18,6 +28,7 @@ describe("Grammar Custom Exercises & AI Prompt", () => {
     await db.execute("DELETE FROM grammar_exercise_imports;");
     await db.execute("DELETE FROM grammar_book_items WHERE id LIKE 'ch01:ch01-s-ai-%';");
     await db.execute("DELETE FROM grammar_book_sets WHERE id LIKE 'ch01-s-ai-%';");
+    await importSampleChapter();
   });
 
   describe("generateExercisePrompt", () => {
@@ -153,6 +164,56 @@ describe("Grammar Custom Exercises & AI Prompt", () => {
     });
   });
 
+  describe("reading the AI's JSON like a book file", () => {
+    const exercise = { lessonId: "ch01-l01", prompt: "They ___ (visit) us every summer.", answers: [["visit"]] };
+
+    it("takes text before the JSON with no code fence, and a trailing comma", () => {
+      const raw = `Đây là bộ bài tập của bạn nhé:\n{ "chapterId": "ch01", "exercises": [ ${JSON.stringify(exercise)}, ], }\nChúc bạn học tốt!`;
+      const res = parseAndValidateExerciseJson(raw);
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.payload.exercises).toHaveLength(1);
+    });
+
+    it("leaves a comma-bracket sequence inside a string alone", () => {
+      const raw = JSON.stringify({
+        exercises: [{ ...exercise, explainVn: "Giữ nguyên chuỗi này: [a, ], {b, }" }],
+      });
+      const res = parseAndValidateExerciseJson(raw);
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.payload.exercises[0].explainVn).toBe("Giữ nguyên chuỗi này: [a, ], {b, }");
+    });
+
+    it("rejects an answer that is an object instead of turning it into text", () => {
+      const raw = JSON.stringify({ exercises: [{ ...exercise, answers: [{ text: "visit" }] }] });
+      const res = parseAndValidateExerciseJson(raw);
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.error).toContain("answers");
+    });
+
+    it("keeps an empty answer in its place so the other blanks do not shift", () => {
+      const raw = JSON.stringify({
+        exercises: [{ prompt: "I ___ the ___ report ___ today.", answers: [["read"], [""], ["again"]] }],
+      });
+      const res = parseAndValidateExerciseJson(raw);
+      expect(res.ok).toBe(true);
+      if (res.ok) expect(res.payload.exercises[0].answers).toEqual([["read"], [""], ["again"]]);
+    });
+
+    it("a flat list of two answers for one blank is two accepted answers, not two blanks", () => {
+      const raw = JSON.stringify({ exercises: [{ prompt: "We ___ happy.", answers: ["are", "were"] }] });
+      const res = parseAndValidateExerciseJson(raw);
+      expect(res.ok && res.payload.exercises[0].answers).toEqual([["are", "were"]]);
+    });
+
+    it("reads 'ch1' as ch01 and falls back to the chosen chapter for a chapter that does not exist", () => {
+      const ok = parseAndValidateExerciseJson(JSON.stringify({ chapterId: "ch5", exercises: [exercise] }), "ch02");
+      expect(ok.ok && ok.payload.chapterId).toBe("ch05");
+      const bad = parseAndValidateExerciseJson(JSON.stringify({ chapterId: "ch99", exercises: [exercise] }), "ch02");
+      expect(bad.ok && bad.payload.chapterId).toBe("ch02");
+      expect(bad.ok && bad.warnings.some((w) => w.includes("ch99"))).toBe(true);
+    });
+  });
+
   describe("Database Operations & Undo History", () => {
     it("saves custom batch, records history, and reverts (undoes) cleanly", async () => {
       const payload: CustomExercisesPayload = {
@@ -224,6 +285,83 @@ describe("Grammar Custom Exercises & AI Prompt", () => {
       await deleteExerciseImportRecord(record.id);
       const historyAfterDelete = await listExerciseImportHistory();
       expect(historyAfterDelete.find((h) => h.id === record.id)).toBeUndefined();
+    });
+
+    const batch = (over: Partial<CustomExercisesPayload> = {}): CustomExercisesPayload => ({
+      format: "myenglish-grammar-exercises",
+      chapterId: "ch01",
+      title: "Batch",
+      exercises: [{ lessonId: "ch01-l01", type: "fill_blank", prompt: "She ___ (read) every night.", answers: [["reads"]] }],
+      ...over,
+    });
+
+    it("refuses a chapter that is not imported and a lesson that is not in the chapter", async () => {
+      await expect(saveCustomExerciseBatch(batch({ chapterId: "ch05" }), "{}")).rejects.toThrow(/chưa được nhập/);
+      await expect(
+        saveCustomExerciseBatch(batch({ exercises: [{ lessonId: "ch01-l77", prompt: "A ___ b.", answers: [["x"]] }] }), "{}")
+      ).rejects.toThrow(/ch01-l77/);
+      await expect(
+        saveCustomExerciseBatch(batch({ exercises: [{ prompt: "A ___ b.", answers: [["x"]] }] }), "{}")
+      ).rejects.toThrow(/lessonId/);
+      // Nothing was written by the refused saves
+      expect(await listExerciseImportHistory()).toHaveLength(0);
+    });
+
+    it("a save that fails half-way leaves no rows behind and a history that cannot mislead", async () => {
+      const db = await getDatabase();
+      const original = db.execute.bind(db);
+      const spy = vi.spyOn(db, "execute").mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (/INSERT OR REPLACE INTO grammar_book_items/.test(sql)) throw new Error("disk full");
+        return original(sql, params);
+      });
+      await expect(saveCustomExerciseBatch(batch(), "{}")).rejects.toThrow("disk full");
+      spy.mockRestore();
+      const left = await db.select<Array<{ id: string }>>("SELECT id FROM grammar_book_sets WHERE id LIKE 'ch01-s-ai-%';");
+      expect(left).toHaveLength(0);
+      const history = await listExerciseImportHistory();
+      expect(history.every((h) => h.status === "reverted")).toBe(true);
+    });
+
+    it("an interrupted save stays pending in the table, is listed as active, and undoing it removes every row stamped with its id", async () => {
+      const db = await getDatabase();
+      const original = db.execute.bind(db);
+      // The cleanup of the failed save fails too: the pending history and the half-written set stay
+      const spy = vi.spyOn(db, "execute").mockImplementation(async (sql: string, params?: unknown[]) => {
+        if (/INSERT OR REPLACE INTO grammar_book_items/.test(sql) || /^DELETE FROM grammar_book_/.test(sql.trim())) throw new Error("io");
+        return original(sql, params);
+      });
+      await expect(saveCustomExerciseBatch(batch(), "{}")).rejects.toThrow("io");
+      spy.mockRestore();
+      const [row] = await listExerciseImportHistory();
+      expect(row.status).toBe("active");
+      const raw = await db.select<Array<{ status: string }>>("SELECT status FROM grammar_exercise_imports;");
+      expect(raw[0].status).toBe("pending");
+      // A stray item of the batch that the history does not list
+      await db.execute("INSERT INTO grammar_book_items (id, chapter_id, ord, data) VALUES ($1, 'ch01', 999, $2);", [
+        "ch01:stray#1",
+        JSON.stringify({ setId: "stray", n: 1, prompt: "x ___", answers: [["y"]], importBatchId: row.id }),
+      ]);
+      expect(await revertCustomExerciseBatch(row.id)).toBe(true);
+      const sets = await db.select<Array<{ id: string }>>("SELECT id FROM grammar_book_sets WHERE id LIKE 'ch01-s-ai-%';");
+      const stray = await db.select<Array<{ id: string }>>("SELECT id FROM grammar_book_items WHERE id = 'ch01:stray#1';");
+      expect(sets).toHaveLength(0);
+      expect(stray).toHaveLength(0);
+      expect((await listExerciseImportHistory())[0].status).toBe("reverted");
+    });
+
+    it("replacing the chapter keeps the AI batches; resetting the book marks their history as reverted", async () => {
+      const record = await saveCustomExerciseBatch(batch(), "{}");
+      const again = book.mergeChapterParts([structuredClone(p1)] as unknown as GrammarBookFile[]).get("ch01")!;
+      await book.saveGrammarBookChapter(again, { mode: "replace" });
+      const db = await getDatabase();
+      const items = await db.select<Array<{ id: string }>>("SELECT id FROM grammar_book_items WHERE id = $1;", [record.itemIds[0]]);
+      expect(items).toHaveLength(1);
+      const chapter = await book.getBookChapter("ch01");
+      expect(chapter!.practiceGroups!.flatMap((g) => g.items).some((it) => it.prompt.startsWith("She ___ (read)"))).toBe(true);
+      expect((await listExerciseImportHistory())[0].status).toBe("active");
+
+      await book.clearGrammarBook();
+      expect((await listExerciseImportHistory())[0].status).toBe("reverted");
     });
   });
 });

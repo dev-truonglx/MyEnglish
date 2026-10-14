@@ -265,6 +265,12 @@ async function repairMissingSrsRows(db: Database): Promise<void> {
           SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'intro'
         );
     `);
+    // One-time fix for cards stuck by the old letter_tiles grading. Must not run on every window open:
+    // it would also promote genuine Learning/Relearning cards (e.g. a fresh lapse) to Review +3 days.
+    const done = await db.select<{ value: string }[]>(
+      `SELECT value FROM app_kv WHERE key = 'repair_stuck_learning_v1';`
+    );
+    if (done.length > 0) return;
     for (const table of ["srs_reviews", "srs_production"]) {
       await db.execute(`
         UPDATE ${table}
@@ -283,6 +289,9 @@ async function repairMissingSrsRows(db: Database): Promise<void> {
           AND (state IN (1, 3) OR (state = 2 AND lapses = 0 AND difficulty > 8.0));
       `);
     }
+    await db.execute(
+      `INSERT OR REPLACE INTO app_kv (key, value) VALUES ('repair_stuck_learning_v1', '1');`
+    );
   } catch (e) {
     console.warn("SRS row repair notice:", e);
   }
@@ -332,6 +341,12 @@ async function runMigrations(db: Database): Promise<void> {
     }
   };
 
+  // Record each finished block, so a failure in a later block can't re-run earlier ones that are
+  // not safe to repeat (the v1 dedupe would delete deck words such as "May" next to "may")
+  const checkpoint = async (reached: number) => {
+    if (failures === 0 && version < reached) await db.execute(`PRAGMA user_version = ${reached};`);
+  };
+
   if (version < 1) {
     // Columns added over time (errors mean the column already exists)
     await tryExec(`ALTER TABLE words ADD COLUMN phonetic TEXT;`);
@@ -367,13 +382,19 @@ async function runMigrations(db: Database): Promise<void> {
       console.warn("FSRS legacy data migration notice:", e);
     }
 
-    // Deduplicate words, keeping the copy with the most review progress
+    // Deduplicate words, keeping the copy with the most review progress. Deck words are keyed by
+    // catalog_id ("May" and "may" are both in the deck) when this block runs on a newer file.
+    const wordCols = await db.select<{ name: string }[]>(`PRAGMA table_info(words);`);
+    const hasCatalogId = wordCols.some((c) => c.name === "catalog_id");
     try {
+      const dedupeKey = hasCatalogId
+        ? "COALESCE(w.catalog_id, LOWER(TRIM(w.word)))"
+        : "LOWER(TRIM(w.word))";
       await db.execute(`
         DELETE FROM words WHERE id NOT IN (
           SELECT id FROM (
             SELECT w.id, ROW_NUMBER() OVER (
-              PARTITION BY LOWER(TRIM(w.word))
+              PARTITION BY ${dedupeKey}
               ORDER BY COALESCE(s.reps, 0) DESC, w.created_at DESC
             ) as rn
             FROM words w LEFT JOIN srs_reviews s ON s.word_id = w.id
@@ -386,13 +407,18 @@ async function runMigrations(db: Database): Promise<void> {
       console.warn("Deduplication notice:", e);
     }
 
-    await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word_unique ON words(LOWER(TRIM(word)));`);
+    // Superseded in v10 by per-catalog uniqueness; creating it on a file that already has deck words
+    // would fail (case variants) and keep the schema version stuck
+    if (!hasCatalogId) {
+      await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_word_unique ON words(LOWER(TRIM(word)));`);
+    }
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_word ON words(word);`);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_topic ON words(topic);`);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_examples_word_id ON examples(word_id);`);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_srs_reviews_next_date ON srs_reviews(next_review_date);`);
   }
 
+  await checkpoint(1);
   if (version < 2) {
     // ts-fsrs v5 needs the current learning step persisted, otherwise Learning cards never graduate
     await tryExec(`ALTER TABLE srs_reviews ADD COLUMN learning_steps INTEGER DEFAULT 0;`);
@@ -403,6 +429,7 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`UPDATE words SET created_at = REPLACE(created_at, ' ', 'T') || 'Z' WHERE created_at NOT LIKE '%T%';`);
   }
 
+  await checkpoint(2);
   if (version < 3) {
     // 1 = scheduled FSRS review, 0 = practice outside the schedule, NULL = logged before this column existed.
     // Only rows with is_scheduled = 1 are valid training data for the FSRS optimizer.
@@ -410,6 +437,7 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`ALTER TABLE review_logs ADD COLUMN is_scheduled INTEGER;`);
   }
 
+  await checkpoint(3);
   if (version < 4) {
     // Production cards (recall the English word) get their own FSRS schedule, separate from recognition.
     await db.execute(`
@@ -456,17 +484,20 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`ALTER TABLE review_logs ADD COLUMN direction TEXT;`);
   }
 
+  await checkpoint(4);
   if (version < 5) {
     // CEFR level of the term (from AI enrichment), used to keep content and assessment level-accurate
     await tryExec(`ALTER TABLE words ADD COLUMN cefr_level TEXT;`);
   }
 
+  await checkpoint(5);
   if (version < 6) {
     // The v1 dedupe deleted words without their review logs; drop those orphans
     await initReviewLogsTable(db);
     await tryExec(`DELETE FROM review_logs WHERE word_id NOT IN (SELECT id FROM words);`);
   }
 
+  await checkpoint(6);
   if (version < 7) {
     // Memory state of the card just before each answer: true retention (answers to cards in Review state),
     // calibration (predicted R vs remembered) and clean training data for the FSRS optimizer
@@ -484,6 +515,7 @@ async function runMigrations(db: Database): Promise<void> {
     // "user_context" = the sentence the learner met the word in
     await tryExec(`ALTER TABLE examples ADD COLUMN source TEXT;`);
   }
+  await checkpoint(7);
   if (version < 8) {
     // Learning moments and reminder outcomes: words reaching long-term memory, and what happened to each
     // reminder (shown / opened / snoozed / ignored) and session, to see and tune study habits
@@ -499,6 +531,7 @@ async function runMigrations(db: Database): Promise<void> {
     `);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_learning_events_type_at ON learning_events(type, at);`);
   }
+  await checkpoint(8);
   if (version < 9) {
     // The learner's own mistakes (from AI-corrected writing), reviewed as cards with their own FSRS schedule
     await tryExec(`
@@ -527,6 +560,7 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_due ON mistakes(next_review_date);`);
   }
 
+  await checkpoint(9);
   if (version < 10) {
     // Vocabulary comes from the bundled Oxford 5000 deck (vocab_catalog). `words` holds the words met or
     // waiting to be introduced, each linked to its catalog entry.
@@ -559,6 +593,7 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_words_free_unique ON words(LOWER(TRIM(word))) WHERE catalog_id IS NULL;`);
   }
 
+  await checkpoint(10);
   if (version < 11) {
     // Schema v11: Grammar book chapters, lessons, exercise sets, items
     await tryExec(`
@@ -598,6 +633,7 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_grammar_book_items_ch ON grammar_book_items(chapter_id, ord);`);
   }
 
+  await checkpoint(11);
   if (version < 12) {
     // Schema v12: some databases reached v11 from an early build that had not created the grammar book
     // tables yet; create them (no-op where they exist)
@@ -1005,17 +1041,24 @@ const CATALOG_INSERT_BATCH = 50;
 /**
  * Add words of the deck with a few multi-row statements per batch (words, their recognition card, their
  * examples) instead of several round trips per word. A catalog entry already in `words` is left as is.
- * Returns catalog id -> word id for every item (new or already there).
+ * Returns catalog id -> word id for every item (new or already there), and the catalog ids this call
+ * really created: the main window, the popup and the tray refresh can top up at the same time, so after the
+ * `words` insert the rows are read back and only the ones carrying the generated id (not another window's)
+ * get a card and examples.
  */
-export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map<string, string>> {
+export async function insertCatalogWordsReport(
+  items: CatalogWordInput[]
+): Promise<{ ids: Map<string, string>; created: string[] }> {
   const result = new Map<string, string>();
-  if (items.length === 0) return result;
+  const created: string[] = [];
+  if (items.length === 0) return { ids: result, created };
   const db = await getDatabase();
+  const placeholders = (n: number) => Array.from({ length: n }, (_, i) => `$${i + 1}`).join(", ");
   for (let start = 0; start < items.length; start += CATALOG_INSERT_BATCH) {
     const batch = items.slice(start, start + CATALOG_INSERT_BATCH);
     const ids = batch.map((i) => i.catalogId);
     const existing = await db.select<Array<{ id: string; catalog_id: string }>>(
-      `SELECT id, catalog_id FROM words WHERE catalog_id IN (${ids.map((_, i) => `$${i + 1}`).join(", ")})`,
+      `SELECT id, catalog_id FROM words WHERE catalog_id IN (${placeholders(ids.length)})`,
       ids
     );
     existing.forEach((r) => result.set(r.catalog_id, r.id));
@@ -1023,19 +1066,14 @@ export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map
     if (fresh.length === 0) continue;
 
     const wordRows: unknown[] = [];
-    const srsRows: unknown[] = [];
-    const exampleRows: unknown[] = [];
+    const generated = new Map<string, string>();
     for (const item of fresh) {
       const id = crypto.randomUUID();
-      result.set(item.catalogId, id);
+      generated.set(item.catalogId, id);
       wordRows.push(
         id, item.word, item.phonetic, item.partOfSpeech, item.meaningVn, "[]", "[]", "[]", item.cefr, item.cefr,
         item.createdAt, item.catalogId, JSON.stringify(item.variants), JSON.stringify(item.forms)
       );
-      srsRows.push(id, item.createdAt);
-      for (const ex of item.examples) {
-        exampleRows.push(crypto.randomUUID(), id, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus));
-      }
     }
     const values = (rows: unknown[], width: number) =>
       Array.from({ length: rows.length / width }, (_, r) =>
@@ -1047,7 +1085,30 @@ export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map
        VALUES ${values(wordRows, 14)}`,
       wordRows
     );
-    await db.execute(`INSERT OR IGNORE INTO srs_reviews (word_id, next_review_date) VALUES ${values(srsRows, 2)}`, srsRows);
+    // Another window may have inserted the same words first: keep only the rows this call created
+    const freshIds = fresh.map((i) => i.catalogId);
+    const stored = await db.select<Array<{ id: string; catalog_id: string }>>(
+      `SELECT id, catalog_id FROM words WHERE catalog_id IN (${placeholders(freshIds.length)})`,
+      freshIds
+    );
+    const storedBy = new Map(stored.map((r) => [r.catalog_id, r.id]));
+
+    const srsRows: unknown[] = [];
+    const exampleRows: unknown[] = [];
+    for (const item of fresh) {
+      const real = storedBy.get(item.catalogId);
+      if (!real) continue;
+      result.set(item.catalogId, real);
+      if (real !== generated.get(item.catalogId)) continue;
+      created.push(item.catalogId);
+      srsRows.push(real, item.createdAt);
+      for (const ex of item.examples) {
+        exampleRows.push(crypto.randomUUID(), real, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus));
+      }
+    }
+    if (srsRows.length > 0) {
+      await db.execute(`INSERT OR IGNORE INTO srs_reviews (word_id, next_review_date) VALUES ${values(srsRows, 2)}`, srsRows);
+    }
     for (let e = 0; e < exampleRows.length; e += 7 * 100) {
       const chunk = exampleRows.slice(e, e + 7 * 100);
       await db.execute(
@@ -1056,7 +1117,11 @@ export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map
       );
     }
   }
-  return result;
+  return { ids: result, created };
+}
+
+export async function insertCatalogWords(items: CatalogWordInput[]): Promise<Map<string, string>> {
+  return (await insertCatalogWordsReport(items)).ids;
 }
 
 /**

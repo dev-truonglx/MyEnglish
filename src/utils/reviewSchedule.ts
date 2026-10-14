@@ -1,4 +1,4 @@
-import { srsRowToCard, getFSRSScheduler, Rating, State } from "@/services/srs";
+import { srsRowToCard, getFSRSScheduler, getGrammarScheduler, Rating, State } from "@/services/srs";
 import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
 import type { GrammarProgress } from "@/types/grammar";
 import { getNextReviewDate } from "@/services/cards";
@@ -193,8 +193,11 @@ export function predictFutureWordReviews(
   now: Date = new Date()
 ): ReviewStepProjection[] {
   const steps: ReviewStepProjection[] = [];
-  const srs = word.srs;
-  const isNew = (!srs.reps && !srs.repetitions) || srs.repetitions === 0;
+  const isNew = (!word.srs.reps && !word.srs.repetitions) || word.srs.repetitions === 0;
+  // The next review comes from the earlier of the two cards (getNextReviewDate): simulate that same card
+  const prod = word.srsProduction;
+  const srs =
+    !isNew && prod && new Date(prod.next_review_date).getTime() < new Date(word.srs.next_review_date).getTime() ? prod : word.srs;
 
   try {
     const scheduler = getFSRSScheduler();
@@ -277,7 +280,7 @@ export function predictFutureGrammarReviews(
   const isUnattempted = !progress || progress.diagnosticStatus === "unattempted" || progress.reps === 0;
 
   try {
-    const scheduler = getFSRSScheduler();
+    const scheduler = getGrammarScheduler();
     const rowLike: Partial<SRSReview> = {
       next_review_date: progress?.nextReviewDate || now.toISOString(),
       stability: progress?.stability || 0,

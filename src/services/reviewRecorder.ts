@@ -6,6 +6,7 @@
  */
 import { Rating } from "ts-fsrs";
 import { emit } from "@tauri-apps/api/event";
+import { getInitialWindowLabel } from "@/lib/windowLabel";
 import type { CardDirection, ReviewCard, SRSReview } from "@/types/database";
 import { getDatabase, SRS_COLUMNS } from "./db";
 import { getFSRSSettings, recordReview, type FSRSResult } from "./srs";
@@ -153,7 +154,9 @@ export function cardWithResult(card: ReviewCard, r: FSRSResult): ReviewCard {
 async function creditRecognition(card: ReviewCard, exerciseType: ExerciseType, now: Date): Promise<FSRSResult | null> {
   // Building the word from its own letters is not enough evidence of reading it (M9)
   if (exerciseType === "letter_tiles") return null;
-  const rec = card.srsRecognition;
+  // Decide on the stored row, not the session snapshot: the popup window may have graded the recognition
+  // card since (now Relearning or no longer due), and crediting it again would grade one recall twice
+  const rec = await readStoredSrs({ ...card, direction: "recognition" });
   if (!rec || (rec.state ?? 0) !== 2) return null;
   const due = isDueSrs(rec, now);
   const R = calculateRetrievability(rec, now);
@@ -182,8 +185,10 @@ export async function setWordSuspended(wordId: string, suspended: boolean): Prom
   await db.execute(`UPDATE words SET suspended = $1 WHERE id = $2`, [suspended ? 1 : 0, wordId]);
 }
 
-function notifyWordsChanged(): void {
-  emit("words-changed").catch(() => {});
+/** Tells every window the words changed. `source`: the Tauri event also comes back to the window that sent it,
+ *  which has already had the DOM event, so only other windows' changes are re-dispatched there. */
+export function notifyWordsChanged(): void {
+  emit("words-changed", { source: getInitialWindowLabel() }).catch(() => {});
   try {
     window.dispatchEvent(new CustomEvent("words-changed"));
   } catch {}
@@ -252,7 +257,8 @@ export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnsw
   }).catch((err) => console.warn("Review log save failed:", err));
 
   let implicit: FSRSResult | null = null;
-  if (result && card.direction === "production" && rating >= Rating.Hard) {
+  // (a production answer recorded on the recognition card — no production card yet — is not a second grade)
+  if (result && card.direction === "production" && result.direction === "production" && rating >= Rating.Hard) {
     implicit = await creditRecognition(card, input.exerciseType, now).catch(() => null);
   }
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, RotateCcw, Link2, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
+import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareContextMatch, type ContextMatchPair } from "@/services/smartReview";
 
@@ -78,7 +79,7 @@ export default function ContextMatchExercise({
       return;
     }
     // Shuffle right-hand column sentences
-    setShuffledSentences([...pairs].sort(() => 0.5 - Math.random()));
+    setShuffledSentences(shuffle(pairs));
     setSelectedWordId(null);
     setMatches({});
     setIsAnswered(false);

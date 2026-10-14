@@ -9,19 +9,31 @@
  *    new-word budget. The scheduler then works as before (one budget for new cards, oldest first), and
  *    `words` never holds thousands of New cards that would all count as due.
  */
-import { addUserContextExample, getDatabase, getWordsByIds, insertCatalogWords, type CatalogWordInput } from "./db";
-import type { WordDetail } from "@/types/database";
+import { Rating } from "ts-fsrs";
+import {
+  addUserContextExample,
+  getDatabase,
+  getWordsByIds,
+  insertCatalogWords,
+  insertCatalogWordsReport,
+  SRS_COLUMNS,
+  type CatalogWordInput,
+} from "./db";
+import type { SRSReview, WordDetail } from "@/types/database";
 import { getStudyLimits } from "./srs";
 import { persistKeyNow } from "./storageBackup";
-import { markWordKnown } from "./reviewRecorder";
+import { KNOWN_DIFFICULTY, knownCheckDays, notifyWordsChanged } from "./reviewRecorder";
+import { reviewLogBefore } from "./smartReview";
 import { MASTERED_STABILITY_DAYS } from "./progress";
 import {
   CATALOG_LEVEL_COUNTS,
+  CATALOG_VERSION,
   STUDY_LEVELS,
   ensureCatalogSeeded,
   findCatalogWord,
   getCatalogEntries,
-  rowToEntry,
+  rowsToEntries,
+  type CatalogRow,
   type CatalogEntry,
   type StudyLevel,
 } from "./vocabCatalog";
@@ -162,6 +174,13 @@ export function toCatalogWordInput(e: CatalogEntry, createdAt: string): CatalogW
 
 /** `vocab_catalog_meta` key: the deck version the learner's words were last synced with */
 const WORDS_SYNCED_KEY = "words_version";
+const SYNC_BATCH = 100;
+
+function chunked<T>(items: readonly T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
 
 /**
  * After a new deck version (vocabCatalog.ts copies it into `vocab_catalog`), the words already in `words`
@@ -192,7 +211,7 @@ export async function syncWordsWithCatalog(): Promise<number> {
     }>
   >(`SELECT id, catalog_id, phonetic, part_of_speech, meaning_vn, cefr_level, topic, variants, forms FROM words WHERE catalog_id IS NOT NULL`);
   const entries = new Map((await getCatalogEntries(rows.map((r) => r.catalog_id))).map((e) => [e.id, e]));
-  let changed = 0;
+  const updates: unknown[][] = [];
   for (const r of rows) {
     const e = entries.get(r.catalog_id);
     if (!e) continue; // dropped from the deck: the word stays as it is
@@ -208,13 +227,20 @@ export async function syncWordsWithCatalog(): Promise<number> {
     ];
     const current = [r.phonetic, r.part_of_speech, r.meaning_vn, r.cefr_level, r.topic, r.variants, r.forms];
     if (next.every((v, i) => v === current[i])) continue;
-    await db.execute(
-      `UPDATE words SET phonetic = $1, part_of_speech = $2, meaning_vn = $3, cefr_level = $4, topic = $5, variants = $6, forms = $7
-       WHERE id = $8`,
-      [...next, r.id]
-    );
-    changed++;
+    updates.push([r.id, ...next]);
   }
+  // One statement per chunk instead of one round trip per word (the popup waits for this when it opens)
+  for (const chunk of chunked(updates, SYNC_BATCH)) {
+    const params = chunk.flat();
+    const values = chunk.map((_, i) => `(${Array.from({ length: 8 }, (_, c) => `$${i * 8 + c + 1}`).join(", ")})`).join(", ");
+    await db.execute(
+      `UPDATE words SET phonetic = v.column2, part_of_speech = v.column3, meaning_vn = v.column4, cefr_level = v.column5,
+         topic = v.column6, variants = v.column7, forms = v.column8
+       FROM (VALUES ${values}) AS v WHERE words.id = v.column1`,
+      params
+    );
+  }
+  const changed = updates.length;
   await db.execute(
     `INSERT INTO vocab_catalog_meta (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [WORDS_SYNCED_KEY, version]
@@ -271,14 +297,26 @@ export interface TopUpResult {
  */
 let topping: Promise<TopUpResult> | null = null;
 /** Result of the last top-up: `exhausted` = the chosen levels have nothing left to add (see suggestNextLevel) */
-let lastTopUp: TopUpResult | null = null;
+let lastTopUp: (TopUpResult & { levels: string }) | null = null;
+/** The deck version this window has copied into SQLite and synced the learner's words with */
+let preparedFor: number | null = null;
 export function topUpNewWords(options: { target?: number; now?: Date } = {}): Promise<TopUpResult> {
-  topping ??= doTopUp(options)
-    .then((r) => (lastTopUp = r))
+  if (topping) {
+    // The running top-up reads its own goal: a caller asking for more (the "Học thêm" target) runs again when it
+    // settles, which adds only what is still missing (nothing when the running one already covered it)
+    if (options.target === undefined) return topping;
+    return topping.catch(() => undefined).then(() => topUpNewWords(options));
+  }
+  const run: Promise<TopUpResult> = doTopUp(options)
+    .then((r) => {
+      lastTopUp = { ...r, levels: readSetting()?.levels.join() ?? "" };
+      return r;
+    })
     .finally(() => {
-      topping = null;
+      if (topping === run) topping = null;
     });
-  return topping;
+  topping = run;
+  return run;
 }
 
 /** The chosen levels had nothing left to add at the last top-up (null before any top-up) */
@@ -295,15 +333,33 @@ async function doTopUp({ target, now = new Date() }: { target?: number; now?: Da
   // Nothing is added before the learner has chosen their levels (onboarding / migration screen)
   const setting = readSetting();
   if (!setting) return { added: 0, exhausted: false };
-  await ensureCatalogSeeded();
-  await syncWordsWithCatalog().catch((err) => console.warn("Word sync with the deck failed:", err));
+  const levelsKey = setting.levels.join();
   const goal = target ?? getStudyLimits().newCardsPerDay + BUFFER_EXTRA;
+
+  // Once per window and deck version: copy the deck if needed and bring the learner's words up to it
+  if (preparedFor !== CATALOG_VERSION) {
+    await ensureCatalogSeeded();
+    const synced = await syncWordsWithCatalog().then(
+      () => true,
+      (err) => {
+        console.warn("Word sync with the deck failed:", err);
+        return false;
+      }
+    );
+    if (synced) preparedFor = CATALOG_VERSION;
+  }
+
+  // Runs every minute: with a full buffer this is the only query (the deck scan below is skipped)
   const need = goal - (await countWaitingWords());
+  if (need <= 0) return { added: 0, exhausted: lastTopUp?.levels === levelsKey ? lastTopUp.exhausted : false };
+
   const available = await availableByLevel(setting.levels);
   const left = Object.values(available).reduce((a, b) => a + (b ?? 0), 0);
-  if (need <= 0 || left === 0) return { added: 0, exhausted: left === 0 };
+  if (left === 0) return { added: 0, exhausted: true };
 
-  const sequence = pickLevelSequence(setting.levels, setting.drawn, { ...available }, need);
+  // `drawn` of the setting only grows by the words really created (another window may have inserted some first)
+  const scratch = { ...setting.drawn };
+  const sequence = pickLevelSequence(setting.levels, scratch, { ...available }, need);
   const queues = new Map<StudyLevel, string[]>();
   for (const level of new Set(sequence)) {
     queues.set(level, await nextIdsOfLevel(level, sequence.filter((l) => l === level).length));
@@ -311,11 +367,19 @@ async function doTopUp({ target, now = new Date() }: { target?: number; now?: Da
   const ids = sequence.map((l) => queues.get(l)?.shift()).filter((id): id is string => Boolean(id));
   const entries = await getCatalogEntries(ids);
   const base = now.getTime() - entries.length;
-  await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
+  const { created } = await insertCatalogWordsReport(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
   // The levels may have changed while this ran: the mix count then belongs to the old choice, never write it back
   const latest = readSetting();
-  if (latest && latest.levels.join() === setting.levels.join()) writeSetting({ ...latest, drawn: setting.drawn });
-  return { added: entries.length, exhausted: left - entries.length <= 0 };
+  if (latest && latest.levels.join() === levelsKey && created.length > 0) {
+    const levelOf = new Map(entries.map((e) => [e.id, e.cefr]));
+    const drawn = { ...latest.drawn };
+    for (const id of created) {
+      const level = levelOf.get(id);
+      if (level) drawn[level] = (drawn[level] ?? 0) + 1;
+    }
+    writeSetting({ ...latest, drawn });
+  }
+  return { added: created.length, exhausted: left - created.length <= 0 };
 }
 
 /**
@@ -467,7 +531,7 @@ export async function loadLevelProgress(): Promise<LevelProgress[]> {
 export async function nextUnstudiedEntries(level: StudyLevel, limit = 30): Promise<CatalogEntry[]> {
   await ensureCatalogSeeded();
   const db = await getDatabase();
-  const rows = await db.select<Parameters<typeof rowToEntry>[0][]>(
+  const rows = await db.select<CatalogRow[]>(
     `SELECT c.id, c.word, c.cefr, c.list, c.study_order, c.freq, c.it, c.pos, c.vn, c.data
      FROM vocab_catalog c
      LEFT JOIN words w ON w.catalog_id = c.id
@@ -476,7 +540,7 @@ export async function nextUnstudiedEntries(level: StudyLevel, limit = 30): Promi
      ORDER BY c.it DESC, c.study_order LIMIT $2`,
     [level, limit]
   );
-  return rows.map(rowToEntry);
+  return rowsToEntries(rows);
 }
 
 /**
@@ -488,13 +552,90 @@ export async function markCatalogWordsKnown(entryIds: string[], now: Date = new 
   const entries = await getCatalogEntries(entryIds);
   const base = now.getTime() - entries.length;
   const ids = await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
-  let marked = 0;
-  for (const e of entries) {
-    const wordId = ids.get(e.id);
-    if (wordId && (await markWordKnown(wordId, now))) marked++;
-  }
+  const wordIds = entries.map((e) => ids.get(e.id)).filter((id): id is string => Boolean(id));
+  const marked = await markWordsKnownBatch(wordIds, now);
+  if (marked > 0) notifyWordsChanged(); // once, not per word: every listener reloads the whole word list
   await topUpNewWords({ now });
   return marked;
+}
+
+const KNOWN_BATCH = 50;
+
+/**
+ * reviewRecorder.markWordKnown for many words with a few multi-row statements: the recognition card goes to
+ * Review with the "known" schedule, one `known` review log and learning event each. A word already studied is
+ * left alone (also guarded in the upsert, in case it was studied meanwhile). Returns how many were marked.
+ */
+async function markWordsKnownBatch(wordIds: string[], now: Date): Promise<number> {
+  const db = await getDatabase();
+  const eligible: Array<{ id: string; before: ReturnType<typeof reviewLogBefore> }> = [];
+  for (const chunk of chunked(wordIds, 500)) {
+    const rows = await db.select<SRSReview[]>(
+      `SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${chunk.map((_, i) => `$${i + 1}`).join(", ")})`,
+      chunk
+    );
+    const byId = new Map(rows.map((r) => [r.word_id, r]));
+    for (const id of chunk) {
+      const row = byId.get(id);
+      if (row && ((row.reps ?? 0) > 0 || (row.state ?? 0) !== 0)) continue;
+      eligible.push({ id, before: row ? reviewLogBefore(row, now) : null });
+    }
+  }
+  const stamp = now.toISOString();
+  const round = (n: number | null | undefined, digits: number) => (n == null ? null : Number(n.toFixed(digits)));
+  const rowsSql = (n: number, width: number, one: (r: number) => string) =>
+    Array.from({ length: n }, (_, r) => one(r * width)).join(", ");
+  for (const chunk of chunked(eligible, KNOWN_BATCH)) {
+    const srsParams: unknown[] = [];
+    const logParams: unknown[] = [];
+    const eventParams: unknown[] = [];
+    for (const { id, before } of chunk) {
+      const days = knownCheckDays(id);
+      srsParams.push(id, days, new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString());
+      logParams.push(
+        crypto.randomUUID(), id, before ? before.state : null, round(before?.stability, 4), round(before?.difficulty, 4),
+        round(before?.retrievability, 4), round(before?.elapsedDays, 3)
+      );
+      eventParams.push(crypto.randomUUID(), id);
+    }
+    await db.execute(
+      `INSERT INTO srs_reviews (
+         word_id, ease_factor, interval, repetitions, next_review_date,
+         stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
+       )
+       VALUES ${rowsSql(chunk.length, 3, (o) => `($${o + 1}, 2.5, $${o + 2}, 1, $${o + 3}, $${o + 2}, ${KNOWN_DIFFICULTY}, 0, $${o + 2}, 1, 0, 2, '${stamp}', 0)`)}
+       ON CONFLICT(word_id) DO UPDATE SET
+         ease_factor = excluded.ease_factor,
+         interval = excluded.interval,
+         repetitions = excluded.repetitions,
+         next_review_date = excluded.next_review_date,
+         stability = excluded.stability,
+         difficulty = excluded.difficulty,
+         elapsed_days = excluded.elapsed_days,
+         scheduled_days = excluded.scheduled_days,
+         reps = excluded.reps,
+         lapses = excluded.lapses,
+         state = excluded.state,
+         last_review = excluded.last_review,
+         learning_steps = excluded.learning_steps
+       WHERE COALESCE(srs_reviews.reps, 0) = 0 AND COALESCE(srs_reviews.state, 0) = 0`,
+      srsParams
+    );
+    await db.execute(
+      `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp,
+         is_scheduled, direction, state_before, stability_before, difficulty_before, r_predicted, elapsed_days_before)
+       VALUES ${rowsSql(chunk.length, 7, (o) => `($${o + 1}, $${o + 2}, 'known', 0, 1, 0, ${Rating.Good}, 0, '${stamp}', 0, 'recognition', $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7})`)}`,
+      logParams
+    );
+    await db
+      .execute(
+        `INSERT INTO learning_events (id, type, word_id, direction, at, meta)
+         VALUES ${rowsSql(chunk.length, 2, (o) => `($${o + 1}, 'known', $${o + 2}, 'recognition', '${stamp}', NULL)`)}`,
+        eventParams
+      )
+      .catch((err) => console.warn("Learning events not saved:", err));
+  }
+  return eligible.length;
 }
 
 /**

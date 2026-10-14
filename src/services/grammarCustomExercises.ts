@@ -1,5 +1,14 @@
 import { getDatabase } from "./db";
-import { clearBookCache, getChapterMetadata } from "./grammarBook";
+import { fillBlanks } from "./grammarItems";
+import {
+  countBlanks,
+  getBookChapter,
+  getChapterMetadata,
+  normalizeAnswers,
+  notifyBookUpdated,
+  parseGrammarBookJson,
+  VALID_CHAPTER_IDS,
+} from "./grammarBook";
 import type { GrammarExerciseSetType } from "@/types/grammarBook";
 
 export interface CustomExerciseItemInput {
@@ -33,6 +42,7 @@ export interface GrammarExerciseImportRecord {
   itemIds: string[];
   setIds: string[];
   rawJson: string;
+  /** A batch whose save was interrupted ("pending" in the table) is listed as "active" so it can be undone */
   status: "active" | "reverted";
 }
 
@@ -208,6 +218,8 @@ Quy tắc cấu trúc JSON:
 /**
  * Normalizes and cleans raw text from an AI chat:
  * Drops markdown code fences (```json ... ```), BOM, leading/trailing text, and trailing commas.
+ * (Reading a file uses parseGrammarBookJson, which also copes with text before the "{" and with line breaks
+ * inside strings; this plain cleaner is kept for callers that only want the text.)
  */
 export function cleanRawJsonText(raw: string): string {
   let s = raw.replace(/^\uFEFF/, "").trim();
@@ -221,126 +233,132 @@ export function cleanRawJsonText(raw: string): string {
   return s;
 }
 
+type Obj = Record<string, unknown>;
+const isObj = (v: unknown): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
+const str = (v: unknown): string | undefined => (typeof v === "string" && v.trim() ? v.trim() : undefined);
+
+/** Synthesize the complete sentence: each blank (and the cue after it) is replaced by the first accepted answer */
+function sentenceFrom(prompt: string, answers: string[][]): string {
+  const blanks = countBlanks(prompt);
+  if (blanks === 0) return answers[0]?.[0] || prompt;
+  return fillBlanks(prompt, answers.map((a) => a[0] ?? ""));
+}
+
 /**
- * Validates and parses the exercise JSON text.
+ * One exercise from the AI's JSON (either format). `where` names it in messages ("Câu số 3"); `defaults`
+ * are what the book format takes from the set. A fatal problem comes back as an error.
+ */
+function readExercise(
+  item: Obj,
+  where: string,
+  defaults: { type?: string; lessonId?: string }
+): { ok: true; exercise: CustomExerciseItemInput; warnings: string[] } | { ok: false; error: string } {
+  const warnings: string[] = [];
+  const prompt = str(item.prompt) ?? "";
+  if (!prompt) return { ok: false, error: `${where} thiếu nội dung câu hỏi ("prompt").` };
+  const blanks = countBlanks(prompt);
+  if (blanks === 0) warnings.push(`${where} không chứa chỗ trống '___'. Người học sẽ không thấy ô điền/chọn đáp án.`);
+
+  // The book's reader keeps an empty answer ("nothing goes here") and its place among the blanks
+  const parsed = normalizeAnswers(item.answers !== undefined ? item.answers : item.answer, blanks);
+  if (parsed === null) {
+    return { ok: false, error: `${where} ("${prompt.slice(0, 30)}...") có "answers" sai định dạng: mỗi đáp án phải là chữ hoặc danh sách chữ.` };
+  }
+  const answers = parsed.map((slot) => slot.map((a) => a.trim()));
+  if (!answers.some((slot) => slot.some(Boolean))) {
+    return { ok: false, error: `${where} ("${prompt.slice(0, 30)}...") thiếu danh sách đáp án đúng ("answers").` };
+  }
+  if (blanks > 0 && answers.length !== blanks) {
+    warnings.push(`${where} có ${blanks} chỗ trống nhưng ${answers.length} đáp án: câu này sẽ do bạn tự chấm.`);
+  }
+
+  let options: string[] | undefined;
+  if (Array.isArray(item.options)) {
+    options = item.options
+      .filter((o): o is string | number => typeof o === "string" || typeof o === "number")
+      .map((o) => String(o).trim())
+      .filter(Boolean);
+  }
+  const type = (str(item.type) ?? defaults.type ?? (options && options.length >= 2 ? "choose" : "fill_blank")) as GrammarExerciseSetType;
+  if (type === "choose" && (!options || options.length < 2)) {
+    warnings.push(`${where} có dạng trắc nghiệm ("choose") nhưng có ít hơn 2 lựa chọn trong "options".`);
+  }
+
+  const ai = isObj(item.ai) ? item.ai : undefined;
+  const lessonIds = Array.isArray(item.lessonIds) ? item.lessonIds : undefined;
+  return {
+    ok: true,
+    warnings,
+    exercise: {
+      lessonId: str(item.lessonId) ?? (lessonIds?.[0] !== undefined ? str(String(lessonIds[0])) : undefined) ?? defaults.lessonId,
+      type,
+      prompt,
+      options,
+      answers,
+      answerSentence: str(item.answerSentence) ?? sentenceFrom(prompt, answers),
+      explainVn: str(item.explainVn) ?? (ai ? str(ai.explainVn) : undefined),
+      vi: str(item.vi) ?? (ai ? str(ai.vi) : undefined),
+      underline: str(item.underline),
+      given: str(item.given),
+    },
+  };
+}
+
+/**
+ * Validates and parses the exercise JSON text. The text is read the way a book file is (parseGrammarBookJson):
+ * text around the JSON, code fences, trailing commas and raw line breaks inside strings are all forgiven.
  */
 export function parseAndValidateExerciseJson(
   rawText: string,
   defaultChapterId: string = "ch01"
 ): ValidationResult {
-  const cleaned = cleanRawJsonText(rawText);
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(cleaned);
-  } catch (err) {
-    return {
-      ok: false,
-      error: `Lỗi cú pháp JSON: ${err instanceof Error ? err.message : String(err)}. Vui lòng kiểm tra dấu ngoặc kép hoặc dấu phẩy.`,
-    };
+  const read = parseGrammarBookJson(rawText);
+  if (!read.ok) {
+    return { ok: false, error: `Lỗi cú pháp JSON: ${read.message}` };
   }
-
-  if (!parsed || typeof parsed !== "object") {
+  if (!isObj(read.value)) {
     return { ok: false, error: "Nội dung JSON không hợp lệ (phải là một đối tượng JSON)." };
   }
 
-  const obj = parsed as Record<string, unknown>;
+  const obj = read.value;
   const warnings: string[] = [];
 
-  // Determine chapterId
-  let chapterId = typeof obj.chapterId === "string" && /^ch\d+$/i.test(obj.chapterId)
-    ? obj.chapterId.toLowerCase()
-    : defaultChapterId;
+  // The chapter: the file's own ("ch1" is read as "ch01"), else the one chosen in the screen
+  let chapterId = defaultChapterId;
+  const given = typeof obj.chapterId === "string" ? obj.chapterId.trim().toLowerCase() : "";
+  if (given) {
+    const m = /^ch0*(\d{1,2})$/.exec(given);
+    const id = m ? `ch${m[1].padStart(2, "0")}` : "";
+    if (VALID_CHAPTER_IDS.has(id)) chapterId = id;
+    else warnings.push(`chapterId "${String(obj.chapterId).slice(0, 20)}" không thuộc 31 chương (ch01 – ch31): dùng chương đang chọn (${defaultChapterId}).`);
+  }
 
-  // Check format: either "myenglish-grammar-exercises" or legacy/book format
   const exercisesInput: CustomExerciseItemInput[] = [];
-
   if (Array.isArray(obj.exercises)) {
     // New lightweight exercises format
     for (let i = 0; i < obj.exercises.length; i++) {
       const item = obj.exercises[i];
-      if (!item || typeof item !== "object") continue;
-
-      const prompt = typeof item.prompt === "string" ? item.prompt.trim() : "";
-      if (!prompt) {
-        return { ok: false, error: `Câu số ${i + 1} thiếu nội dung câu hỏi ("prompt").` };
-      }
-      if (!prompt.includes("___")) {
-        warnings.push(`Câu số ${i + 1} không chứa chỗ trống '___'. Người học sẽ không thấy ô điền/chọn đáp án.`);
-      }
-
-      // Parse answers
-      let answers: string[][] = [];
-      if (Array.isArray(item.answers)) {
-        answers = (item.answers as unknown[])
-          .map((ans: unknown) =>
-            Array.isArray(ans)
-              ? (ans as unknown[]).map(String).map((s: string) => s.trim()).filter(Boolean)
-              : [String(ans).trim()]
-          )
-          .filter((ansArr: string[]) => ansArr.length > 0);
-      } else if (typeof item.answer === "string" && item.answer.trim()) {
-        answers = [[item.answer.trim()]];
-      }
-
-      if (answers.length === 0) {
-        return { ok: false, error: `Câu số ${i + 1} ("${prompt.slice(0, 30)}...") thiếu danh sách đáp án đúng ("answers").` };
-      }
-
-      // Parse options
-      let options: string[] | undefined = undefined;
-      if (Array.isArray(item.options)) {
-        options = (item.options as unknown[]).map(String).map((s: string) => s.trim()).filter(Boolean);
-      }
-
-      const type = (typeof item.type === "string" ? item.type : options && options.length >= 2 ? "choose" : "fill_blank") as GrammarExerciseSetType;
-
-      if (type === "choose" && (!options || options.length < 2)) {
-        warnings.push(`Câu số ${i + 1} có dạng trắc nghiệm ("choose") nhưng có ít hơn 2 lựa chọn trong "options".`);
-      }
-
-      // Answer sentence fallback
-      let answerSentence = typeof item.answerSentence === "string" ? item.answerSentence.trim() : "";
-      if (!answerSentence) {
-        // Synthesize by replacing ___ (and optional cue in parentheses) with the first accepted answer
-        const firstAns = answers[0]?.[0] || "";
-        answerSentence = prompt.replace(/_{3,}(?:\s*\([^)]*\))?/, firstAns);
-      }
-
-      exercisesInput.push({
-        lessonId: typeof item.lessonId === "string" && item.lessonId.trim() ? item.lessonId.trim() : undefined,
-        type,
-        prompt,
-        options,
-        answers,
-        answerSentence,
-        explainVn: typeof item.explainVn === "string" ? item.explainVn.trim() : undefined,
-        vi: typeof item.vi === "string" ? item.vi.trim() : undefined,
-        underline: typeof item.underline === "string" ? item.underline.trim() : undefined,
-        given: typeof item.given === "string" ? item.given.trim() : undefined,
-      });
+      if (!isObj(item)) continue;
+      const res = readExercise(item, `Câu số ${i + 1}`, {});
+      if (!res.ok) return { ok: false, error: res.error };
+      warnings.push(...res.warnings);
+      exercisesInput.push(res.exercise);
     }
   } else if (Array.isArray(obj.exerciseSets)) {
-    // Standard book format (exerciseSets with items)
-    for (const set of obj.exerciseSets as Array<Record<string, unknown>>) {
-      if (!Array.isArray(set.items)) continue;
-      for (const it of set.items as Array<Record<string, unknown>>) {
-        const prompt = typeof it.prompt === "string" ? it.prompt.trim() : "";
-        if (!prompt) continue;
-        const answers: string[][] = Array.isArray(it.answers)
-          ? it.answers.map((a: unknown) => (Array.isArray(a) ? a.map(String) : [String(a)]))
-          : [];
-        if (answers.length === 0) continue;
-
-        exercisesInput.push({
-          lessonId: Array.isArray(it.lessonIds) && it.lessonIds[0] ? String(it.lessonIds[0]) : undefined,
-          type: (typeof set.type === "string" ? set.type : "fill_blank") as GrammarExerciseSetType,
-          prompt,
-          options: Array.isArray(it.options) ? it.options.map(String) : undefined,
-          answers,
-          answerSentence: typeof it.answerSentence === "string" ? it.answerSentence : prompt,
-          explainVn: it.ai && typeof (it.ai as Record<string, unknown>).explainVn === "string" ? (it.ai as Record<string, unknown>).explainVn as string : undefined,
-          vi: it.ai && typeof (it.ai as Record<string, unknown>).vi === "string" ? (it.ai as Record<string, unknown>).vi as string : undefined,
-        });
+    // Standard book format (exerciseSets with items): an item that cannot be used is left out with a warning
+    let n = 0;
+    for (const set of obj.exerciseSets) {
+      if (!isObj(set) || !Array.isArray(set.items)) continue;
+      for (const it of set.items) {
+        n++;
+        if (!isObj(it)) continue;
+        const res = readExercise(it, `Câu số ${n}`, { type: str(set.type) ?? "fill_blank" });
+        if (!res.ok) {
+          warnings.push(`${res.error} → bỏ qua câu này.`);
+          continue;
+        }
+        warnings.push(...res.warnings);
+        exercisesInput.push(res.exercise);
       }
     }
   }
@@ -352,9 +370,7 @@ export function parseAndValidateExerciseJson(
     };
   }
 
-  const title = typeof obj.title === "string" && obj.title.trim()
-    ? obj.title.trim()
-    : `Bài tập bổ sung (${exercisesInput.length} câu)`;
+  const title = str(obj.title) ?? `Bài tập bổ sung (${exercisesInput.length} câu)`;
 
   return {
     ok: true,
@@ -369,14 +385,82 @@ export function parseAndValidateExerciseJson(
   };
 }
 
+const CH_LABEL = (chapterId: string) => chapterId.toUpperCase();
+
+/**
+ * The batch must land where the learner can reach it: the chapter has to be imported, and every lessonId has
+ * to be one of its lessons (a question tied to no lesson is never asked). Throws an explanation in Vietnamese.
+ */
+async function assertBatchTargets(payload: CustomExercisesPayload): Promise<void> {
+  const chapterId = payload.chapterId;
+  if (!VALID_CHAPTER_IDS.has(chapterId)) {
+    throw new Error(`Mã chương "${chapterId}" không thuộc 31 chương (ch01 – ch31).`);
+  }
+  if (payload.exercises.length === 0) throw new Error("Bộ bài tập không có câu nào.");
+  const chapter = await getBookChapter(chapterId);
+  if (!chapter) {
+    throw new Error(
+      `Chương ${CH_LABEL(chapterId)} chưa được nhập vào sách nên chưa có bài để gắn bài tập vào. Hãy nhập chương này trước, hoặc chọn chương khác.`
+    );
+  }
+  const lessonIds = new Set((chapter.lessons ?? []).map((l) => l.id));
+  const unknown = [...new Set(payload.exercises.map((e) => e.lessonId).filter((id): id is string => !!id && !lessonIds.has(id)))];
+  if (unknown.length > 0) {
+    throw new Error(
+      `Bài ${unknown.slice(0, 5).join(", ")} không có trong chương ${CH_LABEL(chapterId)}. Hãy sửa "lessonId" cho đúng mã bài của chương này.`
+    );
+  }
+  if (!payload.exercises.some((e) => e.lessonId)) {
+    throw new Error('Chưa câu nào có "lessonId" (mã bài học). Câu không gắn bài nào sẽ không bao giờ được hỏi.');
+  }
+}
+
+type BookDb = Awaited<ReturnType<typeof getDatabase>>;
+
+/** Multi-row INSERT of (id, chapter_id, ord, data) rows, a hundred per statement */
+async function insertBookRows(db: BookDb, table: string, rows: Array<[string, string, number, string]>): Promise<void> {
+  const BATCH = 100;
+  for (let i = 0; i < rows.length; i += BATCH) {
+    const chunk = rows.slice(i, i + BATCH);
+    const values = chunk.map((_, j) => `($${j * 4 + 1}, $${j * 4 + 2}, $${j * 4 + 3}, $${j * 4 + 4})`).join(", ");
+    await db.execute(`INSERT OR REPLACE INTO ${table} (id, chapter_id, ord, data) VALUES ${values};`, chunk.flat());
+  }
+}
+
+async function deleteBookRows(db: BookDb, table: string, ids: string[]): Promise<void> {
+  const BATCH = 200;
+  for (let i = 0; i < ids.length; i += BATCH) {
+    const chunk = ids.slice(i, i + BATCH);
+    await db.execute(`DELETE FROM ${table} WHERE id IN (${chunk.map((_, j) => `$${j + 1}`).join(", ")});`, chunk);
+  }
+}
+
+/** Every row of a batch: the ones its history lists, and any other row stamped with its id (left by a failed save) */
+async function deleteBatchRows(db: BookDb, chapterId: string, batchId: string, itemIds: string[], setIds: string[]): Promise<void> {
+  const stamp = `%"importBatchId":"${batchId}"%`;
+  for (const [table, ids] of [
+    ["grammar_book_items", itemIds],
+    ["grammar_book_sets", setIds],
+  ] as const) {
+    const orphans = await db.select<Array<{ id: string }>>(`SELECT id FROM ${table} WHERE chapter_id = $1 AND data LIKE $2;`, [chapterId, stamp]);
+    await deleteBookRows(db, table, [...new Set([...ids, ...orphans.map((r) => r.id)])]);
+  }
+}
+
 /**
  * Saves a validated batch of custom exercises into SQLite database.
  * Creates an entry in grammar_exercise_imports and returns the record.
+ *
+ * Writes are separate statements (the connection pool makes a transaction unsafe), so they are ordered to be
+ * recoverable: the history row goes first as "pending" (it already lists every row to come), then the set and
+ * the items, and only then the row becomes "active". A failure half-way is cleaned up here, and when even that
+ * fails the pending history can still be undone, which removes whatever was written.
  */
 export async function saveCustomExerciseBatch(
   payload: CustomExercisesPayload,
   rawJson: string
 ): Promise<GrammarExerciseImportRecord> {
+  await assertBatchTargets(payload);
   const db = await getDatabase();
   const chapterId = payload.chapterId;
   const now = Date.now();
@@ -401,7 +485,6 @@ export async function saveCustomExerciseBatch(
   const primaryType: GrammarExerciseSetType = payload.exercises[0]?.type || "choose";
   const primaryLessonId = payload.exercises.find((e) => Boolean(e.lessonId))?.lessonId || null;
 
-  // 1. Insert Exercise Set row
   const setMeta = {
     id: setId,
     roman: "AI",
@@ -409,49 +492,39 @@ export async function saveCustomExerciseBatch(
     type: primaryType,
     importBatchId: batchId,
   };
-  await db.execute(
-    "INSERT OR REPLACE INTO grammar_book_sets (id, chapter_id, ord, data) VALUES ($1, $2, $3, $4);",
-    [setId, chapterId, maxSetOrd + 1, JSON.stringify(setMeta)]
-  );
-
-  // 2. Insert Item rows
   const itemIds: string[] = [];
-  for (let i = 0; i < payload.exercises.length; i++) {
-    const ex = payload.exercises[i];
+  const itemData: Array<[string, string, number, string]> = payload.exercises.map((ex, i) => {
     const n = i + 1;
     const itemId = `${chapterId}:${setId}#${n}`;
     itemIds.push(itemId);
-    curItemOrd++;
-
     const lessonIds = ex.lessonId ? [ex.lessonId] : primaryLessonId ? [primaryLessonId] : [];
-    const itemData = {
-      setId,
-      n,
-      prompt: ex.prompt,
-      options: ex.options,
-      answers: ex.answers,
-      answerSentence: ex.answerSentence || ex.prompt,
-      underline: ex.underline,
-      given: ex.given,
-      lessonIds,
-      groupId,
-      groupTitle: payload.title || "Bài tập bổ sung bằng AI",
-      groupLessonIds: lessonIds,
-      importBatchId: batchId,
-      ai: {
-        explainVn: ex.explainVn,
-        vi: ex.vi,
+    return [
+      itemId,
+      chapterId,
+      ++curItemOrd,
+      JSON.stringify({
+        setId,
+        n,
+        prompt: ex.prompt,
+        options: ex.options,
+        answers: ex.answers,
+        answerSentence: ex.answerSentence || ex.prompt,
+        underline: ex.underline,
+        given: ex.given,
         lessonIds,
-      },
-    };
+        groupId,
+        groupTitle: payload.title || "Bài tập bổ sung bằng AI",
+        groupLessonIds: lessonIds,
+        importBatchId: batchId,
+        ai: {
+          explainVn: ex.explainVn,
+          vi: ex.vi,
+          lessonIds,
+        },
+      }),
+    ];
+  });
 
-    await db.execute(
-      "INSERT OR REPLACE INTO grammar_book_items (id, chapter_id, ord, data) VALUES ($1, $2, $3, $4);",
-      [itemId, chapterId, curItemOrd, JSON.stringify(itemData)]
-    );
-  }
-
-  // 3. Insert Import History row
   const record: GrammarExerciseImportRecord = {
     id: batchId,
     timestamp: now,
@@ -465,6 +538,7 @@ export async function saveCustomExerciseBatch(
     status: "active",
   };
 
+  // 1. The history row first, "pending": from here on the batch can always be found and undone
   await db.execute(
     `INSERT INTO grammar_exercise_imports (id, timestamp, chapter_id, lesson_id, title, item_count, item_ids, set_ids, raw_json, status)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);`,
@@ -478,24 +552,36 @@ export async function saveCustomExerciseBatch(
       JSON.stringify(record.itemIds),
       JSON.stringify(record.setIds),
       record.rawJson,
-      record.status,
+      "pending",
     ]
   );
 
-  // Invalidate cache & notify UI
-  clearBookCache();
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("myenglish-grammar-updated", { detail: { book: true, chapterIds: [chapterId] } })
-    );
+  try {
+    // 2. The exercise set, 3. its items, 4. the batch is complete
+    await insertBookRows(db, "grammar_book_sets", [[setId, chapterId, maxSetOrd + 1, JSON.stringify(setMeta)]]);
+    await insertBookRows(db, "grammar_book_items", itemData);
+    await db.execute("UPDATE grammar_exercise_imports SET status = 'active' WHERE id = $1;", [batchId]);
+  } catch (err) {
+    try {
+      await deleteBatchRows(db, chapterId, batchId, itemIds, record.setIds);
+      await db.execute("UPDATE grammar_exercise_imports SET status = 'reverted' WHERE id = $1;", [batchId]);
+    } catch {
+      // The pending history stays: undoing it later removes the rows
+    }
+    notifyBookUpdated([chapterId]);
+    throw err;
   }
+
+  // Invalidate cache & notify UI (this window and the other ones)
+  notifyBookUpdated([chapterId]);
 
   return record;
 }
 
 /**
  * Reverts (undoes) an imported batch of custom exercises.
- * Deletes all items and sets belonging to this batch from SQLite, and marks status as 'reverted'.
+ * Deletes all items and sets belonging to this batch from SQLite (the ones its history lists and any row
+ * stamped with the batch id), and marks status as 'reverted'.
  */
 export async function revertCustomExerciseBatch(batchId: string): Promise<boolean> {
   const db = await getDatabase();
@@ -517,26 +603,12 @@ export async function revertCustomExerciseBatch(batchId: string): Promise<boolea
     setIds = JSON.parse(row.set_ids || "[]");
   } catch {}
 
-  // Delete items
-  for (const id of itemIds) {
-    await db.execute("DELETE FROM grammar_book_items WHERE id = $1;", [id]);
-  }
-
-  // Delete sets
-  for (const id of setIds) {
-    await db.execute("DELETE FROM grammar_book_sets WHERE id = $1;", [id]);
-  }
+  await deleteBatchRows(db, row.chapter_id, batchId, itemIds, setIds);
 
   // Update history record status
   await db.execute("UPDATE grammar_exercise_imports SET status = 'reverted' WHERE id = $1;", [batchId]);
 
-  // Invalidate cache & notify UI
-  clearBookCache();
-  if (typeof window !== "undefined") {
-    window.dispatchEvent(
-      new CustomEvent("myenglish-grammar-updated", { detail: { book: true, chapterIds: [row.chapter_id] } })
-    );
-  }
+  notifyBookUpdated([row.chapter_id]);
 
   return true;
 }
@@ -551,7 +623,7 @@ export async function deleteExerciseImportRecord(batchId: string): Promise<void>
     "SELECT status FROM grammar_exercise_imports WHERE id = $1;",
     [batchId]
   );
-  if (rows.length > 0 && rows[0].status === "active") {
+  if (rows.length > 0 && rows[0].status !== "reverted") {
     await revertCustomExerciseBatch(batchId);
   }
   await db.execute("DELETE FROM grammar_exercise_imports WHERE id = $1;", [batchId]);
@@ -608,7 +680,8 @@ export async function listExerciseImportHistory(
         }
       })(),
       rawJson: r.raw_json,
-      status: (r.status as "active" | "reverted") || "active",
+      // A batch still "pending" had its save interrupted: it is offered as active so it can be undone
+      status: r.status === "reverted" ? "reverted" : "active",
     }));
   } catch (err) {
     console.warn("Failed to load grammar exercise import history:", err);

@@ -120,41 +120,89 @@ function sentenceSpans(text: string): Array<{ start: number; end: number; text: 
 
 const TOKEN_RE = /[A-Za-z][A-Za-z0-9'’-]*[A-Za-z0-9]|[A-Za-z]/g;
 
-/**
- * `knownCommon`: words treated as already known when they are not in the bank. Default: the ~900 very
- * common words; a beginner (foundation mode) passes FUNCTION_WORDS so everyday words are suggested too.
- */
-export function analyzeText(
-  text: string,
-  words: WordDetail[],
-  knownCommon: ReadonlySet<string> = COMMON_WORDS
-): ReadingAnalysis {
+/** The learner's words prepared for lookup: every inflected form of a single word, and the multi-word phrases */
+export interface WordIndex {
+  formIndex: Map<string, WordDetail>;
+  /** Longest first; `pattern` is a global case-insensitive regex (reset lastIndex before use) */
+  phrases: Array<{ word: WordDetail; pattern: RegExp }>;
+}
+
+export function buildWordIndex(words: WordDetail[]): WordIndex {
   // Single words: every inflected form -> the bank word
   const formIndex = new Map<string, WordDetail>();
-  const phrases: WordDetail[] = [];
+  const phraseWords: WordDetail[] = [];
   for (const w of words) {
     const key = w.word.trim().toLowerCase();
     if (!key) continue;
     if (/\s/.test(key)) {
-      phrases.push(w);
+      phraseWords.push(w);
       continue;
     }
     for (const f of wordForms(key)) if (!formIndex.has(f)) formIndex.set(f, w);
   }
+  const phrases = phraseWords
+    .sort((a, b) => b.word.length - a.word.length)
+    .map((word) => ({ word, pattern: new RegExp(wordFormsPattern(word.word.trim()), "gi") }));
+  return { formIndex, phrases };
+}
+
+// Building the index walks every word: reuse it while the same words array is analysed again (the 7 sample
+// texts of the coverage number, a text re-analysed as the learner types)
+const indexCache = new WeakMap<WordDetail[], WordIndex>();
+
+function indexFor(words: WordDetail[]): WordIndex {
+  let index = indexCache.get(words);
+  if (!index) {
+    index = buildWordIndex(words);
+    indexCache.set(words, index);
+  }
+  return index;
+}
+
+/**
+ * `knownCommon`: words treated as already known when they are not in the bank. Default: the ~900 very
+ * common words; a beginner (foundation mode) passes FUNCTION_WORDS so everyday words are suggested too.
+ * `index`: the words prepared by buildWordIndex, when the caller analyses several texts with the same words.
+ */
+export function analyzeText(
+  text: string,
+  words: WordDetail[],
+  knownCommon: ReadonlySet<string> = COMMON_WORDS,
+  index: WordIndex = indexFor(words)
+): ReadingAnalysis {
+  const { formIndex, phrases } = index;
 
   const sentences = sentenceSpans(text);
-  const sentenceAt = (pos: number) => sentences.find((s) => pos >= s.start && pos < s.end)?.text ?? "";
+  // Spans are visited in text order, so the sentence is found by moving forward, not by scanning them all
+  let sentenceIdx = 0;
+  const sentenceAt = (pos: number) => {
+    while (sentenceIdx < sentences.length && sentences[sentenceIdx].end <= pos) sentenceIdx++;
+    const s = sentences[sentenceIdx];
+    return s && pos >= s.start ? s.text : "";
+  };
 
-  // Phrases of the bank ("follow up", "edge case") first; their words are not looked up again
+  // Phrases of the bank ("follow up", "edge case") first; their words are not looked up again.
+  // `taken` marks the characters of the phrases found, so overlap checks cost the length of the match.
   type Span = { start: number; end: number; cls: TokenClass };
   const spans: Span[] = [];
-  const covered = (start: number, end: number) => spans.some((s) => start < s.end && end > s.start);
-  for (const p of phrases.sort((a, b) => b.word.length - a.word.length)) {
-    const re = new RegExp(wordFormsPattern(p.word.trim()), "gi");
+  const taken = phrases.length > 0 ? new Uint8Array(text.length) : null;
+  const covered = (start: number, end: number) => {
+    if (!taken) return false;
+    for (let i = start; i < end; i++) if (taken[i]) return true;
+    return false;
+  };
+  for (const { word: p, pattern: re } of phrases) {
+    re.lastIndex = 0;
     let m: RegExpExecArray | null;
     while ((m = re.exec(text))) {
-      if (!covered(m.index, m.index + m[0].length)) {
-        spans.push({ start: m.index, end: m.index + m[0].length, cls: { kind: "bank", word: p, status: bankStatus(p) } });
+      const end = m.index + m[0].length;
+      if (m[0].length === 0) {
+        re.lastIndex++;
+        continue;
+      }
+      if (!covered(m.index, end)) {
+        spans.push({ start: m.index, end, cls: { kind: "bank", word: p, status: bankStatus(p) } });
+        taken!.fill(1, m.index, end);
       }
     }
   }

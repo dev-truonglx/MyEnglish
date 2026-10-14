@@ -48,7 +48,34 @@ export function weekKey(now: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/** The stats screen opens several cards at once, each wanting the logs of a week, two weeks or a month */
+const SHARED_LOG_DAYS = 30;
+let loadingLogs: { since: number; promise: Promise<ProgressLog[]> } | null = null;
+
+/**
+ * Logs since `since`. Calls made while a load is in flight share it: a call within the last 30 days loads
+ * all 30 once and each caller takes its own slice (nothing is cached after the load settles, so a log
+ * written a moment later is always seen).
+ */
 export async function getReviewLogsSince(since: Date): Promise<ProgressLog[]> {
+  const from = since.getTime();
+  const sinceIso = since.toISOString();
+  if (!loadingLogs || loadingLogs.since > from) {
+    // At least the last 30 days; a caller asking for more loads what it needs
+    const start = Math.min(from, Date.now() - SHARED_LOG_DAYS * 24 * 60 * 60 * 1000);
+    const entry: { since: number; promise: Promise<ProgressLog[]> } = {
+      since: start,
+      promise: queryReviewLogsSince(new Date(start)).finally(() => {
+        if (loadingLogs === entry) loadingLogs = null;
+      }),
+    };
+    loadingLogs = entry;
+  }
+  const logs = await loadingLogs.promise;
+  return logs.filter((l) => l.timestamp >= sinceIso);
+}
+
+async function queryReviewLogsSince(since: Date): Promise<ProgressLog[]> {
   const db = await getDatabase();
   // Introductions, words marked "Đã biết" and implicit credits (is_scheduled = 2) are not answers the learner gave
   const rows = await db.select<

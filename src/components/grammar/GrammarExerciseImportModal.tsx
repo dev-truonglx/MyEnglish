@@ -527,7 +527,7 @@ export default function GrammarExerciseImportModal({
                       </span>
                     </div>
                     <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
-                      {validation.payload.chapterId.toUpperCase()} • {validation.payload.title}
+                      {selectedChapterId.toUpperCase()} • {validation.payload.title}
                     </span>
                   </div>
 
@@ -591,7 +591,7 @@ export default function GrammarExerciseImportModal({
                 </button>
                 <button
                   type="button"
-                  onClick={() => validation?.ok && handleSave(validation.payload)}
+                  onClick={() => validation?.ok && handleSave({ ...validation.payload, chapterId: selectedChapterId })}
                   disabled={!validation?.ok || saving}
                   className="px-5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5"
                 >

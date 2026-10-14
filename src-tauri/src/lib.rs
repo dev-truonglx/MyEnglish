@@ -538,8 +538,11 @@ fn read_clipboard_text() -> String {
         // On macOS, always use pbpaste (spawns a subprocess).
         // Accessing NSPasteboard via arboard from background tokio worker threads is NOT thread-safe
         // and crashes with EXC_BAD_ACCESS (SIGSEGV) in -[NSPasteboard _updateTypeCacheIfNeeded].
+        // Timeout: a pasteboard owned by a frozen app can hang pbpaste, and we hold CLIPBOARD_LOCK
         for cmd in &["/usr/bin/pbpaste", "pbpaste"] {
-            if let Ok(output) = std::process::Command::new(cmd).output() {
+            if let Ok(output) =
+                output_with_timeout(std::process::Command::new(cmd), std::time::Duration::from_secs(2))
+            {
                 if output.status.success() {
                     return String::from_utf8_lossy(&output.stdout).to_string();
                 }
@@ -1324,7 +1327,9 @@ fn cancel_update_exit() {
 
 #[tauri::command]
 fn log_debug(tag: String, message: String) {
-    println!("[{}] {}", tag, message);
+    // println! panics on a closed stdout (app started from a terminal that was then closed)
+    use std::io::Write;
+    let _ = writeln!(std::io::stdout().lock(), "[{}] {}", tag, message);
 }
 
 #[derive(serde::Serialize)]
@@ -2195,9 +2200,16 @@ fn optimize_fsrs_parameters(items: &[FsrsItemInput]) -> Result<FsrsOptimizeResul
 /// Fit personal FSRS-6 parameters to the user's review history (CPU heavy: runs on a worker thread).
 #[tauri::command]
 async fn compute_fsrs_parameters(items: Vec<FsrsItemInput>) -> Result<FsrsOptimizeResult, String> {
-    tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
+    // One run at a time: each one uses every CPU core
+    static OPTIMIZING: AtomicBool = AtomicBool::new(false);
+    if OPTIMIZING.swap(true, Ordering::SeqCst) {
+        return Err("Đang tối ưu tham số, vui lòng đợi lượt trước xong".to_string());
+    }
+    let result = tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
         .await
-        .map_err(|e| format!("Task execution failed: {}", e))?
+        .map_err(|e| format!("Task execution failed: {}", e));
+    OPTIMIZING.store(false, Ordering::SeqCst);
+    result?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2279,6 +2291,9 @@ pub fn run() {
                 }
                 let _tray = tray_builder
                     .menu(&tray_menu)
+                    // Left click toggles the main window; the menu is on right click only
+                    // (with both, Windows shows the menu and toggles at once)
+                    .show_menu_on_left_click(false)
                     .tooltip("MyEnglish")
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => {
@@ -2341,7 +2356,8 @@ pub fn run() {
             let bg_app = app.handle().clone();
             std::thread::spawn(move || loop {
                 std::thread::sleep(std::time::Duration::from_secs(30));
-                let _ = bg_app.emit("srs-heartbeat", serde_json::json!({}));
+                // Only the main window schedules reminders
+                let _ = bg_app.emit_to("main", "srs-heartbeat", serde_json::json!({}));
             });
 
             Ok(())
@@ -2402,10 +2418,12 @@ pub fn run() {
                 ..
             } => {
                 // If an update is in progress, allow the process to die normally.
-                // Otherwise hide to tray so the app keeps running in background.
-                if label == "main" && !ALLOW_EXIT.load(Ordering::SeqCst) {
+                // Otherwise hide to tray so the app keeps running in background. Applies to every
+                // window: they are created once from tauri.conf.json, so a Cmd+W / Alt+F4 that really
+                // closed quick-input or the review popup would break them until the next launch.
+                if !ALLOW_EXIT.load(Ordering::SeqCst) {
                     api.prevent_close();
-                    if let Some(w) = app_handle.get_webview_window("main") {
+                    if let Some(w) = app_handle.get_webview_window(&label) {
                         let _ = w.hide();
                     }
                 }

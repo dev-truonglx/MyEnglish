@@ -7,8 +7,6 @@ import { restoreLocalStorageFromDb, startLocalStorageBackup } from "./services/s
 import { getInitialWindowLabel } from "./lib/windowLabel";
 import { initStrictInputGuards } from "./lib/inputGuards";
 
-import { ensureReleaseMigrationV27 } from "./services/releaseMigration";
-
 // Initialize theme (dark/light/system) before first paint
 initTheme();
 // Enforce strict raw keyboard input across all inputs in the system
@@ -20,6 +18,9 @@ async function bootstrap() {
   if ("__TAURI_INTERNALS__" in window) {
     try {
       if (getInitialWindowLabel() === "main") {
+        // Main window only: loaded on demand so the other windows (popup, nudge, quick input) don't pull the
+        // migration's services (grammar book, catalog, db, smart review) into their startup
+        const { ensureReleaseMigrationV27 } = await import("./services/releaseMigration");
         await ensureReleaseMigrationV27();
       }
       await restoreLocalStorageFromDb();

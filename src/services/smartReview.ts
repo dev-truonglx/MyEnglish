@@ -14,6 +14,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
 import { getCardRetrievability, getStudyLimits } from "./srs";
+import { shuffle } from "@/lib/utils";
 import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs } from "./cards";
 import { persistKeyNow } from "./storageBackup";
 import { COMMON_WORDS } from "@/data/commonWords";
@@ -309,18 +310,44 @@ export function smartSortReviewQueue<T extends WordDetail>(
   return interleaveTopics(scored.map((s) => s.word));
 }
 
-function interleaveTopics<T extends WordDetail>(ordered: T[]): T[] {
+/** Keeps the order but never lets more than 2 consecutive words share a topic when another exists */
+export function interleaveTopics<T extends WordDetail>(ordered: T[]): T[] {
+  // Same rule as taking `remaining.findIndex(...)` from a shrinking array, without the O(n²) splices:
+  // one queue of positions per topic, so the first word of another topic is the smallest queue head
+  const topics = ordered.map(topicOf);
+  const queues = new Map<string, number[]>();
+  topics.forEach((t, i) => {
+    const q = queues.get(t);
+    if (q) q.push(i);
+    else queues.set(t, [i]);
+  });
+  const heads = new Map<string, number>([...queues.keys()].map((t) => [t, 0]));
+  const taken: boolean[] = new Array(ordered.length).fill(false);
+  const headOf = (topic: string): number | undefined => {
+    const q = queues.get(topic)!;
+    let h = heads.get(topic)!;
+    while (h < q.length && taken[q[h]]) h++;
+    heads.set(topic, h);
+    return h < q.length ? q[h] : undefined;
+  };
   const result: T[] = [];
-  const remaining = [...ordered];
-  while (remaining.length > 0) {
-    let chosen = 0;
+  let first = 0; // first position not taken yet
+  while (result.length < ordered.length) {
+    while (taken[first]) first++;
+    let chosen = first;
     const n = result.length;
     if (n >= 2 && topicOf(result[n - 1]) === topicOf(result[n - 2])) {
       const blocked = topicOf(result[n - 1]);
-      const alt = remaining.findIndex((w) => topicOf(w) !== blocked);
-      if (alt !== -1) chosen = alt;
+      let alt = Infinity;
+      for (const t of queues.keys()) {
+        if (t === blocked) continue;
+        const h = headOf(t);
+        if (h !== undefined && h < alt) alt = h;
+      }
+      if (alt !== Infinity) chosen = alt;
     }
-    result.push(remaining.splice(chosen, 1)[0]);
+    taken[chosen] = true;
+    result.push(ordered[chosen]);
   }
   return result;
 }
@@ -358,6 +385,8 @@ export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
     .catch(() => new Map<string, number>());
   // A word marked "already known" never uses the budget for recognition (neither the day it is marked nor
   // the day of its first real review). Its recall card, started later, is a new card like any other.
+  // Only words with a log today are grouped (idx_review_logs_time; this runs every minute): their MIN(timestamp)
+  // still covers all their older logs, so the result is the same as grouping every log.
   const rows = await db.select<
     Array<{ word_id: string; direction: string; state: number | null; reps: number | null; next_review_date: string | null; suspended: number | null }>
   >(
@@ -369,7 +398,8 @@ export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
      FROM (
        SELECT word_id, COALESCE(direction, 'recognition') AS direction, MIN(timestamp) AS first_seen
        FROM review_logs
-       WHERE (is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro')
+       WHERE word_id IN (SELECT word_id FROM review_logs WHERE timestamp >= $1)
+         AND (is_scheduled IS NULL OR is_scheduled = 1 OR exercise_type = 'intro')
          AND NOT (COALESCE(direction, 'recognition') = 'recognition'
                   AND word_id IN (SELECT word_id FROM review_logs WHERE exercise_type = 'known'))
        GROUP BY word_id, COALESCE(direction, 'recognition')
@@ -577,7 +607,8 @@ export function newCardAllowance(dueReviewCount: number, maxSessionSize: number)
  *    new words and new recall cards alternating, spread evenly through the session; cards introduced
  *    in the last 24 hours that are still new (NewCardCounts.pending) go first, outside the budget, once
  *    their introduction is a minute old even when their postponed quiz is not due yet (see isDueSrs)
- *  - whole session capped at maxSessionSize (or `options.maxCards`, today's share after a break)
+ *  - whole session capped at maxSessionSize (or `options.maxCards`, today's share after a break; with
+ *    `comebackNewCards` that cap is for the reviews and the plan's new cards are added on top)
  *  - `options.noNewCards`: reviews only
  *  - `options.comebackNewCards`: while a comeback plan runs, exactly this many new cards a day (minus the
  *    ones already introduced today) replace the daily budget, and the backlog does not cut them
@@ -642,9 +673,14 @@ export function buildReviewSession(
     if (i < split.production) newCards.push(newRecall[i]);
   }
 
-  const allowance = comebackNew != null ? limits.maxSessionSize : newCardAllowance(reviewCards.length, limits.maxSessionSize);
-  const newSlice = newCards.slice(0, Math.min(limits.maxSessionSize, allowance));
-  const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, limits.maxSessionSize - newSlice.length), leechSettings));
+  // Comeback: reviews take today's share (maxCards) first and the plan's few new cards come on top of that cut
+  // (applyComebackToWork counts them the same way); otherwise new cards share the session with the reviews
+  const newSlice =
+    comebackNew != null
+      ? newCards.slice(0, stored.maxSessionSize)
+      : newCards.slice(0, Math.min(limits.maxSessionSize, newCardAllowance(reviewCards.length, limits.maxSessionSize)));
+  const reviewRoom = comebackNew != null ? limits.maxSessionSize : limits.maxSessionSize - newSlice.length;
+  const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, reviewRoom), leechSettings));
   if (newSlice.length === 0) return reviewSlice;
   if (reviewSlice.length === 0) return newSlice;
 
@@ -1596,8 +1632,7 @@ export function generateMultipleChoiceQuestion(
   // Vietnamese -> English: words the learner has studied come first, otherwise the answer is the one
   // familiar word among words never seen (M7); deck words not studied yet only fill what is missing
   const studied = (w: WordDetail) => (promptType === "vn_to_en" && (w.srs?.reps ?? 0) > 0 ? 1 : 0);
-  const ranked = [...otherWords]
-    .sort(() => 0.5 - Math.random())
+  const ranked = shuffle(otherWords)
     .sort((x, y) => studied(y) - studied(x) || similarity(y) - similarity(x));
 
   // Displayed text of an option; options that look identical to another one are skipped
@@ -1651,7 +1686,7 @@ export function generateMultipleChoiceQuestion(
     }
 
     // Shuffle options
-    options = options.sort(() => 0.5 - Math.random());
+    options = shuffle(options);
 
     return {
       promptType,
@@ -1687,7 +1722,7 @@ export function generateMultipleChoiceQuestion(
       fbIdx++;
     }
 
-    options = options.sort(() => 0.5 - Math.random());
+    options = shuffle(options);
 
     return {
       promptType,
@@ -1771,11 +1806,7 @@ export function prepareSentenceBuilder(word: WordDetail): SentenceBuilderData | 
   }));
 
   // Fisher-Yates shuffle to ensure tokens are thoroughly scrambled
-  const shuffledTokens = [...tokens];
-  for (let i = shuffledTokens.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shuffledTokens[i], shuffledTokens[j]] = [shuffledTokens[j], shuffledTokens[i]];
-  }
+  const shuffledTokens = shuffle(tokens);
   // Ensure it doesn't accidentally stay in the exact original order
   if (shuffledTokens.length > 1 && shuffledTokens.every((t, idx) => t.id === tokens[idx].id)) {
     [shuffledTokens[0], shuffledTokens[1]] = [shuffledTokens[1], shuffledTokens[0]];
@@ -1846,8 +1877,8 @@ export function prepareContextMatch(
   // Only words already met: a word still waiting in the buffer (never introduced) would be shown, with its
   // meaning given away, before its own introduction (M16)
   const met = (w: WordDetail) => (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || Boolean(w.srs?.last_review);
-  const shuffledOthers = allWords
-    .filter(
+  const shuffledOthers = shuffle(
+    allWords.filter(
       (w) =>
         w.id !== primaryWord.id &&
         !excludeIds.has(w.id) &&
@@ -1856,7 +1887,7 @@ export function prepareContextMatch(
         w.examples &&
         w.examples.length > 0
     )
-    .sort(() => 0.5 - Math.random());
+  );
   for (const other of shuffledOthers) {
     if (pairs.length >= 3) break;
     tryAdd(other);
@@ -2258,14 +2289,16 @@ export function prepareMeaningMatch(
 
   if (!tryAdd(primaryWord)) return [];
 
-  const candidates = allWords
-    .filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id))
-    .sort(() => 0.5 - Math.random())
-    .sort((a, b) => Number((b.srs?.reps ?? 0) > 0) - Number((a.srs?.reps ?? 0) > 0));
+  // Only words already met (M16, same rule as prepareContextMatch): a word still waiting in the buffer
+  // would have its meaning given away before its own introduction
+  const met = (w: WordDetail) => (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || Boolean(w.srs?.last_review);
+  const candidates = shuffle(allWords.filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id) && met(w))).sort(
+    (a, b) => Number((b.srs?.reps ?? 0) > 0) - Number((a.srs?.reps ?? 0) > 0)
+  );
   for (const w of candidates) {
     if (pairs.length >= MEANING_MATCH_PAIRS) break;
     tryAdd(w);
   }
 
-  return pairs.sort(() => 0.5 - Math.random());
+  return shuffle(pairs);
 }

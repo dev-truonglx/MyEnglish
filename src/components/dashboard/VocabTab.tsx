@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Check, Eye, Layers, Loader2, Search, Volume2, Zap } from "lucide-react";
 import {
   CATALOG_LEVEL_COUNTS,
@@ -74,14 +74,24 @@ export function mixDescription(levels: StudyLevel[]): string {
 
 function useLevelProgress() {
   const [progress, setProgress] = useState<LevelProgress[] | null>(null);
+  // The newest request wins: an older, slower response must not overwrite it
+  const seqRef = useRef(0);
   const reload = useCallback(() => {
-    loadLevelProgress().then(setProgress).catch(() => setProgress(null));
+    const seq = ++seqRef.current;
+    loadLevelProgress()
+      .then((p) => {
+        if (seq === seqRef.current) setProgress(p);
+      })
+      .catch(() => {
+        if (seq === seqRef.current) setProgress(null);
+      });
   }, []);
   useEffect(() => {
     reload();
     window.addEventListener("words-changed", reload);
     window.addEventListener("myenglish-study-levels-changed", reload);
     return () => {
+      seqRef.current++; // unmounted: drop a response still on its way
       window.removeEventListener("words-changed", reload);
       window.removeEventListener("myenglish-study-levels-changed", reload);
     };
@@ -213,13 +223,27 @@ function Skim({ levels, onChanged }: { levels: StudyLevel[]; onChanged: () => vo
     if (!levels.includes(level)) setLevel(levels[0]);
   }, [levels, level]);
 
+  // The newest load wins: switching level quickly must not show the previous level's words
+  const loadSeqRef = useRef(0);
   const load = useCallback(() => {
+    const seq = ++loadSeqRef.current;
     setEntries(null);
     setPicked(new Set());
     setShown(new Set());
-    nextUnstudiedEntries(level, 30).then(setEntries).catch(() => setEntries([]));
+    nextUnstudiedEntries(level, 30)
+      .then((list) => {
+        if (seq === loadSeqRef.current) setEntries(list);
+      })
+      .catch(() => {
+        if (seq === loadSeqRef.current) setEntries([]);
+      });
   }, [level]);
-  useEffect(load, [load]);
+  useEffect(() => {
+    load();
+    return () => {
+      loadSeqRef.current++;
+    };
+  }, [load]);
 
   const toggle = (set: Set<string>, id: string) => {
     const next = new Set(set);
@@ -336,10 +360,21 @@ function CatalogSearch({ onChanged }: { onChanged: () => void }) {
       setResults([]);
       return;
     }
+    // An older search finishing after a newer one must not replace its results
+    let stale = false;
     const t = setTimeout(() => {
-      searchCatalog(q, 30).then(setResults).catch(() => setResults([]));
+      searchCatalog(q, 30)
+        .then((list) => {
+          if (!stale) setResults(list);
+        })
+        .catch(() => {
+          if (!stale) setResults([]);
+        });
     }, 150);
-    return () => clearTimeout(t);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
   }, [query]);
 
   const early = async (e: CatalogEntry) => {

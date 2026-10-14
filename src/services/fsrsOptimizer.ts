@@ -41,14 +41,23 @@ export function isValidWeights(w: unknown): w is number[] {
   return Array.isArray(w) && w.length === FSRS_PARAM_COUNT && w.every((x) => typeof x === "number" && Number.isFinite(x));
 }
 
+/** The stored weights, re-parsed only when the stored string changes (any writer, any window, a reset) */
+let cachedWeights: { raw: string | null; value: StoredWeights | null } | null = null;
+
 /** Weights applied by the learner, or null to use the defaults */
 export function getStoredWeights(): StoredWeights | null {
+  let raw: string | null = null;
   try {
-    const parsed = JSON.parse(localStorage.getItem(FSRS_WEIGHTS_KEY) || "null");
-    return parsed && isValidWeights(parsed.w) ? parsed : null;
-  } catch {
-    return null;
-  }
+    raw = localStorage.getItem(FSRS_WEIGHTS_KEY);
+  } catch {}
+  if (cachedWeights && cachedWeights.raw === raw) return cachedWeights.value;
+  let value: StoredWeights | null = null;
+  try {
+    const parsed = JSON.parse(raw || "null");
+    value = parsed && isValidWeights(parsed.w) ? parsed : null;
+  } catch {}
+  cachedWeights = { raw, value };
+  return value;
 }
 
 export function saveWeights(result: OptimizerResult): void {
@@ -77,7 +86,9 @@ interface LogRow {
 
 function localDayNumber(iso: string): number {
   const d = new Date(iso);
-  return Math.floor(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86400000);
+  // The local calendar date as a UTC day count: local midnights are 23 or 25 hours apart across a DST change,
+  // so dividing their timestamps would be off by one there (or sit on a rounding boundary far from UTC)
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
 }
 
 /**

@@ -7,7 +7,7 @@
 import type { WordDetail } from "@/types/database";
 import type { CoverageText } from "@/data/coverageCorpus";
 import { FUNCTION_WORDS } from "@/data/commonWords";
-import { analyzeText } from "./reading";
+import { analyzeText, buildWordIndex } from "./reading";
 import { hasRealReview } from "./progress";
 
 export interface Coverage {
@@ -25,8 +25,9 @@ function isRecognised(word: WordDetail): boolean {
 export function computeCoverage(words: WordDetail[], texts: CoverageText[]): Coverage {
   let known = 0;
   let total = 0;
+  const index = buildWordIndex(words); // once for all the sample texts
   for (const t of texts) {
-    for (const seg of analyzeText(t.text, words, FUNCTION_WORDS).segments) {
+    for (const seg of analyzeText(t.text, words, FUNCTION_WORDS, index).segments) {
       if (!seg.token) continue;
       total++;
       if (seg.token.kind === "common" || (seg.token.kind === "bank" && isRecognised(seg.token.word))) known++;

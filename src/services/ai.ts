@@ -434,9 +434,16 @@ export interface WritingFeedback {
   explanationVn: string;
 }
 
-/** Parse the AI's JSON defensively: unknown categories become "other", empty or no-op corrections are dropped. */
+/**
+ * Parse the AI's JSON defensively: unknown categories become "other", empty or no-op corrections are dropped.
+ * A result without a numeric score is rejected (like parseSentenceGrade) rather than shown as 0/100.
+ */
 export function parseWritingFeedback(raw: string): WritingFeedback {
   const obj = JSON.parse(raw) as Record<string, unknown>;
+  const rawScore = typeof obj.score === "string" ? Number(obj.score.trim()) : obj.score;
+  if (typeof rawScore !== "number" || !Number.isFinite(rawScore)) {
+    throw new Error("AI không trả về điểm hợp lệ cho bài viết này.");
+  }
   const corrections = (Array.isArray(obj.corrections) ? obj.corrections : [])
     .map((c) => {
       const o = (c && typeof c === "object" ? c : {}) as Record<string, unknown>;
@@ -452,7 +459,7 @@ export function parseWritingFeedback(raw: string): WritingFeedback {
     .filter((c) => c.wrong && c.right && c.wrong.toLowerCase() !== c.right.toLowerCase())
     .slice(0, 8);
   return {
-    score: Math.max(0, Math.min(100, Math.round(Number(obj.score) || 0))),
+    score: Math.max(0, Math.min(100, Math.round(rawScore))),
     corrections,
     betterVersion: String(obj.better_version ?? ""),
     explanationVn: String(obj.explanation_vn ?? ""),

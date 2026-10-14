@@ -1,6 +1,6 @@
 import { getDatabase } from "./db";
 import { ensureCatalogSeeded } from "./vocabCatalog";
-import { ensureGrammarBookSeeded, clearBookCache } from "./grammarBook";
+import { ensureGrammarBookSeeded, notifyBookUpdated } from "./grammarBook";
 import { GRAMMAR_CONTENT_VERSION_KEY, TARGET_GRAMMAR_CONTENT_VERSION } from "./grammarReset";
 import { RELEASE_WIPE_VERSION_KEY, TARGET_RELEASE_WIPE_VERSION } from "./releaseMigration";
 import { clearBackupCache } from "./storageBackup";
@@ -15,6 +15,7 @@ export const TABLES_TO_RESET = [
   "mistakes",
   "grammar_progress",
   "grammar_custom_exercises",
+  "grammar_exercise_imports",
   "grammar_book_items",
   "grammar_book_sets",
   "grammar_book_lessons",
@@ -127,7 +128,7 @@ export async function resetAllAppData(options?: ResetOptions): Promise<boolean> 
 
     // 5. Invalidate in-memory caches
     clearBackupCache();
-    clearBookCache();
+    notifyBookUpdated([]); // other windows (the review popup) drop their copy too
 
     // 6. Re-seed Oxford 5000 vocabulary catalog
     notify("Đang nạp lại 5.000 từ vựng Oxford...");

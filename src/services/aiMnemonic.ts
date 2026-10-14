@@ -18,7 +18,8 @@ interface StoredMnemonics {
 function readMap(): StoredMnemonics {
   try {
     const raw = localStorage.getItem(MNEMONIC_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as StoredMnemonics) : {};
   } catch {
     return {};
   }

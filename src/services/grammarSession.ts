@@ -1,13 +1,15 @@
-import type { GrammarBookExerciseSet, GrammarBookItem, GrammarBookLesson, GrammarExerciseSetType } from "@/types/grammarBook";
+import type { GrammarBookExerciseSet, GrammarBookFile, GrammarBookItem, GrammarBookLesson, GrammarExerciseSetType } from "@/types/grammarBook";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
-import { bookItemKey, getAllBookChapters, getHiddenItemsSet } from "./grammarBook";
+import { bookItemKey, getAcceptedAnswersRevision, getAllBookChapters, getHiddenItemsRevision, getHiddenItemsSet } from "./grammarBook";
 import {
+  availableFormats,
   buildTask,
   formatForLevel,
   getItemReviewLevel,
   isSelfGraded,
   ladderTask,
   nativeFormat,
+  readItemLevels,
   updateItemReviewLevel,
   type GrammarFormat,
   type GrammarTask,
@@ -62,6 +64,9 @@ export interface SessionEntry {
   wordBank?: string[];
   /** The set's text the questions are about ("dựa vào đoạn văn") */
   passage?: string;
+  /** Popup: shown in an easier format than the item's ladder level (choice for an error/translate item), so a
+   *  right answer does not lift the item past that format */
+  belowLevel?: boolean;
 }
 
 interface IndexedItem {
@@ -84,8 +89,26 @@ interface BookIndex {
   items: IndexedItem[];
 }
 
+/**
+ * The index of the book, kept until something it was built from changes: the loaded book (a new array each
+ * time it is reloaded), the hidden items, or the answers the learner accepted (they decide what is self-graded).
+ */
+let indexCache: { chapters: GrammarBookFile[]; hidden: string; accepted: string; index: BookIndex } | null = null;
+
 export async function loadBookIndex(): Promise<BookIndex> {
   const chapters = await getAllBookChapters();
+  const hiddenRevision = getHiddenItemsRevision();
+  const acceptedRevision = getAcceptedAnswersRevision();
+  if (indexCache && indexCache.chapters === chapters && indexCache.hidden === hiddenRevision && indexCache.accepted === acceptedRevision) {
+    return indexCache.index;
+  }
+  const index = buildBookIndex(chapters);
+  // A book that could not be read comes back empty each time and is never kept
+  if (chapters.length > 0) indexCache = { chapters, hidden: hiddenRevision, accepted: acceptedRevision, index };
+  return index;
+}
+
+function buildBookIndex(chapters: GrammarBookFile[]): BookIndex {
   const hidden = getHiddenItemsSet();
   const lessons: GrammarBookLesson[] = [];
   const chapterOfLesson = new Map<string, string>();
@@ -104,7 +127,7 @@ export async function loadBookIndex(): Promise<BookIndex> {
     for (const g of ch.practiceGroups || []) {
       for (const item of g.items) {
         const key = bookItemKey(item);
-        if (item.hidden || hidden.has(key)) continue;
+        if (hidden.has(key)) continue;
         const set = item.setId ? setById.get(item.setId) : undefined;
         const setType = set?.type ?? "fill_blank";
         items.push({
@@ -174,7 +197,13 @@ export async function buildLearnSession(lessonId: string, size = 8, random: () =
   const index = await loadBookIndex();
   const learnable = (it: IndexedItem) => it.lessonIds.includes(lessonId) && !it.selfGraded;
   const solo = index.items.filter((it) => learnable(it) && it.lessonIds.length === 1);
-  const othersStudied = (it: IndexedItem) => it.lessonIds.every((id) => id === lessonId || isLessonStudied(id));
+  const studiedMemo = new Map<string, boolean>();
+  const studiedOnce = (id: string) => {
+    let v = studiedMemo.get(id);
+    if (v === undefined) studiedMemo.set(id, (v = isLessonStudied(id)));
+    return v;
+  };
+  const othersStudied = (it: IndexedItem) => it.lessonIds.every((id) => id === lessonId || studiedOnce(id));
   const mixed = index.items.filter((it) => learnable(it) && it.lessonIds.length > 1 && (solo.length === 0 || othersStudied(it)));
   const picked = [...spread(solo, size), ...spread(mixed, Math.max(0, size - solo.length))].slice(0, size);
   const production = Math.min(3, Math.floor(picked.length / 3));
@@ -372,10 +401,12 @@ export async function recordGrammarAnswer(
   const isCorrect = correct && !skipped;
   const clean = isCorrect && !opts.hinted && !selfAccepted;
   recordGrammarExerciseAttempt(key, clean, skipped);
-  if (!selfAccepted) updateItemReviewLevel(key, clean);
+  if (!selfAccepted && !(clean && e.belowLevel)) updateItemReviewLevel(key, clean);
   if (opts.mode !== "popup") recordDailyActivity(1);
 
-  if ((opts.mode === "review" || opts.mode === "popup") && !selfAccepted) {
+  // The learner's own "Đúng/Sai" on a self-graded item never grades the lesson (it can appear in a studied
+  // lesson's "Bài tập" tab, which is pooled as a review)
+  if ((opts.mode === "review" || opts.mode === "popup") && !selfAccepted && e.task.format !== "self") {
     for (const id of e.lessonIds) {
       if (!isLessonStudied(id)) continue;
       const score = poolLessonAnswer(id, clean);
@@ -383,21 +414,44 @@ export async function recordGrammarAnswer(
     }
   }
 
-  if (!isCorrect && e.task.format !== "self") {
+  // Saved in the background: the next question never waits for the notebook
+  if (!isCorrect && e.task.format !== "self") void saveGrammarMistake(e, opts.given);
+}
+
+/** The mistake-notebook card for a wrong answer; null when there is nothing meaningful to learn from it */
+export function grammarMistakeOf(e: SessionEntry, given: string | undefined): { wrong: string; right: string } | null {
+  const t = e.task;
+  let wrong = given?.trim() ?? "";
+  let right: string;
+  if (t.format === "error") {
+    // The learner tapped a word; the card is the wrong part of the sentence and its correction
+    const [from, to] = t.errorSpan ?? [-1, -1];
+    wrong = (t.errorTokens?.slice(from, to + 1) ?? []).join(" ").replace(/^[^\w']+|[^\w']+$/g, "");
+    right = t.errorFix ?? "";
+  } else {
+    right = t.blanks > 0 ? t.answers.map((a) => a[0] ?? "").join(" … ") : t.full;
+  }
+  // No answer at all ("Mình chưa biết") is not a mistake to fix
+  return wrong.trim() && right.trim() ? { wrong, right } : null;
+}
+
+async function saveGrammarMistake(e: SessionEntry, given: string | undefined): Promise<void> {
+  try {
+    const mistake = grammarMistakeOf(e, given);
+    if (!mistake) return;
     const index = await loadBookIndex().catch(() => null);
-    saveMistakes(
+    await saveMistakes(
       [
         {
-          wrong: opts.given?.trim() || "(chưa trả lời đúng)",
-          right: e.task.blanks > 0 ? e.task.answers.map((a) => a[0]).join(" … ") : e.task.full,
+          ...mistake,
           sentence: e.task.full,
           category: mistakeCategory(index?.chapterOfLesson.get(e.lessonIds[0])),
           whyVn: e.task.explain ?? "",
         },
       ],
       { source: "grammar" }
-    ).catch(() => {});
-  }
+    );
+  } catch {}
 }
 
 /** End of a new lesson's quick check: the lesson is studied and gets its first FSRS schedule */
@@ -491,12 +545,16 @@ export function bookLessonShell(lesson: GrammarBookLesson, chapterLabel: string 
   };
 }
 
-/** Popup questions are quick: choose, or type a single blank; nothing self-graded or multi-line */
-function popupFormat(it: IndexedItem, intro: boolean): GrammarFormat | null {
-  const level = intro ? 0 : getItemReviewLevel(it.key);
-  const f = formatForLevel(it.item, it.setType, level);
+/**
+ * Popup questions are quick: choose, or type a single blank; nothing self-graded or multi-line.
+ * `levels` is the ladder levels map, read once by the caller.
+ */
+function popupFormat(it: IndexedItem, intro: boolean, levels: Record<string, number>): GrammarFormat | null {
+  const level = intro ? 0 : getItemReviewLevel(it.key, levels);
+  const available = availableFormats(it.item, it.setType);
+  const f = formatForLevel(it.item, it.setType, level, available);
   if (f === "choice" || f === "pick_sentence") return f;
-  const lower = formatForLevel(it.item, it.setType, 0);
+  const lower = formatForLevel(it.item, it.setType, 0, available);
   if (f === "type" && (it.item.prompt.match(/_{3,}/g) || []).length === 1) return "type";
   return lower === "choice" || lower === "pick_sentence" ? lower : null;
 }
@@ -544,11 +602,20 @@ export async function getPopupGrammarItems(count: number, now: Date = new Date()
     return `Ch.${ch.chapter?.order ?? ""} · ${name.charAt(0) + name.slice(1).toLowerCase()}`;
   };
 
+  // The ladder levels are read once; each question's format is worked out once
+  const levels = readItemLevels();
+  const formats = new Map<IndexedItem, GrammarFormat | null>();
+  const formatOf = (it: IndexedItem) => {
+    if (!formats.has(it)) formats.set(it, popupFormat(it, false, levels));
+    return formats.get(it) ?? null;
+  };
+
   const result: PopupGrammarItem[] = [];
   const push = (it: IndexedItem) => {
-    const format = popupFormat(it, false);
+    const format = formatOf(it);
     if (!format) return false;
     const e = entry(it, buildTask(it.item, it.setType, format, random), { intro: false });
+    if (format !== formatForLevel(it.item, it.setType, getItemReviewLevel(it.key, levels))) e.belowLevel = true;
     const lesson = index.lessonById.get(it.lessonIds[it.lessonIds.length - 1]);
     if (!lesson) return false;
     result.push({ exercise: toPopupExercise(e), lesson: bookLessonShell(lesson, chapterLabel(lesson.id)), intro: false, entry: e });
@@ -560,7 +627,9 @@ export async function getPopupGrammarItems(count: number, now: Date = new Date()
     .filter((it) => it.lessonIds.length > 0 && it.lessonIds.every((id) => studied.has(id)))
     .map((it) => ({
       it,
-      score: itemPriority(history[it.key], t) + (it.lessonIds.some((id) => due.has(id)) ? 30 : 0) + (random() - 0.5) * 6,
+      // Due lessons strictly first: the popup often has a single grammar slot, and a recently missed item of a
+      // lesson that is not due must not take it
+      score: itemPriority(history[it.key], t) + (it.lessonIds.some((id) => due.has(id)) ? 1000 : 0) + (random() - 0.5) * 6,
     }))
     .filter((c) => c.score > -50)
     .sort((a, b) => b.score - a.score);
@@ -568,7 +637,7 @@ export async function getPopupGrammarItems(count: number, now: Date = new Date()
   for (const c of reviewCandidates) {
     const lessonId = c.it.lessonIds[c.it.lessonIds.length - 1];
     const list = byLesson.get(lessonId) ?? [];
-    if (list.length < POPUP_PER_LESSON && popupFormat(c.it, false)) {
+    if (list.length < POPUP_PER_LESSON && formatOf(c.it)) {
       list.push(c.it);
       byLesson.set(lessonId, list);
     }
@@ -583,9 +652,14 @@ export async function getPopupGrammarItems(count: number, now: Date = new Date()
 }
 
 /** Remembering where each lesson's progress stands, for the hub */
-export function lessonStatus(lessonId: string, now: Date = new Date()): "new" | "learning" | "due" | "mastered" {
+export function lessonStatus(
+  lessonId: string,
+  now: Date = new Date(),
+  /** The due lessons (getDueGrammarLessons), when the caller shows many lessons and works them out once */
+  due: ReadonlySet<string> | string[] = getDueGrammarLessons(now)
+): "new" | "learning" | "due" | "mastered" {
   if (!isLessonStudied(lessonId)) return "new";
   const p = getLessonProgress(lessonId);
-  if (getDueGrammarLessons(now).includes(lessonId)) return "due";
+  if (Array.isArray(due) ? due.includes(lessonId) : due.has(lessonId)) return "due";
   return isLessonMastered(p) ? "mastered" : "learning";
 }

@@ -89,8 +89,12 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
     const seq = ++loadSeq.current;
     try {
       await initGrammarStorage();
-      await ensureGrammarBookSeeded().catch(() => {});
-      const chs = await getAllBookChapters();
+      let chs = await getAllBookChapters();
+      // Only an empty book is worth asking the seeding about (it counts rows in SQL)
+      if (chs.length === 0) {
+        await ensureGrammarBookSeeded().catch(() => {});
+        chs = await getAllBookChapters();
+      }
       const nextPlan = await getTodayGrammarPlan();
       if (seq !== loadSeq.current) return;
       setChapters(chs);
@@ -114,9 +118,18 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
     }
   }, [initialLessonId]);
 
+  // Every graded answer fires "myenglish-grammar-updated"; closing the player reloads the hub already
+  const playerOpen = useRef(false);
+  playerOpen.current = player !== null;
+
   useEffect(() => {
     void loadData();
-    const onUpdate = () => void loadData();
+    const onUpdate = (e: Event) => {
+      // The book itself changed (import, undo, other window): the hub must reload even behind the player
+      const bookChanged = !!(e as CustomEvent<{ book?: boolean } | undefined>).detail?.book;
+      if (playerOpen.current && !bookChanged) return;
+      void loadData();
+    };
     window.addEventListener("myenglish-grammar-updated", onUpdate);
     return () => window.removeEventListener("myenglish-grammar-updated", onUpdate);
   }, [loadData]);

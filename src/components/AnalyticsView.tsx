@@ -82,7 +82,18 @@ export default function AnalyticsView({
   // Reviews coming up: the next days in one line (simple mode), the full calibration card otherwise
   const [forecast, setForecast] = useState<WorkloadForecast | null>(null);
   useEffect(() => {
-    loadWorkloadForecast(8).then(setForecast).catch(() => setForecast(null));
+    // Words change often: only the latest forecast request may set the state
+    let stale = false;
+    loadWorkloadForecast(8)
+      .then((f) => {
+        if (!stale) setForecast(f);
+      })
+      .catch(() => {
+        if (!stale) setForecast(null);
+      });
+    return () => {
+      stale = true;
+    };
   }, [words]);
 
   // Compute Level Mastery (the "topic" field holds the CEFR level)
@@ -109,9 +120,15 @@ export default function AnalyticsView({
 
   // Load Review Logs from SQLite
   useEffect(() => {
+    let stale = false;
     getReviewAnalytics(14)
-      .then((data) => setReviewAnalytics(data))
+      .then((data) => {
+        if (!stale) setReviewAnalytics(data);
+      })
       .catch((err) => console.warn("Failed to load review analytics:", err));
+    return () => {
+      stale = true;
+    };
   }, []);
 
   // Badge counts leave out "Đã biết" words no review has confirmed (the session counts the same way).

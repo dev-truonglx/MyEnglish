@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, Link2 } from "lucide-react";
 import { Rating } from "@/services/srs";
+import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareMeaningMatch, type MeaningMatchPair } from "@/services/smartReview";
 
@@ -37,7 +38,7 @@ export default function MeaningMatchExercise({
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [word.id]
   );
-  const meanings = useMemo(() => [...pairs].sort(() => 0.5 - Math.random()), [pairs]);
+  const meanings = useMemo(() => shuffle(pairs), [pairs]);
 
   const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
   const [matched, setMatched] = useState<Set<string>>(new Set());

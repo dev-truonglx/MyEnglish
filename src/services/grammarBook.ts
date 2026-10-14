@@ -13,6 +13,7 @@ import type {
   ItemValidationError,
 } from "@/types/grammarBook";
 import { persistKeyNow } from "./storageBackup";
+import { answerReadings } from "./smartReview";
 
 /**
  * The grammar book is the learner's own data: JSON files they convert from their copy of the book and import
@@ -21,6 +22,8 @@ import { persistKeyNow } from "./storageBackup";
 
 export const ACCEPTED_ANSWERS_KEY = "myenglish_grammar_accepted_answers_v1";
 export const HIDDEN_ITEMS_KEY = "myenglish_grammar_hidden_items_v1";
+/** Bumped (localStorage) each time the imported book changes, so the other windows (the popup) drop their copy */
+export const BOOK_REVISION_KEY = "myenglish_grammar_book_revision_v1";
 
 /** The 31 chapters in book order (same ids and titles as docs/grammar-import-prompt.md) */
 export const BOOK_CHAPTERS: GrammarBookChapterMeta[] = [
@@ -84,6 +87,75 @@ export function bookItemKey(item: Pick<GrammarBookItem, "setId" | "n">): string 
 /** Blanks in a prompt: "___" (3 or more underscores, a longer run counts once) */
 export function countBlanks(prompt: string): number {
   return (prompt.match(/_{3,}/g) || []).length;
+}
+
+/** True when the text matches one of the accepted answers (case, punctuation and contractions ignored) */
+export function matchesAny(text: string, accepted: string[]): boolean {
+  const user = new Set(answerReadings(text.trim()));
+  // An empty answer means "nothing goes here": accept an empty box, "-", "x" or "Ø"
+  if (accepted.some((a) => a.trim() === "") && /^\s*[-xØ∅]?\s*$/i.test(text)) return true;
+  return accepted.some((a) => a.trim() !== "" && answerReadings(a.trim()).some((r) => user.has(r)));
+}
+
+const ELLIPSIS = /\.\.\.|…/;
+/** Most words an alternative may have to be told apart from a "/" inside a longer sentence */
+const MAX_ALTERNATIVE_WORDS = 4;
+
+const wordCount = (text: string) => text.split(/\s+/).filter(Boolean).length;
+
+/**
+ * The accepted alternatives of an answer written with "/" ("was / were", "has been/ has gone"): the answer
+ * itself when it has no "/". null when the "/" cannot be split safely: no space next to it ("and/or",
+ * "24/7"), an empty alternative, long parts that may be pieces of one sentence ("He is / was late"), or parts
+ * that mix capitalised and lower-case starts in a whole-sentence answer.
+ */
+export function splitAnswerAlternatives(answer: string, wholeSentence: boolean): string[] | null {
+  if (!answer.includes("/")) return [answer];
+  if (/\S\/\S/.test(answer)) return null;
+  const parts = answer.split("/").map((p) => p.trim());
+  if (parts.length < 2 || parts.some((p) => !p)) return null;
+  // Complete sentences: each starts with a capital and all but the last end the sentence
+  const sentences = parts.every((p) => /^[A-Z]/.test(p)) && parts.slice(0, -1).every((p) => /[.!?]["')]*$/.test(p));
+  if (!sentences && parts.some((p) => wordCount(p) > MAX_ALTERNATIVE_WORDS)) return null;
+  if (wholeSentence && !sentences && new Set(parts.map((p) => /^[A-Z]/.test(p))).size > 1) return null;
+  return [...new Set(parts)];
+}
+
+/** An answer that no typed text can match: cut off ("...") or a "/" left unsplit (see normalizeItemAnswers) */
+export function hasUnreadableAnswers(item: GrammarBookItem): boolean {
+  if (countBlanks(item.prompt) === 0 && ELLIPSIS.test(item.answerSentence ?? "")) return true;
+  return (item.answers ?? []).some((slot) => slot.some((a) => a.includes("/") || ELLIPSIS.test(a)));
+}
+
+/**
+ * Makes an item's answers something a typed answer can match: an answer written as "a / b" becomes the
+ * alternatives "a" and "b"; an answer that is cut off ("...", "…") or has a "/" that cannot be split safely
+ * makes the item self-graded (the learner sees the book's answer and marks it). Nothing else changes.
+ */
+export function normalizeItemAnswers(item: GrammarBookItem): GrammarBookItem {
+  if (item.noKey || item.selfGrade) return item;
+  const blanks = countBlanks(item.prompt);
+  let unsafe = false;
+  let changed = false;
+  const answers = (item.answers ?? []).map((slot) => {
+    const out: string[] = [];
+    for (const answer of slot) {
+      const text = String(answer);
+      if (ELLIPSIS.test(text)) unsafe = true;
+      const parts = splitAnswerAlternatives(text, blanks === 0);
+      if (!parts) unsafe = true;
+      else if (parts.length !== 1 || parts[0] !== text) changed = true;
+      out.push(...(parts ?? [text]));
+    }
+    return [...new Set(out)];
+  });
+  // A whole-sentence answer is also read from the sentence itself
+  if (blanks === 0 && ELLIPSIS.test(item.answerSentence ?? "")) unsafe = true;
+  if (unsafe) return { ...item, selfGrade: true };
+  if (!changed) return item;
+  const next: GrammarBookItem = { ...item, answers };
+  if (blanks === 0 && item.answerSentence && item.answerSentence.includes("/")) next.answerSentence = answers[0]?.[0] ?? item.answerSentence;
+  return next;
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -347,7 +419,7 @@ function exampleOf(v: unknown): string | null {
  * Accepted answers as one list per blank. A flat list (["x"], or "x") is wrapped: one answer per blank when
  * the counts match, otherwise alternatives for a single blank. null = unusable shape.
  */
-function normalizeAnswers(value: unknown, blanks: number): string[][] | null {
+export function normalizeAnswers(value: unknown, blanks: number): string[][] | null {
   if (value === undefined || value === null) return [];
   if (isScalar(value)) return [[String(value)]];
   if (!Array.isArray(value)) return null;
@@ -573,6 +645,14 @@ export function validateGrammarBookFile(
 
     const answers = normalizeAnswers(raw.answers, blanks);
     item.answers = answers ?? [];
+    // "a / b" becomes two accepted answers; a cut-off answer ("...") or a "/" that cannot be split is self-graded
+    const tidy = normalizeItemAnswers(item);
+    item.answers = tidy.answers;
+    item.answerSentence = tidy.answerSentence;
+    if (tidy.selfGrade && !item.selfGrade && !item.noKey) {
+      warn(`${label}: đáp án bị cắt dở ("...") hoặc có dấu "/" không tách được → tự chấm`, where);
+      item.selfGrade = true;
+    }
     if (!answers && !item.noKey) {
       warn(`${label}: "answers" sai định dạng → tự chấm`, where);
       item.selfGrade = true;
@@ -586,8 +666,9 @@ export function validateGrammarBookFile(
       item.selfGrade = true;
     }
     if (item.options && item.options.length > 0 && item.answers.length > 0) {
-      const first = (item.answers[0] || []).map((a) => a.toLowerCase().trim());
-      if (!item.options.some((opt) => first.includes(opt.toLowerCase().trim()))) {
+      // The same matcher as the player's: curly and straight apostrophes, contractions and case do not matter
+      const first = item.answers[0] || [];
+      if (!item.options.some((opt) => matchesAny(opt, first))) {
         warn(`${label}: đáp án không có trong các lựa chọn → tự chấm`, where);
         item.selfGrade = true;
       }
@@ -731,7 +812,11 @@ export function validateGrammarBookFile(
 export function validateChapterFiles(files: GrammarBookFile[], stored: GrammarBookFile[] = []): ItemValidationError[] {
   const warnings: ItemValidationError[] = [];
   const byChapter = new Map<string, GrammarBookFile[]>();
-  for (const f of files) byChapter.set(f.chapterId, [...(byChapter.get(f.chapterId) ?? []), f]);
+  for (const f of files) {
+    const list = byChapter.get(f.chapterId);
+    if (list) list.push(f);
+    else byChapter.set(f.chapterId, [f]);
+  }
 
   for (const [chapterId, parts] of byChapter) {
     const base = stored.find((c) => c.chapterId === chapterId);
@@ -797,6 +882,9 @@ export function validateChapterFiles(files: GrammarBookFile[], stored: GrammarBo
 export function mergeChapterParts(files: GrammarBookFile[], options: { overwrite?: boolean } = {}): Map<string, GrammarBookFile> {
   const overwrite = !!options.overwrite;
   const chapterMap = new Map<string, GrammarBookFile>();
+  // Per chapter: its practice groups by id, where each item (by place in the book) sits, and the replaced
+  // items still to be removed (dropped in one pass at the end instead of re-filtering per replaced item)
+  const placed = new Map<string, { groups: Map<string, GrammarBookPracticeGroup>; groupOf: Map<string, { group: GrammarBookPracticeGroup; item: GrammarBookItem }>; replaced: Set<GrammarBookItem> }>();
   const ordered = overwrite
     ? [...files]
     : [...files].sort((a, b) => a.chapterId.localeCompare(b.chapterId) || (a.part || 1) - (b.part || 1));
@@ -819,6 +907,7 @@ export function mergeChapterParts(files: GrammarBookFile[], options: { overwrite
         importedParts: [],
       };
       chapterMap.set(file.chapterId, chapter);
+      placed.set(file.chapterId, { groups: new Map(), groupOf: new Map(), replaced: new Set() });
     }
     if (file.chapter && (overwrite || !chapter.chapter)) chapter.chapter = file.chapter;
     if (file.parts) chapter.parts = overwrite ? file.parts : Math.max(chapter.parts || 1, file.parts);
@@ -855,9 +944,7 @@ export function mergeChapterParts(files: GrammarBookFile[], options: { overwrite
       } else if (overwrite) chapter.exerciseSets![at] = meta;
     }
 
-    const groups = new Map(chapter.practiceGroups!.map((g) => [g.id, g]));
-    const groupOf = new Map<string, GrammarBookPracticeGroup>();
-    for (const g of chapter.practiceGroups!) for (const it of g.items) groupOf.set(bookItemKey(it), g);
+    const { groups, groupOf, replaced } = placed.get(file.chapterId)!;
     for (const incoming of extractPracticeGroups(file)) {
       let group = groups.get(incoming.id);
       if (!group) {
@@ -870,15 +957,17 @@ export function mergeChapterParts(files: GrammarBookFile[], options: { overwrite
         const previous = groupOf.get(key);
         if (previous) {
           if (!overwrite) continue;
-          previous.items = previous.items.filter((it) => bookItemKey(it) !== key);
+          replaced.add(previous.item);
         }
         group.items.push(item);
-        groupOf.set(key, group);
+        groupOf.set(key, { group, item });
       }
     }
   }
 
   for (const chapter of chapterMap.values()) {
+    const replaced = placed.get(chapter.chapterId)!.replaced;
+    if (replaced.size > 0) for (const g of chapter.practiceGroups!) g.items = g.items.filter((it) => !replaced.has(it));
     chapter.chapter = chapter.chapter || getChapterMetadata(chapter.chapterId);
     chapter.lessons!.sort((a, b) => a.order - b.order);
     if (overwrite) chapter.exerciseSets!.sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
@@ -999,8 +1088,11 @@ function parseRow<T>(row: BookRow): T | null {
   }
 }
 
-/** One chapter rebuilt from its rows; `hidden` marks the items the learner hid */
-function buildChapter(chapterRow: BookRow, lessonRows: BookRow[], setRows: BookRow[], itemRows: BookRow[], hidden?: Set<string>): GrammarBookFile {
+/**
+ * One chapter rebuilt from its rows. Items come with usable answers (see normalizeItemAnswers); the items the
+ * learner hid are not flagged here: that set changes without the book being reloaded (getHiddenItemsSet).
+ */
+function buildChapter(chapterRow: BookRow, lessonRows: BookRow[], setRows: BookRow[], itemRows: BookRow[]): GrammarBookFile {
   const chapterId = chapterRow.chapter_id;
   const meta = parseRow<ChapterMetaRow>(chapterRow) ?? {};
   const lessons = lessonRows.map((r) => parseRow<GrammarBookLesson>(r)).filter(notNull);
@@ -1019,7 +1111,7 @@ function buildChapter(chapterRow: BookRow, lessonRows: BookRow[], setRows: BookR
       group = { id, lessonIds: groupLessonIds || item.lessonIds || [], title: groupTitle || "", items: [] };
       groups.set(id, group);
     }
-    group.items.push(hidden ? { ...item, hidden: hidden.has(bookItemKey(item)) } : item);
+    group.items.push(normalizeItemAnswers(item));
   }
   const known = meta.chapter || getChapterMetadata(chapterId);
   return {
@@ -1098,18 +1190,33 @@ async function writeChapter(db: BookDb, incoming: GrammarBookFile, options: Save
   // New rows are written first and the chapter's unused rows deleted afterwards: a failure half-way never
   // loses what was imported before
   const before = await Promise.all(BOOK_TABLES.map((t) => db.select<Array<{ id: string }>>(`SELECT id FROM ${t} WHERE chapter_id = $1;`, [chapterId])));
+  // Replacing the chapter keeps the learner's own AI exercises (their rows carry "importBatchId"): their
+  // import history still lists them and can undo them
+  const custom = new Set<string>();
+  if (options.mode === "replace") {
+    for (const t of ["grammar_book_sets", "grammar_book_items"]) {
+      const kept = await db.select<Array<{ id: string }>>(`SELECT id FROM ${t} WHERE chapter_id = $1 AND data LIKE '%"importBatchId"%';`, [chapterId]);
+      for (const r of kept) custom.add(r.id);
+    }
+  }
   const rows = [[chapterRow], lessonRows, setRows, itemRows];
   for (let t = 0; t < BOOK_TABLES.length; t++) await insertRows(db, BOOK_TABLES[t], rows[t]);
   for (let t = 0; t < BOOK_TABLES.length; t++) {
     const keep = new Set(rows[t].map((r) => r[0]));
-    await deleteRows(db, BOOK_TABLES[t], before[t].map((r) => r.id).filter((id) => !keep.has(id)));
+    await deleteRows(db, BOOK_TABLES[t], before[t].map((r) => r.id).filter((id) => !keep.has(id) && !custom.has(id)));
   }
   return chapter;
 }
 
-/** Drop the cached book and tell the screens once (each event makes the Hub reload the whole book) */
-function notifyBookUpdated(chapterIds: string[]): void {
+/**
+ * Drop the cached book and tell the screens once (each event makes the Hub reload the whole book). Other
+ * windows (the review popup is never destroyed) hear about it through the book revision in localStorage.
+ */
+export function notifyBookUpdated(chapterIds: string[]): void {
   clearBookCache();
+  try {
+    localStorage.setItem(BOOK_REVISION_KEY, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`);
+  } catch {}
   window.dispatchEvent(new CustomEvent("myenglish-grammar-updated", { detail: { book: true, chapterIds } }));
 }
 
@@ -1167,6 +1274,8 @@ export async function clearGrammarBook(): Promise<void> {
   for (const table of BOOK_TABLES) {
     await db.execute(`DELETE FROM ${table};`);
   }
+  // The AI exercises went with the book: their history must not offer to undo what is no longer there
+  await db.execute(`UPDATE grammar_exercise_imports SET status = 'reverted' WHERE status != 'reverted';`).catch(() => {});
   notifyBookUpdated([]);
 }
 
@@ -1259,16 +1368,19 @@ async function loadChapters(generation: number): Promise<GrammarBookFile[]> {
     }
     const byChapter = (rows: BookRow[]) => {
       const map = new Map<string, BookRow[]>();
-      for (const r of rows) map.set(r.chapter_id, [...(map.get(r.chapter_id) ?? []), r]);
+      for (const r of rows) {
+        const list = map.get(r.chapter_id);
+        if (list) list.push(r);
+        else map.set(r.chapter_id, [r]);
+      }
       return map;
     };
     const lessons = byChapter(lessonRows);
     const sets = byChapter(setRows);
     const items = byChapter(itemRows);
-    const hidden = getHiddenItemsSet();
     for (const chRow of chapterRows) {
       const id = chRow.chapter_id;
-      result.push(buildChapter(chRow, lessons.get(id) ?? [], sets.get(id) ?? [], items.get(id) ?? [], hidden));
+      result.push(buildChapter(chRow, lessons.get(id) ?? [], sets.get(id) ?? [], items.get(id) ?? []));
     }
   } catch (err) {
     // Not cached: the next call tries again
@@ -1312,16 +1424,49 @@ export function clearBookCache(): void {
   loading = null;
 }
 
+/** Another window changed the book (import, replace, undo, reset): forget this window's copy and let the screens reload */
+function onBookRevision(e: Event): void {
+  if ((e as StorageEvent).key !== BOOK_REVISION_KEY) return;
+  clearBookCache();
+  knownLessonIds = [];
+  window.dispatchEvent(new CustomEvent("myenglish-grammar-updated", { detail: { book: true, chapterIds: [] } }));
+}
+
+// A reloaded module (hot reload) replaces the previous listener
+const REVISION_LISTENER = "__myenglishBookRevisionListener";
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  const holder = window as unknown as Record<string, EventListener | undefined>;
+  const previous = holder[REVISION_LISTENER];
+  if (previous) window.removeEventListener("storage", previous);
+  holder[REVISION_LISTENER] = onBookRevision;
+  window.addEventListener("storage", onBookRevision);
+}
+
 /**
  * Answers the learner accepted with "Tính là đúng": item key → answers; for a blank other than the first the
  * entry is prefixed with "<index>::".
  */
+let acceptedCache: { raw: string; map: Record<string, string[]> } | null = null;
+
+/** Parsed again only when the stored text changed (any window): the returned map is shared, never change it */
 export function getAcceptedAnswersMap(): Record<string, string[]> {
   try {
     const raw = localStorage.getItem(ACCEPTED_ANSWERS_KEY);
-    if (raw) return JSON.parse(raw) || {};
+    if (raw) {
+      if (acceptedCache?.raw !== raw) acceptedCache = { raw, map: JSON.parse(raw) || {} };
+      return acceptedCache.map;
+    }
   } catch {}
   return {};
+}
+
+/** Changes whenever an accepted answer is added or removed, in any window */
+export function getAcceptedAnswersRevision(): string {
+  try {
+    return localStorage.getItem(ACCEPTED_ANSWERS_KEY) ?? "";
+  } catch {
+    return "";
+  }
 }
 
 function saveAcceptedAnswersMap(map: Record<string, string[]>): void {
@@ -1353,7 +1498,7 @@ export function listUserAcceptedAnswers(): Array<{ itemKey: string; blankIndex: 
 export function saveUserAcceptedAnswer(itemKey: string, answer: string, blankIndex: number = 0): void {
   if (!answer.trim()) return;
   const entry = acceptedEntry(answer, blankIndex);
-  const map = getAcceptedAnswersMap();
+  const map = { ...getAcceptedAnswersMap() };
   const list = map[itemKey] || [];
   if (list.includes(entry)) return;
   map[itemKey] = [...list, entry];
@@ -1362,7 +1507,7 @@ export function saveUserAcceptedAnswer(itemKey: string, answer: string, blankInd
 
 export function removeUserAcceptedAnswer(itemKey: string, answer: string, blankIndex: number = 0): void {
   const entry = acceptedEntry(answer, blankIndex);
-  const map = getAcceptedAnswersMap();
+  const map = { ...getAcceptedAnswersMap() };
   const list = map[itemKey];
   if (!list || !list.includes(entry)) return;
   const rest = list.filter((a) => a !== entry);
@@ -1386,12 +1531,21 @@ export function getHiddenItemKeys(): string[] {
   return [...getHiddenItemsSet()];
 }
 
+/** Changes whenever an item is hidden or shown, in any window (the session index is rebuilt when it does) */
+export function getHiddenItemsRevision(): string {
+  try {
+    return localStorage.getItem(HIDDEN_ITEMS_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+// The hidden set is read fresh by whoever needs it (see loadBookIndex): the loaded book stays as it is
 function saveHiddenItems(set: Set<string>): void {
   try {
     localStorage.setItem(HIDDEN_ITEMS_KEY, JSON.stringify([...set]));
     persistKeyNow(HIDDEN_ITEMS_KEY);
   } catch {}
-  clearBookCache();
 }
 
 export function hideItem(itemKey: string): void {

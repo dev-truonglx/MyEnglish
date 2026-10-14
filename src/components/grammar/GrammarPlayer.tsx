@@ -16,6 +16,7 @@ import { getBookLesson, hideItem, unhideItem } from "@/services/grammarBook";
 import { getLessonNextReview, GRAMMAR_PASS_SCORE } from "@/services/grammarService";
 import type { GrammarBookLesson } from "@/types/grammarBook";
 import { handleSpeak } from "@/components/review/speech";
+import { setMainSessionActive } from "@/services/activeSession";
 
 interface GrammarPlayerProps {
   entries: SessionEntry[];
@@ -993,6 +994,12 @@ function Run({ entries, mode, title, subtitle, onExit, onComplete, onOpenLesson 
   const [undo, setUndo] = useState<SessionEntry | null>(null);
   const busyRef = useRef(false);
   const resultsRef = useRef<RunResult[]>([]);
+  // The reminder popup must not open over this run and ask the same lessons (the flashcard sessions' flag;
+  // refreshed on each answer, it goes stale by itself if the window is left)
+  useEffect(() => {
+    setMainSessionActive(true);
+    return () => setMainSessionActive(false);
+  }, []);
 
   const entry = queue[index];
   // Never reached in practice (the run ends before the index passes the queue); kept so a render cannot crash
@@ -1029,6 +1036,7 @@ function Run({ entries, mode, title, subtitle, onExit, onComplete, onOpenLesson 
   const handleNext = ({ correct, given, skipped, selfAccepted }: NextResult) =>
     guarded(async () => {
       const hinted = hintTask !== null;
+      setMainSessionActive(true);
       try {
         await recordGrammarAnswer({ ...entry, task }, correct, { mode, hinted, given, skipped, selfAccepted });
       } catch (err) {

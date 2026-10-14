@@ -5,10 +5,11 @@ import {
   isBuriedBySibling,
   isNewCard,
   isSuspended,
+  needsRelearnIntro,
 } from "./smartReview";
 import { getWordsByIds, isPlaceholderMeaning } from "./db";
 import { getDueCards, toCard } from "./cards";
-import { checkAndUnlockAchievements } from "./achievements";
+import { checkAndUnlockAchievements, recordFirstTryCorrect } from "./achievements";
 import { popupAnswerRating } from "./popupSession";
 import { recordCardAnswer, schedulingDecision } from "./reviewRecorder";
 import { celebrationFor } from "./celebrations";
@@ -16,6 +17,7 @@ import { minutesFor, type ComebackStatus } from "./comeback";
 import type { ReminderMoment } from "./reminderMoments";
 import type { WordDetail, CardDirection, ReviewCard } from "@/types/database";
 import { invoke } from "@tauri-apps/api/core";
+import { shuffle } from "@/lib/utils";
 
 export type DuoToneLevel =
   | "level_1_encouraging"
@@ -303,11 +305,15 @@ export function selectMicroQuizQuestion(
   const dueCards = dueWords
     .filter(usable)
     .flatMap((w) => getDueCards(w, now))
-    .filter((c) => c.direction === "recognition" && !isNewCard(c) && !isBuriedBySibling(c, now));
+    // A leech set to "relearn" is shown its introduction again first (popup / sessions), never quizzed cold here
+    .filter((c) => c.direction === "recognition" && !isNewCard(c) && !isBuriedBySibling(c, now) && !needsRelearnIntro(c));
   const scheduled = dueCards.length > 0;
   const candidatePool: ReviewCard[] = scheduled
     ? dueCards
-    : allWords.filter((w) => usable(w) && (w.srs.reps ?? 0) > 0).map((w) => toCard(w, "recognition"));
+    : allWords
+        .filter((w) => usable(w) && (w.srs.reps ?? 0) > 0)
+        .map((w) => toCard(w, "recognition"))
+        .filter((c) => !needsRelearnIntro(c));
   if (candidatePool.length === 0) return null;
 
   const RECENT_COOLDOWN_MS = 45 * 60 * 1000;
@@ -336,9 +342,8 @@ export function selectMicroQuizQuestion(
 
   const mcq = generateMultipleChoiceQuestion(targetCard, allWords, "en_to_vn");
   const correctOpt = mcq.options.find((o) => o.isCorrect);
-  const compactOptions = [...mcq.options.filter((o) => !o.isCorrect).slice(0, 2), ...(correctOpt ? [correctOpt] : [])].sort(
-    () => 0.5 - Math.random()
-  );
+  // 3 options (not 4): the 400×230 reminder card has room for three full-width meanings
+  const compactOptions = shuffle([...mcq.options.filter((o) => !o.isCorrect).slice(0, 2), ...(correctOpt ? [correctOpt] : [])]);
 
   return {
     wordId: targetCard.id,
@@ -385,6 +390,9 @@ export async function evaluateMicroQuizAnswer(params: {
   targetMeaning: string;
   responseTimeMs: number;
   direction?: CardDirection;
+  /** The question came from the due list (selectMicroQuizQuestion): a fallback word (e.g. a recall card's
+   *  buried sibling) is practice even if it is due */
+  scheduledQuestion?: boolean;
 }): Promise<MicroQuizEvaluationResult> {
   const { wordId, selectedChoiceId, options, targetMeaning, responseTimeMs } = params;
   const picked = options.find((o) => o.id === selectedChoiceId);
@@ -400,7 +408,7 @@ export async function evaluateMicroQuizAnswer(params: {
     const card = toCard(word, "recognition");
     const decision = schedulingDecision({ card, exerciseType: "multiple_choice" });
     // Brand-new words are never graded from a 3-option guess
-    scheduled = decision.scheduled && !isNewCard(card);
+    scheduled = decision.scheduled && !isNewCard(card) && params.scheduledQuestion !== false;
     const recorded = await recordCardAnswer({
       card,
       exerciseType: "multiple_choice",
@@ -418,6 +426,8 @@ export async function evaluateMicroQuizAnswer(params: {
 
   resetConsecutiveSkipCount();
   if (scheduled) {
+    // Same as the popup and flashcard sessions
+    if (isCorrect && rating >= Rating.Good) recordFirstTryCorrect();
     checkAndUnlockAchievements({
       consecutiveCorrect: isCorrect ? 1 : 0,
       sessionReviewCount: 1,

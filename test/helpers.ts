@@ -22,6 +22,7 @@ export function makeWord(
   opts: Partial<Omit<WordDetail, "srs">> & { srs?: Partial<SRSReview>; createdDaysAgo?: number } = {}
 ): WordDetail {
   const { srs, createdDaysAgo = 1, ...rest } = opts;
+  const createdAt = new Date(Date.now() - createdDaysAgo * DAY).toISOString();
   return {
     id,
     word: id,
@@ -30,7 +31,7 @@ export function makeWord(
     synonyms: "[]",
     antonyms: "[]",
     topic: "General Tech",
-    created_at: new Date(Date.now() - createdDaysAgo * DAY).toISOString(),
+    created_at: createdAt,
     examples: [],
     ...rest,
     srs: {
@@ -38,7 +39,9 @@ export function makeWord(
       ease_factor: 2.5,
       interval: 0,
       repetitions: 0,
-      next_review_date: new Date(Date.now() - 1000).toISOString(),
+      // As in the database (a new card is due from its creation): not the call time, or words made in a loop
+      // would be ordered by which millisecond each was built in
+      next_review_date: createdAt,
       stability: 0,
       difficulty: 0,
       reps: 0,

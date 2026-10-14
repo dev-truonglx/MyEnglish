@@ -1,12 +1,13 @@
-import { useEffect, useState, useMemo, useRef, useCallback, lazy, Suspense } from "react";
+import { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue, lazy, Suspense } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { getInitialWindowLabel } from "@/lib/windowLabel";
 import { Layers, X } from "lucide-react";
 import { takePendingContext, pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { isPlaceholderMeaning } from "@/services/db";
 import { getDueCards, isWordDue, practiceCards, getNextReviewDate, toCard } from "@/services/cards";
-import { formatNextReviewRelative, compareNextReview, type ReviewTimeBucket } from "@/utils/reviewSchedule";
+import { formatNextReviewRelative, type ReviewTimeBucket } from "@/utils/reviewSchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
@@ -81,6 +82,18 @@ import {
   type LibraryStats,
   type ViewMode,
 } from "./dashboard/shared";
+
+const EMPTY_WORDS: WordDetail[] = [];
+const EMPTY_BUCKET_COUNTS: Record<ReviewTimeBucket, number> = {
+  all: 0,
+  due: 0,
+  today: 0,
+  "1-3d": 0,
+  "4-7d": 0,
+  future: 0,
+  new: 0,
+};
+const EMPTY_CARD_META = new Map<string, WordCardMeta>();
 
 interface MainDashboardProps {
   onOpenQuickInputPreview?: () => void;
@@ -176,6 +189,13 @@ export default function MainDashboard({
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
+  // Ticks every minute so "due" computations don't freeze at the last words change
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNowTick(Date.now()), 60_000);
+    return () => clearInterval(id);
+  }, []);
+
   const currentProficiency = useMemo(() => {
     return assessUserProficiency(words);
   }, [words, activityVersion]);
@@ -186,11 +206,15 @@ export default function MainDashboard({
   useEffect(() => {
     getNewCardsIntroducedToday().then(setIntroducedToday).catch(() => {});
   }, [words, activityVersion]);
-  const fullTodayWork = useMemo(() => summarizeTodayWork(words, introducedToday), [words, introducedToday, activityVersion]);
+  // nowTick: cards fall due while the window stays open, so the due count must grow too
+  const fullTodayWork = useMemo(
+    () => summarizeTodayWork(words, introducedToday),
+    [words, introducedToday, activityVersion, nowTick]
+  );
   // Back after a break: the backlog is spread over a few days and only today's share is counted
   const comeback = useMemo(
     () => resolveComeback(fullTodayWork.reviews, getStudyLimits().maxSessionSize),
-    [fullTodayWork.reviews, activityVersion]
+    [fullTodayWork.reviews, activityVersion, nowTick]
   );
   // While the plan runs: the plan's new words (not the daily budget, not cut by the backlog), minus the ones
   // already introduced today, as the session takes them (buildReviewSession's comebackNewCards)
@@ -203,7 +227,7 @@ export default function MainDashboard({
           })
         : fullTodayWork;
     return applyComebackToWork(base, comeback, introducedToday);
-  }, [fullTodayWork, comeback, words, introducedToday]);
+  }, [fullTodayWork, comeback, words, introducedToday, nowTick]);
 
   const streakStats = useMemo(() => {
     // Finishing what is left today (reviews + budgeted new words) also completes the daily goal
@@ -227,6 +251,7 @@ export default function MainDashboard({
         }
       })
       .catch(() => {});
+    // Not awaited here: the catalog readers below wait for the same (shared) seeding themselves
     ensureCatalogSeeded().catch(() => {});
     ensureGrammarBookSeeded().catch(() => {});
   }, []);
@@ -278,13 +303,29 @@ export default function MainDashboard({
   // Debounced background refresh (pipeline completions, reviews recorded in other windows)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastRefreshAtRef = useRef(Date.now());
+  // A change announced while a flashcard session runs: every graded answer announces one, and a full reload per
+  // answer (5 queries + all the recomputation) is wasted. Reloaded once when the session ends.
+  // Only while the session is on screen: kept behind another tab, the tab shown must stay current.
+  const refreshDirtyRef = useRef(false);
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
   const scheduleRefresh = () => {
+    if (isReviewingRef.current && activeTabRef.current === "review") {
+      refreshDirtyRef.current = true;
+      return;
+    }
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
       refreshTimerRef.current = null;
       refreshWords();
     }, 300);
   };
+  useEffect(() => {
+    if (!(isReviewing && activeTab === "review") && refreshDirtyRef.current) {
+      refreshDirtyRef.current = false;
+      scheduleRefresh();
+    }
+  }, [isReviewing, activeTab]);
   // Any refresh (from here or elsewhere) replaces the words array
   useEffect(() => {
     lastRefreshAtRef.current = Date.now();
@@ -344,10 +385,26 @@ export default function MainDashboard({
   // Wrong options for multiple choice: the learner's words plus unseen deck words of their levels
   const [catalogDistractors, setCatalogDistractors] = useState<WordDetail[]>([]);
   useEffect(() => {
-    const load = () => loadCatalogDistractors(getStudyLevels()).then(setCatalogDistractors).catch(() => {});
+    let cancelled = false;
+    let loadSeq = 0;
+    // The deck must be seeded before it is read (a first launch reads an empty table otherwise); the seeding
+    // is shared with the call above, and a failed one just leaves the pool empty
+    const load = () => {
+      const seq = ++loadSeq;
+      ensureCatalogSeeded()
+        .catch(() => {})
+        .then(() => loadCatalogDistractors(getStudyLevels()))
+        .then((list) => {
+          if (!cancelled && seq === loadSeq) setCatalogDistractors(list);
+        })
+        .catch(() => {});
+    };
     load();
     window.addEventListener("myenglish-study-levels-changed", load);
-    return () => window.removeEventListener("myenglish-study-levels-changed", load);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("myenglish-study-levels-changed", load);
+    };
   }, []);
   const distractorPool = useMemo(() => [...words, ...catalogDistractors], [words, catalogDistractors]);
 
@@ -471,8 +528,13 @@ export default function MainDashboard({
       if (!isCancelled) scheduleRefresh();
     };
     window.addEventListener("words-changed", handleWordsChanged);
-    listen("words-changed", () => {
-      if (!isCancelled) scheduleRefresh();
+    const ownLabel = getInitialWindowLabel();
+    listen<{ source?: string } | null>("words-changed", (event) => {
+      if (isCancelled) return;
+      scheduleRefresh();
+      // A change from another window (the popup): re-dispatch the DOM event, so the cards listening to it
+      // (Today roadmap, vocabulary tab, insights) reload too. This window's own changes already dispatched it.
+      if (event.payload?.source !== ownLabel) window.dispatchEvent(new CustomEvent("words-changed"));
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -507,6 +569,8 @@ export default function MainDashboard({
     };
   }, []);
 
+  // A start is being prepared (several awaits before the session exists): a second click must not build another
+  const startingRef = useRef(false);
   /** `maxCards`: a short session ("Chỉ 1 phút" on Today: 3 cards to keep the streak) */
   const handleStartReview = async (onlyDue: boolean = true, topicFilter?: string, maxCards?: number) => {
     // A session is in progress (maybe kept behind another tab): show it instead of restarting from card 0
@@ -514,6 +578,15 @@ export default function MainDashboard({
       setActiveTab("review");
       return;
     }
+    if (startingRef.current) return;
+    startingRef.current = true;
+    try {
+      await prepareAndStartReview(onlyDue, topicFilter, maxCards);
+    } finally {
+      startingRef.current = false;
+    }
+  };
+  const prepareAndStartReview = async (onlyDue: boolean, topicFilter?: string, maxCards?: number) => {
     const now = new Date();
     const matchesTopic = (w: WordDetail) =>
       !topicFilter ||
@@ -612,6 +685,8 @@ export default function MainDashboard({
 
     setReviewSet(session);
     setSessionId((id) => id + 1);
+    // Set now, not at the next render: a click right after this must find the session
+    isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
   };
@@ -670,19 +745,30 @@ export default function MainDashboard({
     setWordToDelete({ id: wordId, word: wordText });
   }, []);
 
-  // Ticks every minute so "due" computations don't freeze at the last words change
-  const [nowTick, setNowTick] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 60_000);
-    return () => clearInterval(id);
-  }, []);
+  // The library's own computations (list, bucket counts, per-card data) run only while it is on screen
+  const isLibraryTab = activeTab === "library";
+  // Typing stays responsive: the list follows the query a moment later
+  const deferredSearch = useDeferredValue(searchQuery);
+
+  // Sort keys of the library list, once per words change (not per comparison): same order as
+  // reviewSchedule.compareNextReview (scheduled words by due time, then never-studied words newest first)
+  const sortKeys = useMemo(() => {
+    const keys = new Map<string, { isNew: boolean; created: number; next: number }>();
+    if (!isLibraryTab) return keys;
+    for (const w of libraryWords) {
+      const isNew = (!w.srs.reps && !w.srs.repetitions) || w.srs.repetitions === 0;
+      keys.set(w.id, { isNew, created: new Date(w.created_at).getTime(), next: getNextReviewDate(w).getTime() });
+    }
+    return keys;
+  }, [libraryWords, isLibraryTab]);
 
   // Filter & Search Logic
   const filteredWords = useMemo(() => {
+    if (!isLibraryTab) return EMPTY_WORDS;
     const now = new Date(nowTick);
+    const q = deferredSearch.toLowerCase().trim();
     const result = libraryWords.filter((item) => {
       // Search
-      const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
         item.word.toLowerCase().includes(q) ||
@@ -725,11 +811,20 @@ export default function MainDashboard({
     });
 
     // Default sort: words due earliest / coming up next first
-    return result.sort((a, b) => compareNextReview(a, b, now));
-  }, [libraryWords, searchQuery, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
+    return result.sort((a, b) => {
+      const ka = sortKeys.get(a.id);
+      const kb = sortKeys.get(b.id);
+      if (!ka || !kb) return 0;
+      if (ka.isNew && kb.isNew) return kb.created - ka.created;
+      if (ka.isNew !== kb.isNew) return ka.isNew ? 1 : -1;
+      if (ka.next !== kb.next) return ka.next - kb.next;
+      return a.word.localeCompare(b.word);
+    });
+  }, [isLibraryTab, libraryWords, sortKeys, deferredSearch, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
 
   // Counts for each review schedule bucket
   const reviewBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
+    if (!isLibraryTab) return EMPTY_BUCKET_COUNTS;
     const now = new Date(nowTick);
     const counts: Record<ReviewTimeBucket, number> = {
       all: libraryWords.length,
@@ -747,7 +842,7 @@ export default function MainDashboard({
       counts[info.bucket]++;
     }
     return counts;
-  }, [libraryWords, nowTick]);
+  }, [libraryWords, nowTick, isLibraryTab]);
 
   // Single pass over words: due/learned/leech counts and per-topic {total, due}
   const libraryStats = useMemo<LibraryStats>(() => {
@@ -772,6 +867,7 @@ export default function MainDashboard({
 
   // Per-card derived data (parsed synonyms + FSRS retrievability), computed once per words change
   const cardMeta = useMemo(() => {
+    if (!isLibraryTab) return EMPTY_CARD_META;
     const now = new Date(nowTick);
     const leechIds = new Set(getLeechWords(words).map((w) => w.id));
     const meta = new Map<string, WordCardMeta>();
@@ -783,13 +879,13 @@ export default function MainDashboard({
       });
     }
     return meta;
-  }, [words, nowTick]);
+  }, [words, nowTick, isLibraryTab]);
 
   // Gallery pagination (reset when filters/search change)
   const [visibleCount, setVisibleCount] = useState(GALLERY_PAGE_SIZE);
   useEffect(() => {
     setVisibleCount(GALLERY_PAGE_SIZE);
-  }, [searchQuery, filterMode, selectedTopic]);
+  }, [searchQuery, filterMode, reviewTimeFilter, selectedTopic]);
   const visibleWords = useMemo(() => filteredWords.slice(0, visibleCount), [filteredWords, visibleCount]);
 
   // Keyboard-first Navigation
@@ -797,6 +893,12 @@ export default function MainDashboard({
     const handleKeyDown = (e: KeyboardEvent) => {
       // The session's own shortcuts own the keys only while it is on screen (it stays mounted behind other tabs)
       if ((isReviewing && activeTab === "review") || wordToDelete) return;
+      // Browser / OS shortcuts (Cmd+R reload, Ctrl+J...) and open dialogs (first-run, setup, the library's
+      // review-trajectory modal) keep their keys
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      if (showOnboarding || vocabSetup || showTenseSetup) return;
+      // (the word panel is a dialog too, but its j/k / Esc navigation is wanted)
+      if (document.querySelector('[aria-modal="true"]:not([aria-label^="Chi tiết từ"])')) return;
 
       const isTyping =
         e.target instanceof HTMLInputElement ||
@@ -865,7 +967,7 @@ export default function MainDashboard({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isReviewing, wordToDelete, selectedWord, filteredWords, searchQuery, activeTab]);
+  }, [isReviewing, wordToDelete, selectedWord, filteredWords, searchQuery, activeTab, showOnboarding, vocabSetup, showTenseSetup]);
 
   return (
     // h-full, not h-screen: with the interface scale (zoom on <html>) 100vh is taller than the window
@@ -1095,12 +1197,14 @@ export default function MainDashboard({
                 practiceMode={isPracticeSession}
                 active={activeTab === "review"}
                 onFinish={() => {
+                  refreshDirtyRef.current = false; // reloaded just below
                   setIsReviewing(false);
                   // Close the loop on the day: back to "Hôm nay" (what is left, the streak, the goal)
                   setActiveTab("today");
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
                 }}
                 onExit={() => {
+                  refreshDirtyRef.current = false;
                   setIsReviewing(false);
                   setActiveTab("today");
                   // Reviews answered before exiting were already persisted

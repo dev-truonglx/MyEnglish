@@ -159,6 +159,44 @@ export function normalizeMistakeText(text: string): string {
 
 const sameText = (a: string, b: string) => normalizeMistakeText(a) === normalizeMistakeText(b);
 
+/** What makes two mistakes the same one: the normalized wrong text and the normalized fix */
+export function mistakeKey(wrong: string, right: string): string {
+  return `${normalizeMistakeText(wrong)}\u0001${normalizeMistakeText(right)}`;
+}
+
+type MistakesDb = Awaited<ReturnType<typeof getDatabase>>;
+let keyColumnReady: Promise<void> | null = null;
+
+/**
+ * Mistakes carry their normalized key in an indexed column, so a new one is found with one query instead of
+ * reading the whole table and normalizing every row. Rows saved without a key (older builds, other
+ * windows) get theirs here.
+ */
+function ensureKeyColumn(db: MistakesDb): Promise<void> {
+  keyColumnReady ??= (async () => {
+    try {
+      await db.execute(`ALTER TABLE mistakes ADD COLUMN norm_key TEXT`);
+    } catch (err) {
+      // Already there is fine
+      if (!/duplicate column name/i.test(String(err))) throw err;
+    }
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_mistakes_norm_key ON mistakes(norm_key)`);
+  })().catch((err) => {
+    keyColumnReady = null;
+    throw err;
+  });
+  return keyColumnReady;
+}
+
+async function fillMissingKeys(db: MistakesDb): Promise<void> {
+  const rows = await db.select<Array<{ id: string; wrong_text: string; right_text: string }>>(
+    `SELECT id, wrong_text, right_text FROM mistakes WHERE norm_key IS NULL`
+  );
+  for (const r of rows) {
+    await db.execute(`UPDATE mistakes SET norm_key = $1 WHERE id = $2`, [mistakeKey(r.wrong_text, r.right_text), r.id]);
+  }
+}
+
 /**
  * Save the corrections of one piece of writing. A mistake already in the notebook is counted again and
  * made due now (the learner repeated it); returns how many were new.
@@ -169,28 +207,28 @@ export async function saveMistakes(
   now: Date = new Date()
 ): Promise<{ added: number; repeated: number }> {
   const db = await getDatabase();
-  const existing = await db.select<Array<Pick<Mistake, "id" | "wrong_text" | "right_text">>>(
-    `SELECT id, wrong_text, right_text FROM mistakes`
-  );
+  await ensureKeyColumn(db);
+  await fillMissingKeys(db);
   let added = 0;
   let repeated = 0;
   for (const m of items) {
     const wrong = m.wrong.trim();
     const right = m.right.trim();
     if (!wrong || !right || sameText(wrong, right)) continue;
-    const same = existing.find((e) => sameText(e.wrong_text, wrong) && sameText(e.right_text, right));
-    if (same) {
+    const key = mistakeKey(wrong, right);
+    const same = await db.select<Array<{ id: string }>>(`SELECT id FROM mistakes WHERE norm_key = $1 LIMIT 1`, [key]);
+    if (same.length > 0) {
       await db.execute(
         `UPDATE mistakes SET occurrences = occurrences + 1, next_review_date = $1 WHERE id = $2`,
-        [now.toISOString(), same.id]
+        [now.toISOString(), same[0].id]
       );
       repeated++;
       continue;
     }
     const id = crypto.randomUUID();
     await db.execute(
-      `INSERT INTO mistakes (id, wrong_text, right_text, why_vn, category, sentence, source, word_id, created_at, next_review_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+      `INSERT INTO mistakes (id, wrong_text, right_text, why_vn, category, sentence, source, word_id, created_at, next_review_date, norm_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
       [
         id,
         wrong,
@@ -202,9 +240,9 @@ export async function saveMistakes(
         opts.wordId ?? null,
         now.toISOString(),
         new Date(now.getTime() + FIRST_REVIEW_DELAY_MS).toISOString(),
+        key,
       ]
     );
-    existing.push({ id, wrong_text: wrong, right_text: right });
     added++;
   }
   return { added, repeated };

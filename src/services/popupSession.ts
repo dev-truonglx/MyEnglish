@@ -64,10 +64,11 @@ export function popupAnswerRating(
   exerciseType: ExerciseType,
   responseTimeMs: number,
   nearMiss = false,
-  confusedWithSynonym = false
+  confusedWithSynonym = false,
+  usedHint = false
 ): Rating {
   if (!correct) return Rating.Again;
-  return deriveRating({ exerciseType, wrongAttempts: 0, nearMiss, confusedWithSynonym, responseTimeMs });
+  return deriveRating({ exerciseType, wrongAttempts: 0, nearMiss, confusedWithSynonym, usedHint, responseTimeMs });
 }
 
 /** The word the learner picked instead of the right one, to explain the mix-up after a wrong answer */

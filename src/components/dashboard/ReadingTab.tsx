@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { BookOpenText, Check, Pencil, Plus, Quote, Sparkles, X } from "lucide-react";
 import { useWordsStore } from "@/stores/wordsStore";
 import { analyzeText, logEncounters, type BankStatus, type ReadingAnalysis } from "@/services/reading";
@@ -56,6 +56,25 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
   const [savedSentences, setSavedSentences] = useState<Set<string>>(() => new Set());
   const [adding, setAdding] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  // Clears the message after a while: a newer message restarts the wait, and leaving the tab cancels it
+  const messageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showMessage = (text: string, clearAfterMs?: number) => {
+    if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    messageTimerRef.current = null;
+    setMessage(text);
+    if (clearAfterMs) {
+      messageTimerRef.current = setTimeout(() => {
+        messageTimerRef.current = null;
+        setMessage(null);
+      }, clearAfterMs);
+    }
+  };
+  useEffect(
+    () => () => {
+      if (messageTimerRef.current) clearTimeout(messageTimerRef.current);
+    },
+    []
+  );
   // A beginner only "knows" function words: everyday words (because, change, need…) are offered to learn
   const knownCommon = useMemo(() => (isFoundationMode() ? FUNCTION_WORDS : COMMON_WORDS), []);
 
@@ -77,8 +96,10 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
     setSavedSentences(new Set());
     const met = logEncounters(analyzeText(clean, words, knownCommon).bankHits);
     if (met > 0) {
-      setMessage(`Bạn gặp lại ${met} từ đang học trong bài này. Gặp từ trong văn bản thật giúp bạn hiểu cách dùng của nó.`);
-      setTimeout(() => setMessage(null), 5000);
+      showMessage(
+        `Bạn gặp lại ${met} từ đang học trong bài này. Gặp từ trong văn bản thật giúp bạn hiểu cách dùng của nó.`,
+        5000
+      );
     }
   };
 
@@ -109,7 +130,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
     setAdding(false);
     setPicked(new Map());
     refreshWords();
-    setMessage(
+    showMessage(
       (AI_VOCAB_ENABLED
         ? `Đã thêm ${accepted} từ vào sổ, kèm câu bạn gặp chúng làm ví dụ. AI đang phân tích nghĩa (cần Gemini CLI).`
         : `${accepted} từ sẽ được học sớm, kèm câu bạn gặp chúng làm ví dụ.`) +
@@ -121,8 +142,10 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
     const ok = await addUserContextExample(wordId, sentence).catch(() => false);
     setSavedSentences((prev) => new Set(prev).add(wordId));
     if (ok) refreshWords();
-    setMessage(ok ? "Đã lưu câu này làm ví dụ: bài điền từ sẽ dùng câu của bạn trước." : "Câu này đã có trong ví dụ của từ.");
-    setTimeout(() => setMessage(null), 4000);
+    showMessage(
+      ok ? "Đã lưu câu này làm ví dụ: bài điền từ sẽ dùng câu của bạn trước." : "Câu này đã có trong ví dụ của từ.",
+      4000
+    );
   };
 
   if (!analysis) {

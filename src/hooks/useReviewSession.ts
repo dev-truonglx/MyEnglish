@@ -215,10 +215,10 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
   const [sessionCompleted, setSessionCompleted] = useState(false);
   const [lastResult, setLastResult] = useState<FSRSResult | null>(null);
   const [intervalPreviews, setIntervalPreviews] = useState<IntervalPreviews>({
-    [Rating.Again]: "1m",
-    [Rating.Hard]: "1d",
-    [Rating.Good]: "3d",
-    [Rating.Easy]: "7d",
+    [Rating.Again]: "1 phút",
+    [Rating.Hard]: "1 ngày",
+    [Rating.Good]: "3 ngày",
+    [Rating.Easy]: "7 ngày",
   });
 
   // Cloze & Spelling Interactive State
@@ -475,13 +475,24 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
     gradingLockRef.current = true;
     const word = currentWord;
     introducedAtRef.current.set(currentKey, Date.now());
-    await markWordKnown(word.id).catch(() => false);
-    const replacement = await nextWaitingWord(queue.map((c) => c.id)).catch(() => null);
-    setQueue((prev) => {
-      const rest = prev.filter((c, i) => i <= currentIndex || c.id !== word.id);
-      return replacement ? [...rest, toCard(replacement, "recognition")] : rest;
+    const marked = await markWordKnown(word.id).catch((err) => {
+      console.warn("Failed to mark word as known:", err);
+      return false;
     });
-    setCurrentIndex((prev) => prev + 1);
+    if (!marked) console.warn("Word was not marked as known:", word.id);
+    const replacement = await nextWaitingWord(queue.map((c) => c.id)).catch((err) => {
+      console.warn("Failed to find a replacement for a known word:", err);
+      return null;
+    });
+    const rest = queue.filter((c, i) => i <= currentIndex || c.id !== word.id);
+    const nextQueue = replacement ? [...rest, toCard(replacement, "recognition")] : rest;
+    setQueue((prev) => {
+      const kept = prev.filter((c, i) => i <= currentIndex || c.id !== word.id);
+      return replacement ? [...kept, toCard(replacement, "recognition")] : kept;
+    });
+    // Nothing left after this card: end the session the way the last answer does (advance), instead of
+    // moving past the end of the queue with no summary
+    advance({ nextQueueLength: nextQueue.length, reviewCountAfter: reviewCount });
   };
 
   // Exercises report their own attempts; the FSRS grade is derived centrally.

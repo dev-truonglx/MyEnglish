@@ -62,3 +62,18 @@ describe("reading analysis", () => {
     expect(suggestedBase("retrying")).toBe("retrying");
   });
 });
+
+describe("reading analysis on a long paste", () => {
+  it("stays linear: 20k words with many phrase matches and sentences", () => {
+    const chunk = "We deployed the build, then I will follow up on the dependency. The endpoint is idempotent.\n";
+    const text = chunk.repeat(1500); // ~21k words, 3000 sentences, 1500 phrase spans
+    const start = Date.now();
+    const a = analyzeText(text, words);
+    expect(Date.now() - start).toBeLessThan(2000);
+    expect(a.segments.map((s) => s.text).join("")).toBe(text);
+    expect(a.bankHits.find((h) => h.word.word === "follow up")?.count).toBe(1500);
+    expect(a.bankHits.find((h) => h.word.word === "dependency")?.sentence).toBe(
+      "We deployed the build, then I will follow up on the dependency."
+    );
+  });
+});

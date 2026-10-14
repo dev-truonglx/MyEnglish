@@ -14,6 +14,8 @@ import { getLocalDateString, recordDailyActivity } from "./streak";
 const PROGRESS_KEY = "myenglish_pronunciation_v1";
 /** Local day (YYYY-MM-DD) the learner last practised pronunciation */
 const LAST_PRACTICE_DAY_KEY = "myenglish_pronunciation_last_day_v1";
+/** Lessons whose quiz already counted toward today's goal: `{ day, lessons }` (a retake of one adds nothing) */
+const COUNTED_KEY = "myenglish_pronunciation_counted_v1";
 export const PRONUNCIATION_PASS_RATIO = 0.8;
 
 export interface PronunciationLessonProgress {
@@ -38,6 +40,26 @@ export function getPronunciationProgress(): PronunciationProgress {
   } catch {
     return {};
   }
+}
+
+/**
+ * Whether this lesson's quiz still counts toward today's goal: only its first pass of the day does, so
+ * retaking it does not inflate the daily count or the streak. Marks it as counted.
+ */
+function claimQuizCredit(lessonId: string, now: Date): boolean {
+  const day = getLocalDateString(now);
+  let lessons: string[] = [];
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(COUNTED_KEY) || "null");
+    const rec = raw && typeof raw === "object" ? (raw as { day?: unknown; lessons?: unknown }) : null;
+    if (rec && rec.day === day && Array.isArray(rec.lessons)) lessons = rec.lessons.filter((x): x is string => typeof x === "string");
+  } catch {}
+  if (lessons.includes(lessonId)) return false;
+  try {
+    localStorage.setItem(COUNTED_KEY, JSON.stringify({ day, lessons: [...lessons, lessonId] }));
+    persistKeyNow(COUNTED_KEY);
+  } catch {}
+  return true;
 }
 
 /** Remember today as a practice day and count `count` answers toward the daily goal and the streak */
@@ -83,8 +105,8 @@ export function recordPronunciationQuiz(lessonId: string, correct: number, total
   };
   if (!next.passedAt && isLessonPassed(next)) next.passedAt = now.toISOString();
   all[lessonId] = next;
-  // Each question answered is one sentence practised
-  notePractice(total, now);
+  // Each question answered is one sentence practised, the first time this lesson is taken today
+  notePractice(claimQuizCredit(lessonId, now) ? total : 0, now);
   try {
     localStorage.setItem(PROGRESS_KEY, JSON.stringify(all));
     persistKeyNow(PROGRESS_KEY);

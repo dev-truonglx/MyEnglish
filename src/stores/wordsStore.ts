@@ -64,7 +64,9 @@ export const useWordsStore = create<WordsStoreState>((set, get) => ({
     } catch (err) {
       console.error("Failed to fetch words:", err);
     } finally {
-      if (opts.showLoading && gen === generation) set({ loading: false });
+      // Only the latest refresh ends the loading state: a superseded one would show the still-empty list as
+      // "no words" (empty Today, onboarding) while the newer refresh is loading
+      if (gen === generation && seq === refreshSeq) set({ loading: false });
     }
   },
 

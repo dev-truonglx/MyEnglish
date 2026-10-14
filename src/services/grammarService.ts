@@ -238,6 +238,14 @@ export function getLessonProgress(lessonId: string): GrammarProgress {
   return defaultProgress;
 }
 
+/** One lesson's stored progress (no default is made up); the cache is read in place, nothing is copied */
+function getLessonProgressIfAny(lessonId: string): GrammarProgress | undefined {
+  if (!isInitialized) {
+    progressCache = loadFromLocalStorage();
+  }
+  return progressCache[lessonId];
+}
+
 /**
  * Get all progress records
  */
@@ -619,26 +627,34 @@ export function recordGrammarExerciseAttempt(
 
 const INTRODUCED_LESSONS_KEY = "myenglish_grammar_introduced_v1";
 
-function readIntroducedLessons(): Set<string> {
+let introducedCache: { raw: string; set: Set<string> } | null = null;
+
+/** Parsed again only when the stored text changed (any window): the returned set is shared, never change it */
+function readIntroducedLessons(): ReadonlySet<string> {
   try {
-    const parsed = JSON.parse(localStorage.getItem(INTRODUCED_LESSONS_KEY) || "[]");
-    return new Set(Array.isArray(parsed) ? parsed.map(String) : []);
+    const raw = localStorage.getItem(INTRODUCED_LESSONS_KEY) || "[]";
+    if (introducedCache?.raw !== raw) {
+      const parsed = JSON.parse(raw);
+      introducedCache = { raw, set: new Set(Array.isArray(parsed) ? parsed.map(String) : []) };
+    }
+    return introducedCache.set;
   } catch {
     return new Set();
   }
 }
 
 export function isLessonIntroduced(lessonId: string): boolean {
-  const p = getAllGrammarProgress()[lessonId];
+  // The progress cache is read in place: this runs for every lesson of a screen
+  const p = getLessonProgressIfAny(lessonId);
   if (p && (p.diagnosticStatus !== "unattempted" || !!p.lastReview || p.reps > 0)) return true;
   return readIntroducedLessons().has(lessonId);
 }
 
 export function markLessonIntroduced(lessonId: string): void {
   try {
-    const set = readIntroducedLessons();
-    if (set.has(lessonId)) return;
-    set.add(lessonId);
+    const current = readIntroducedLessons();
+    if (current.has(lessonId)) return;
+    const set = new Set(current).add(lessonId);
     localStorage.setItem(INTRODUCED_LESSONS_KEY, JSON.stringify([...set]));
     persistKeyNow(INTRODUCED_LESSONS_KEY);
   } catch {}

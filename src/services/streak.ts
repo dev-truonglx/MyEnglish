@@ -87,7 +87,14 @@ export function getLocalDateString(d: Date = new Date()): string {
 export function getActivityLogs(): DailyActivityLog {
   try {
     const raw = localStorage.getItem(REVIEWS_STORAGE_KEY);
-    return raw ? JSON.parse(raw) : {};
+    const parsed: unknown = raw ? JSON.parse(raw) : {};
+    // A stored "null", an array or a number would break Object.entries / property access in render
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const logs: DailyActivityLog = {};
+    for (const [day, count] of Object.entries(parsed)) {
+      if (typeof count === "number" && Number.isFinite(count)) logs[day] = count;
+    }
+    return logs;
   } catch {
     return {};
   }

@@ -46,6 +46,17 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const deadlineRef = useRef(0);
   const lastTickRef = useRef(0);
   const actedRef = useRef(false);
+  // Closes the card a moment after a quick answer: a newer reminder must not be closed by an older answer's timer
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const clearCloseTimer = useCallback(() => {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+  }, []);
+  useEffect(() => clearCloseTimer, [clearCloseTimer]);
+  // Counts the reminders shown: an answer evaluated for an earlier one must not close the current one
+  const beginSeqRef = useRef(0);
   const lastNudgeIdRef = useRef<number | null>(null);
   const [freshBar, setFreshBar] = useState(false);
 
@@ -54,6 +65,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       if (next.nudgeId === lastNudgeIdRef.current) return;
       lastNudgeIdRef.current = next.nudgeId;
     }
+    clearCloseTimer();
+    beginSeqRef.current++;
     actedRef.current = false;
     hoverAtRef.current = 0;
     deadlineRef.current = Date.now() + next.autoOpenSeconds * 1000;
@@ -72,11 +85,13 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     // If algorithm prefers micro-quiz and question exists, switch directly to quiz
     if (next.microQuiz && next.motivation?.isMicroQuizPreferred) {
       setMode("quiz");
-      quizStartTimeRef.current = Date.now();
+      // Opened by itself: the answer time starts when the learner reaches the card (first hover), not when
+      // it appeared while they were busy elsewhere, or a correct answer would be graded slow (Hard)
+      quizStartTimeRef.current = 0;
     } else {
       setMode("nudge");
     }
-  }, []);
+  }, [clearCloseTimer]);
 
   useEffect(() => {
     if (!freshBar) return;
@@ -131,7 +146,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     setSelectedOptionId(optionId);
     // Answered (right or wrong): the countdown stops now, so a fast answer is never counted as ignored (N14)
     setSecondsLeft(null);
-    const responseTime = Date.now() - quizStartTimeRef.current;
+    const responseTime = Date.now() - (quizStartTimeRef.current || Date.now());
+    const shownSeq = beginSeqRef.current;
 
     try {
       const res = await evaluateMicroQuizAnswer({
@@ -141,19 +157,26 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         targetMeaning: payload.microQuiz.targetMeaning,
         responseTimeMs: responseTime,
         direction: payload.microQuiz.direction,
+        scheduledQuestion: payload.microQuiz.scheduled,
       });
+      if (shownSeq !== beginSeqRef.current) return; // another reminder replaced this one meanwhile
       setQuizResult(res);
 
       // A right answer dismisses itself after a brief celebration; a wrong one stays on screen
       // until the learner has read the right one and closes the card
       if (res.isCorrect) {
-        setTimeout(() => {
+        clearCloseTimer();
+        closeTimerRef.current = setTimeout(() => {
+          closeTimerRef.current = null;
           finish("quiz-done");
         }, 1800);
       }
     } catch (err) {
       console.warn("Error evaluating micro quiz answer:", err);
-      setTimeout(() => {
+      if (shownSeq !== beginSeqRef.current) return;
+      clearCloseTimer();
+      closeTimerRef.current = setTimeout(() => {
+        closeTimerRef.current = null;
         finish("quiz-done");
       }, 1500);
     }
@@ -292,7 +315,10 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       <div
         key={animationKey}
         className="nudge-enter w-full rounded-2xl border border-slate-200/90 dark:border-zinc-700/90 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden flex flex-col justify-between"
-        onMouseEnter={() => (hoverAtRef.current = Date.now())}
+        onMouseEnter={() => {
+          hoverAtRef.current = Date.now();
+          if (quizStartTimeRef.current === 0) quizStartTimeRef.current = Date.now();
+        }}
         onMouseLeave={() => (hoverAtRef.current = 0)}
       >
         {mode === "nudge" ? (
