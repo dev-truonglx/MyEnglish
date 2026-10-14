@@ -86,4 +86,59 @@ describe("LetterTilesExercise - buildTiles and slot verification", () => {
     expect(tiles.map((t) => t.ch)).toContain("r");
     expect(tiles.map((t) => t.ch)).toContain("e");
   });
+
+  it("renders LetterTilesExercise initially in building state without auto-completing", async () => {
+    const { renderToStaticMarkup } = await import("react-dom/server");
+    const { createElement } = await import("react");
+    const LetterTilesExercise = (await import("@/components/exercises/LetterTilesExercise")).default;
+
+    let completed = false;
+    const html = renderToStaticMarkup(
+      createElement(LetterTilesExercise, {
+        word: { id: 1, word: "cat", meaning_vn: "con mèo" } as any,
+        onComplete: () => {
+          completed = true;
+        },
+        onSpeak: () => {},
+      })
+    );
+
+    expect(completed).toBe(false);
+    expect(html).toContain("Làm lại");
+    expect(html).toContain("Xếp chữ cái thành từ tiếng Anh");
+  });
+
+  it("decomposes Vietnamese Telex characters accurately", async () => {
+    const { decomposeVietnameseChar } = await import("@/components/exercises/LetterTilesExercise");
+
+    // "their": i + r -> ỉ
+    expect(decomposeVietnameseChar("ỉ")).toEqual({ base: "i", telexKeys: ["r"] });
+    expect(decomposeVietnameseChar("Ỉ")).toEqual({ base: "i", telexKeys: ["r"] });
+
+    // "this": i + s -> í
+    expect(decomposeVietnameseChar("í")).toEqual({ base: "i", telexKeys: ["s"] });
+
+    // "of": o + f -> ò
+    expect(decomposeVietnameseChar("ò")).toEqual({ base: "o", telexKeys: ["f"] });
+
+    // "how": o + w -> ơ
+    expect(decomposeVietnameseChar("ơ")).toEqual({ base: "o", telexKeys: ["w"] });
+
+    // "see": e + e -> ê
+    expect(decomposeVietnameseChar("ê")).toEqual({ base: "e", telexKeys: ["e"] });
+
+    // "book": o + o -> ô
+    expect(decomposeVietnameseChar("ô")).toEqual({ base: "o", telexKeys: ["o"] });
+
+    // "add": d + d -> đ
+    expect(decomposeVietnameseChar("đ")).toEqual({ base: "d", telexKeys: ["d"] });
+
+    // Plain English letters must return null
+    expect(decomposeVietnameseChar("a")).toBeNull();
+    expect(decomposeVietnameseChar("r")).toBeNull();
+    expect(decomposeVietnameseChar("i")).toBeNull();
+    expect(decomposeVietnameseChar("z")).toBeNull();
+  });
 });
+
+

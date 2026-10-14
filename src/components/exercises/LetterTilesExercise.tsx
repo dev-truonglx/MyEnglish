@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Delete, HelpCircle, Shuffle } from "lucide-react";
+import { CheckCircle2, Delete, HelpCircle, RotateCcw } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { pickExample } from "@/services/smartReview";
@@ -12,6 +12,7 @@ interface LetterTilesExerciseProps {
   onComplete: (isCorrect: boolean, attempts: number, rating: Rating) => void;
   onSpeak: (text: string) => void;
   hideHeader?: boolean;
+  hideHints?: boolean;
 }
 
 /** Characters placed automatically (the learner only builds the letters) */
@@ -65,12 +66,73 @@ export function buildTiles(
   return all;
 }
 
+export interface VietDecomposition {
+  base: string;
+  telexKeys: string[];
+}
+
+/**
+ * Decomposes Vietnamese accented characters back into their base ASCII vowel/consonant
+ * and corresponding Telex key strokes (e.g. 'ỉ' -> { base: 'i', telexKeys: ['r'] }).
+ */
+export function decomposeVietnameseChar(ch: string): VietDecomposition | null {
+  if (ch === "đ" || ch === "Đ") {
+    return { base: "d", telexKeys: ["d"] };
+  }
+  const nfd = ch.normalize("NFD");
+  if (nfd.length === 1 && nfd === ch) return null;
+
+  const base = nfd[0].toLowerCase();
+  const telexKeys: string[] = [];
+
+  for (let i = 1; i < nfd.length; i++) {
+    const code = nfd.charCodeAt(i);
+    switch (code) {
+      case 0x0309: // hỏi (e.g. ỉ, ả, ẻ, ỏ, ủ, ỷ) -> 'r'
+        telexKeys.push("r");
+        break;
+      case 0x0301: // sắc (e.g. í, á, é, ó, ú, ý) -> 's'
+        telexKeys.push("s");
+        break;
+      case 0x0300: // huyền (e.g. ì, à, è, ò, ù, ỳ) -> 'f'
+        telexKeys.push("f");
+        break;
+      case 0x0303: // ngã (e.g. ĩ, ã, ẽ, õ, ũ, ỹ) -> 'x'
+        telexKeys.push("x");
+        break;
+      case 0x0323: // nặng (e.g. ị, ạ, ẹ, ọ, ụ, ỵ) -> 'j'
+        telexKeys.push("j");
+        break;
+      case 0x0306: // ă (a + w) -> 'w'
+        telexKeys.push("w");
+        break;
+      case 0x031B: // ơ, ư (o + w, u + w) -> 'w'
+        telexKeys.push("w");
+        break;
+      case 0x0302: // â, ê, ô (a + a, e + e, o + o) -> repeat base
+        telexKeys.push(base);
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (telexKeys.length === 0) return null;
+  return { base, telexKeys };
+}
+
 /**
  * First step of the recall ladder (see selectExerciseType): the Vietnamese meaning is shown, the learner
  * builds the English word from shuffled letters of that word (plus 3-4 distractor letters). Easier than typing from scratch,
  * so a beginner can start producing words without failing on every spelling detail.
  */
-export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHeader = false }: LetterTilesExerciseProps) {
+export default function LetterTilesExercise({
+  word,
+  onComplete,
+  onSpeak,
+  hideHeader = false,
+  hideHints = hideHeader,
+}: LetterTilesExerciseProps) {
   const target = word.word.trim();
   const slots = useMemo(() => [...target.toLowerCase()], [target]);
   const [tiles, setTiles] = useState<Tile[]>(() => buildTiles(target));
@@ -80,6 +142,7 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
   const [state, setState] = useState<"building" | "wrong" | "correct">("building");
   const doneRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const recentUndosRef = useRef<Array<{ id: number; ch: string; time: number }>>([]);
 
   useEffect(() => {
     setTiles(buildTiles(target));
@@ -88,6 +151,7 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
     setHint(false);
     setState("building");
     doneRef.current = false;
+    recentUndosRef.current = [];
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -109,7 +173,8 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
 
   const check = useCallback(
     (ids: number[]) => {
-      if (doneRef.current) return;
+      if (doneRef.current || state === "correct" || state === "wrong") return;
+      if (ids.length !== letterCount) return;
       const built = ids.map((id) => tiles.find((t) => t.id === id)?.ch ?? "").join("");
       const expected = slots.filter((c) => !FIXED.test(c)).join("");
       if (built === expected) {
@@ -130,21 +195,26 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
         }, 900);
       }
     },
-    [tiles, slots, onSpeak, target, onComplete, wrongAttempts, hint]
+    [tiles, slots, onSpeak, target, onComplete, wrongAttempts, hint, letterCount, state]
   );
 
   const pick = useCallback(
     (id: number) => {
-      if (doneRef.current) return;
+      if (doneRef.current || state === "correct") return;
+      if (state === "wrong") {
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+        setPicked([]);
+      }
       setState("building");
       setPicked((prev) => {
         if (prev.includes(id) || prev.length >= letterCount) return prev;
-        const next = [...prev, id];
-        if (next.length === letterCount) setTimeout(() => check(next), 0);
-        return next;
+        return [...prev, id];
       });
     },
-    [letterCount, check]
+    [letterCount, state]
   );
 
   const unpickAt = useCallback(
@@ -170,8 +240,20 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
       timerRef.current = null;
     }
     setState("building");
-    setPicked((prev) => prev.slice(0, -1));
-  }, [state]);
+    setPicked((prev) => {
+      if (prev.length === 0) return prev;
+      const lastId = prev[prev.length - 1];
+      const lastTile = tiles.find((t) => t.id === lastId);
+      if (lastTile) {
+        const now = Date.now();
+        recentUndosRef.current = [
+          ...recentUndosRef.current.filter((u) => now - u.time < 500).slice(-4),
+          { id: lastId, ch: lastTile.ch, time: now },
+        ];
+      }
+      return prev.slice(0, -1);
+    });
+  }, [state, tiles]);
 
   const clear = () => {
     if (doneRef.current || state === "correct") return;
@@ -179,38 +261,104 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
+    recentUndosRef.current = [];
     setState("building");
     setPicked([]);
-    setTiles((prev) => {
-      const copy = [...prev];
-      for (let i = copy.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [copy[i], copy[j]] = [copy[j], copy[i]];
-      }
-      return copy;
-    });
   };
 
-  // Keyboard: type a letter to pick a matching tile, Backspace to undo
+  // Keyboard: type a letter to pick a matching tile, Backspace to undo, Enter to submit and check
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (doneRef.current) return;
+      if (doneRef.current || state === "correct") return;
+      if (e.repeat) return;
+
       if (e.key === "Backspace") {
         e.preventDefault();
         undo();
         return;
       }
+
+      if (e.key === "Enter") {
+        if (picked.length === letterCount && state !== "wrong") {
+          e.preventDefault();
+          e.stopPropagation();
+          check(picked);
+        }
+        return;
+      }
+
       if (e.key.length !== 1) return;
       const ch = e.key.toLowerCase();
+
+      // 1. Vietnamese Telex support: when typing with Vietnamese IME (EVKey, Unikey, macOS Telex),
+      // typing 'r' after 'i' (like in "their") causes the IME to send Backspace (deleting 'i') followed by 'ỉ'.
+      // We detect the accented character, restore the deleted vowel, and pick the intended letter ('r').
+      const viet = decomposeVietnameseChar(ch);
+      if (viet) {
+        e.preventDefault();
+        setPicked((prev) => {
+          let nextPicked = [...prev];
+          const now = Date.now();
+
+          // Check if the base vowel was deleted by the IME's fake Backspace within the last 350ms
+          const undoIdx = recentUndosRef.current.findIndex(
+            (u) => u.ch === viet.base && now - u.time < 350 && !nextPicked.includes(u.id)
+          );
+
+          if (undoIdx !== -1) {
+            const [restored] = recentUndosRef.current.splice(undoIdx, 1);
+            if (nextPicked.length < letterCount) {
+              nextPicked.push(restored.id);
+            }
+          } else {
+            // If not undone, check if current end of picked has base
+            const lastId = nextPicked[nextPicked.length - 1];
+            const lastTile = tiles.find((t) => t.id === lastId);
+            if (!lastTile || lastTile.ch !== viet.base) {
+              const baseTile = tiles.find((t) => t.ch === viet.base && !nextPicked.includes(t.id));
+              if (baseTile && nextPicked.length < letterCount) {
+                nextPicked.push(baseTile.id);
+              }
+            }
+          }
+
+          // Pick the Telex modifier keys (e.g. 'r' for ỉ, 's' for í, 'w' for ơ/ư/ă, etc.)
+          for (const key of viet.telexKeys) {
+            if (nextPicked.length >= letterCount) break;
+            const tile = tiles.find((t) => t.ch === key && !nextPicked.includes(t.id));
+            if (tile) {
+              nextPicked.push(tile.id);
+            }
+          }
+
+          return nextPicked;
+        });
+        return;
+      }
+
+      // 2. Normal ASCII letter matching
       const tile = tiles.find((t) => t.ch === ch && !picked.includes(t.id));
       if (tile) {
         e.preventDefault();
         pick(tile.id);
+        return;
+      }
+
+      // 3. Fallback to physical key from e.code if key character was modified by another IME layout
+      if (e.code && e.code.startsWith("Key")) {
+        const physicalChar = e.code.slice(3).toLowerCase();
+        if (physicalChar.length === 1 && physicalChar !== ch) {
+          const fallbackTile = tiles.find((t) => t.ch === physicalChar && !picked.includes(t.id));
+          if (fallbackTile) {
+            e.preventDefault();
+            pick(fallbackTile.id);
+          }
+        }
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [tiles, picked, pick, undo]);
+  }, [tiles, picked, pick, undo, check, letterCount, state]);
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 animate-in fade-in duration-200">
@@ -313,13 +461,19 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
 
       <div className="flex items-center justify-between text-xs px-1 min-h-[28px]">
         <div className="flex gap-2">
-          <button onClick={undo} disabled={picked.length === 0 || state === "correct"} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40">
-            <Delete className="w-3.5 h-3.5" /> Xóa chữ cuối
+          {!hideHints && (
+            <button onClick={undo} disabled={picked.length === 0 || state === "correct"} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40">
+              <Delete className="w-3.5 h-3.5" /> Xóa chữ cuối
+            </button>
+          )}
+          <button
+            onClick={clear}
+            disabled={picked.length === 0 || state === "correct"}
+            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40"
+          >
+            <RotateCcw className="w-3.5 h-3.5" /> Làm lại
           </button>
-          <button onClick={clear} disabled={state === "correct"} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40">
-            <Shuffle className="w-3.5 h-3.5" /> Làm lại
-          </button>
-          {!hint && state !== "correct" && (
+          {!hideHints && !hint && state !== "correct" && (
             <button onClick={() => setHint(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200">
               <HelpCircle className="w-3.5 h-3.5" /> Gợi ý chữ đầu
             </button>
@@ -331,9 +485,18 @@ export default function LetterTilesExercise({ word, onComplete, onSpeak, hideHea
           </span>
         ) : state === "wrong" ? (
           <span className="font-semibold text-amber-700 dark:text-amber-300">Gần rồi, đổi vài chữ rồi thử lại nhé</span>
-        ) : (
+        ) : picked.length === letterCount ? (
+          <button
+            type="button"
+            onClick={() => check(picked)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer animate-in fade-in"
+          >
+            <span>Kiểm tra</span>
+            <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[10px] font-mono">Enter</kbd>
+          </button>
+        ) : !hideHints ? (
           <span className="text-slate-400">Bấm vào chữ đã ghép để xóa · Có thể gõ phím</span>
-        )}
+        ) : null}
       </div>
     </div>
   );

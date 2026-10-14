@@ -84,21 +84,28 @@ export default function QuickInput({
    * then automatically applies and selects valid candidate words.
    */
   const checkAndApplyClipboard = async (customText?: string, opts: { onlyIfEmpty?: boolean } = {}) => {
-    let clipText = customText && customText.trim().length > 0 ? customText : undefined;
+    let clipText: string | undefined = typeof customText === "string" ? customText.trim() : undefined;
 
     if (clipText === undefined) {
       // 1. Try native Tauri command (pbpaste on macOS, arboard on Windows/Linux)
       try {
         const nativeText = await invoke<string>("get_clipboard_text");
         if (nativeText && typeof nativeText === "string" && nativeText.trim().length > 0) {
-          clipText = nativeText;
+          clipText = nativeText.trim();
+        } else {
+          clipText = "";
         }
       } catch {
         // Fallback to web navigator.clipboard
         if (navigator.clipboard?.readText) {
           try {
-            clipText = await navigator.clipboard.readText();
-          } catch {}
+            const webText = await navigator.clipboard.readText();
+            clipText = webText?.trim() || "";
+          } catch {
+            clipText = "";
+          }
+        } else {
+          clipText = "";
         }
       }
     }

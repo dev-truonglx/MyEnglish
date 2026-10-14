@@ -527,33 +527,41 @@ fn clipboard_for_webview(text: &str) -> String {
     text.chars().take(CLIPBOARD_MAX_CHARS).collect()
 }
 
+static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Raw clipboard text. Blocking (spawns pbpaste, retries with sleeps): never call it on the main thread.
 fn read_clipboard_text() -> String {
+    let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = std::process::Command::new("/usr/bin/pbpaste").output() {
-            if output.status.success() {
-                let text = String::from_utf8_lossy(&output.stdout).to_string();
-                if !text.is_empty() {
-                    return text;
+        // On macOS, always use pbpaste (spawns a subprocess).
+        // Accessing NSPasteboard via arboard from background tokio worker threads is NOT thread-safe
+        // and crashes with EXC_BAD_ACCESS (SIGSEGV) in -[NSPasteboard _updateTypeCacheIfNeeded].
+        for cmd in &["/usr/bin/pbpaste", "pbpaste"] {
+            if let Ok(output) = std::process::Command::new(cmd).output() {
+                if output.status.success() {
+                    return String::from_utf8_lossy(&output.stdout).to_string();
                 }
             }
         }
+        String::new()
     }
 
-    // Cross-platform clipboard via arboard (supports Windows, Linux, macOS fallback)
-    for _ in 0..3 {
-        if let Ok(mut clipboard) = arboard::Clipboard::new() {
-            if let Ok(text) = clipboard.get_text() {
-                if !text.is_empty() {
+    #[cfg(not(target_os = "macos"))]
+    {
+        // Cross-platform clipboard via arboard (supports Windows, Linux)
+        for _ in 0..3 {
+            if let Ok(mut clipboard) = arboard::Clipboard::new() {
+                if let Ok(text) = clipboard.get_text() {
                     return text;
                 }
             }
+            std::thread::sleep(std::time::Duration::from_millis(30));
         }
-        std::thread::sleep(std::time::Duration::from_millis(30));
-    }
 
-    String::new()
+        String::new()
+    }
 }
 
 /// Clipboard for the quick input window (capped, secrets withheld).
