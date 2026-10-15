@@ -497,14 +497,16 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
 
   // Exercises report their own attempts; the FSRS grade is derived centrally.
   // An exercise reporting Hard with 0 wrong attempts means a hint was used.
-  const gradeExercise = (exerciseType: ExerciseType, attempts: number, exerciseRating: Rating): Rating =>
-    deriveRating({
+  const gradeExercise = (exerciseType: ExerciseType, attempts: number, exerciseRating: Rating): Rating => {
+    if (exerciseRating === Rating.Again) return Rating.Again;
+    return deriveRating({
       exerciseType,
       wrongAttempts: attempts,
       usedHint: attempts === 0 && exerciseRating === Rating.Hard,
       responseTimeMs: Date.now() - cardStartTime.current,
       srs: currentWord?.srs,
     });
+  };
 
   /**
    * Record one answer: FSRS or practice (see schedulingDecision), stats, XP, celebrations and the in-session

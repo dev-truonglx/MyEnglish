@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Delete, HelpCircle, RotateCcw } from "lucide-react";
+import { AlertCircle, CheckCircle2, Delete, Eye, HelpCircle, RotateCcw } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { pickExample } from "@/services/smartReview";
@@ -139,7 +139,7 @@ export default function LetterTilesExercise({
   const [picked, setPicked] = useState<number[]>([]); // tile ids, in slot order (letters only)
   const [wrongAttempts, setWrongAttempts] = useState(0);
   const [hint, setHint] = useState(false);
-  const [state, setState] = useState<"building" | "wrong" | "correct">("building");
+  const [state, setState] = useState<"building" | "wrong" | "correct" | "give_up">("building");
   const doneRef = useRef(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recentUndosRef = useRef<Array<{ id: number; ch: string; time: number }>>([]);
@@ -171,9 +171,21 @@ export default function LetterTilesExercise({
     return slots.map((c) => (FIXED.test(c) ? -1 : k++));
   }, [slots]);
 
+  const giveUp = useCallback(() => {
+    if (doneRef.current || state === "correct" || state === "give_up") return;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    doneRef.current = true;
+    setState("give_up");
+    onSpeak(target);
+    onComplete(false, Math.max(wrongAttempts, 1), Rating.Again);
+  }, [state, target, onSpeak, onComplete, wrongAttempts]);
+
   const check = useCallback(
     (ids: number[]) => {
-      if (doneRef.current || state === "correct" || state === "wrong") return;
+      if (doneRef.current || state === "correct" || state === "wrong" || state === "give_up") return;
       if (ids.length !== letterCount) return;
       const built = ids.map((id) => tiles.find((t) => t.id === id)?.ch ?? "").join("");
       const expected = slots.filter((c) => !FIXED.test(c)).join("");
@@ -200,7 +212,7 @@ export default function LetterTilesExercise({
 
   const pick = useCallback(
     (id: number) => {
-      if (doneRef.current || state === "correct") return;
+      if (doneRef.current || state === "correct" || state === "give_up") return;
       if (state === "wrong") {
         if (timerRef.current) {
           clearTimeout(timerRef.current);
@@ -219,7 +231,7 @@ export default function LetterTilesExercise({
 
   const unpickAt = useCallback(
     (index: number) => {
-      if (doneRef.current || state === "correct") return;
+      if (doneRef.current || state === "correct" || state === "give_up") return;
       if (timerRef.current) {
         clearTimeout(timerRef.current);
         timerRef.current = null;
@@ -234,7 +246,7 @@ export default function LetterTilesExercise({
   );
 
   const undo = useCallback(() => {
-    if (doneRef.current || state === "correct") return;
+    if (doneRef.current || state === "correct" || state === "give_up") return;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -256,7 +268,7 @@ export default function LetterTilesExercise({
   }, [state, tiles]);
 
   const clear = () => {
-    if (doneRef.current || state === "correct") return;
+    if (doneRef.current || state === "correct" || state === "give_up") return;
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -269,7 +281,7 @@ export default function LetterTilesExercise({
   // Keyboard: type a letter to pick a matching tile, Backspace to undo, Enter to submit and check
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (doneRef.current || state === "correct") return;
+      if (doneRef.current || state === "correct" || state === "give_up") return;
       if (e.repeat) return;
 
       if (e.key === "Backspace") {
@@ -395,7 +407,7 @@ export default function LetterTilesExercise({
           const letter = hasLetter ? builtLetters[nonFixedIdx] : "";
           const isFirstSlotHint = hint && i === 0 && !hasLetter;
 
-          if (hasLetter && state !== "correct") {
+          if (hasLetter && state !== "correct" && state !== "give_up") {
             return (
               <button
                 key={i}
@@ -419,12 +431,16 @@ export default function LetterTilesExercise({
               className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono select-none ${
                 state === "correct"
                   ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+                  : state === "give_up"
+                  ? "border-rose-400 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold"
                   : state === "wrong"
-                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
-                    : "border-dashed border-slate-300 dark:border-zinc-700 text-slate-400"
+                  ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
+                  : "border-dashed border-slate-300 dark:border-zinc-700 text-slate-400"
               }`}
             >
-              {letter || (isFirstSlotHint ? <span className="text-slate-300 dark:text-zinc-600">{slots[0]}</span> : "")}
+              {state === "give_up"
+                ? slotChar
+                : letter || (isFirstSlotHint ? <span className="text-slate-300 dark:text-zinc-600">{slots[0]}</span> : "")}
             </span>
           );
         })}
@@ -445,11 +461,11 @@ export default function LetterTilesExercise({
                   pick(t.id);
                 }
               }}
-              disabled={state === "correct"}
+              disabled={state === "correct" || state === "give_up"}
               title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
               className={`w-11 h-11 rounded-xl text-lg font-bold font-mono shadow-sm transition-all ${
-                used
-                  ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 hover:border-rose-400 hover:text-rose-500 hover:bg-rose-50/40 dark:hover:bg-rose-950/20 active:scale-95 cursor-pointer"
+                used || state === "give_up"
+                  ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 cursor-not-allowed opacity-60"
                   : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95 cursor-pointer"
               }`}
             >
@@ -460,28 +476,42 @@ export default function LetterTilesExercise({
       </div>
 
       <div className="flex items-center justify-between text-xs px-1 min-h-[28px]">
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {!hideHints && (
-            <button onClick={undo} disabled={picked.length === 0 || state === "correct"} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40">
+            <button onClick={undo} disabled={picked.length === 0 || state === "correct" || state === "give_up"} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40">
               <Delete className="w-3.5 h-3.5" /> Xóa chữ cuối
             </button>
           )}
           <button
             onClick={clear}
-            disabled={picked.length === 0 || state === "correct"}
+            disabled={picked.length === 0 || state === "correct" || state === "give_up"}
             className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 disabled:opacity-40"
           >
             <RotateCcw className="w-3.5 h-3.5" /> Làm lại
           </button>
-          {!hideHints && !hint && state !== "correct" && (
+          {!hideHints && !hint && state !== "correct" && state !== "give_up" && (
             <button onClick={() => setHint(true)} className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200">
               <HelpCircle className="w-3.5 h-3.5" /> Gợi ý chữ đầu
+            </button>
+          )}
+          {state !== "correct" && state !== "give_up" && (
+            <button
+              type="button"
+              onClick={giveUp}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 text-xs font-semibold transition-colors shrink-0"
+              title="Xem đáp án và học lại từ này"
+            >
+              <Eye className="w-3.5 h-3.5" /> Không nhớ
             </button>
           )}
         </div>
         {state === "correct" ? (
           <span className="inline-flex items-center gap-1 font-semibold text-emerald-600 dark:text-emerald-400">
             <CheckCircle2 className="w-4 h-4" /> {target}
+          </span>
+        ) : state === "give_up" ? (
+          <span className="inline-flex items-center gap-1 font-semibold text-rose-600 dark:text-rose-400 animate-in fade-in">
+            <AlertCircle className="w-4 h-4" /> Đáp án: {target}
           </span>
         ) : state === "wrong" ? (
           <span className="font-semibold text-amber-700 dark:text-amber-300">Gần rồi, đổi vài chữ rồi thử lại nhé</span>

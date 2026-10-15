@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { CheckCircle2, RotateCcw, Link2, AlertCircle } from "lucide-react";
+import { CheckCircle2, RotateCcw, Link2, AlertCircle, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
@@ -172,6 +172,21 @@ export default function ContextMatchExercise({
     setIsCorrect(null);
   };
 
+  const handleGiveUp = () => {
+    if (isAnswered) return;
+    setIsAnswered(true);
+    setIsCorrect(false);
+    // Fill all matches with the correct pairs
+    const solved: Record<string, string> = {};
+    for (const p of pairs) {
+      solved[p.wordId] = p.wordId;
+    }
+    setMatches(solved);
+    onSpeak(word.word);
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    onComplete(false, Math.max(targetMistakesRef.current, 1), Rating.Again);
+  };
+
   const allMatched = pairs.length > 0 && pairs.every((p) => matches[p.wordId] !== undefined);
 
   return (
@@ -281,14 +296,28 @@ export default function ContextMatchExercise({
 
       {/* Action Bar */}
       <div className="flex items-center justify-between pt-2">
-        <button
-          onClick={handleReset}
-          disabled={Object.keys(matches).length === 0 || isAnswered}
-          className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors"
-        >
-          <RotateCcw className="w-3.5 h-3.5" />
-          <span>Làm lại ghép cặp</span>
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={Object.keys(matches).length === 0 || isAnswered}
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors"
+          >
+            <RotateCcw className="w-3.5 h-3.5" />
+            <span>Làm lại ghép cặp</span>
+          </button>
+          {!isAnswered && (
+            <button
+              type="button"
+              onClick={handleGiveUp}
+              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold"
+              title="Xem đáp án ghép cặp"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Không nhớ</span>
+            </button>
+          )}
+        </div>
 
         <button
           onClick={handleCheck}
@@ -310,18 +339,37 @@ export default function ContextMatchExercise({
                 : "Tuyệt vời! Bạn đã ghép đúng toàn bộ ngữ cảnh. Nhấn Enter hoặc Tiếp tục."}
             </span>
           </div>
+        ) : isAnswered && isCorrect === false ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span className="font-semibold">
+              Đã hiển thị các cặp ghép đúng. Từ "{word.word}" sẽ được ôn lại sớm. Nhấn Enter hoặc Tiếp tục.
+            </span>
+          </div>
         ) : isCorrect === false && !isAnswered ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
               <span>Có cặp chưa khớp, đổi lại vị trí rồi thử tiếp nhé!</span>
             </div>
-            <button
-              onClick={handleReset}
-              className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 transition-colors text-rose-700 dark:text-rose-200 text-xs shrink-0 ml-2"
-            >
-              Ghép lại
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 transition-colors text-rose-700 dark:text-rose-200 text-xs"
+              >
+                Ghép lại
+              </button>
+              <button
+                type="button"
+                onClick={handleGiveUp}
+                className="px-2.5 py-1 rounded-lg bg-rose-200/70 hover:bg-rose-300/80 dark:bg-rose-900/90 text-rose-800 dark:text-rose-100 font-semibold transition-colors flex items-center gap-1 text-xs"
+                title="Xem đáp án ghép cặp"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Không nhớ</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">

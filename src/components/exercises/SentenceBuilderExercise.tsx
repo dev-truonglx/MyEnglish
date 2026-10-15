@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle } from "lucide-react";
+import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { normalizeTypedText, prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
@@ -88,6 +88,25 @@ export default function SentenceBuilderExercise({
     setIsCorrect(null);
     lastCheckedKeyRef.current = "";
   };
+
+  const handleGiveUp = useCallback(() => {
+    if (isAnswered || !data) return;
+    setIsAnswered(true);
+    setIsCorrect(false);
+
+    // Reconstruct tokens in correct sentence order
+    const words = data.fullSentence.trim().split(/\s+/).filter(Boolean);
+    const correctTokens = words.map((text, idx) => ({
+      id: `token-${idx}-${text}`,
+      text,
+    }));
+    setPlacedTokens(correctTokens);
+    setAvailableTokens([]);
+
+    onSpeakRef.current(data.fullSentence);
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    onCompleteRef.current(false, Math.max(wrongAttemptsRef.current, 1), Rating.Again);
+  }, [data, isAnswered]);
 
   const handleCheck = useCallback(() => {
     if (!data || isAnswered || placedTokens.length === 0) return;
@@ -202,6 +221,8 @@ export default function SentenceBuilderExercise({
               className={`px-3 py-1.5 rounded-lg text-sm font-medium shadow-sm transition-all transform active:scale-95 ${
                 isCorrect === true
                   ? "bg-emerald-500 text-white"
+                  : isAnswered && isCorrect === false
+                  ? "bg-rose-100 dark:bg-rose-900/60 text-rose-800 dark:text-rose-200 border border-rose-300 dark:border-rose-700 cursor-default"
                   : isCorrect === false
                   ? "bg-rose-500 text-white"
                   : "bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-200 border border-slate-200 dark:border-zinc-700 hover:border-rose-400 hover:text-rose-600"
@@ -217,14 +238,28 @@ export default function SentenceBuilderExercise({
       <div className="space-y-2">
         <div className="flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400 px-1">
           <span>Ngân hàng từ vựng:</span>
-          {placedTokens.length > 0 && !isAnswered && (
-            <button
-              onClick={handleReset}
-              className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors"
-            >
-              <RotateCcw className="w-3.5 h-3.5" />
-              <span>Làm lại</span>
-            </button>
+          {!isAnswered && (
+            <div className="flex items-center gap-2">
+              {placedTokens.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleReset}
+                  className="inline-flex items-center gap-1 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 transition-colors"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Làm lại</span>
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={handleGiveUp}
+                className="inline-flex items-center gap-1 text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold"
+                title="Bỏ qua và xem đáp án câu này"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Không nhớ</span>
+              </button>
+            </div>
           )}
         </div>
 
@@ -243,6 +278,8 @@ export default function SentenceBuilderExercise({
             <span className="text-xs text-slate-400 dark:text-zinc-500 italic my-auto mx-auto select-none">
               {isAnswered && isCorrect
                 ? "Hoàn thành chính xác!"
+                : isAnswered && !isCorrect
+                ? "Đã hiển thị đáp án đúng"
                 : isCorrect === null
                 ? "Đã dùng hết từ. Đang kiểm tra..."
                 : "Đã chọn toàn bộ từ"}
@@ -272,6 +309,25 @@ export default function SentenceBuilderExercise({
               <Volume2 className="w-4 h-4" />
             </button>
           </div>
+        ) : isAnswered && isCorrect === false ? (
+          <div className="w-full h-full px-4 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
+            <div className="flex items-center gap-2 min-w-0">
+              <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+              <div className="truncate">
+                <span className="font-bold mr-1.5">Đáp án đúng:</span>
+                <span className="text-rose-700 dark:text-rose-300 font-mono">
+                  {data.fullSentence}
+                </span>
+              </div>
+            </div>
+            <button
+              onClick={() => onSpeakRef.current(data.fullSentence)}
+              className="p-1.5 rounded-full hover:bg-rose-100 dark:hover:bg-rose-900/50 text-rose-600 shrink-0 ml-2"
+              title="Nghe câu"
+            >
+              <Volume2 className="w-4 h-4" />
+            </button>
+          </div>
         ) : isCorrect === false && !isAnswered ? (
           <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
             <div className="flex items-center gap-2 min-w-0">
@@ -285,12 +341,24 @@ export default function SentenceBuilderExercise({
                 )}
               </div>
             </div>
-            <button
-              onClick={handleReset}
-              className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-200 transition-colors shrink-0 ml-2"
-            >
-              Xếp lại
-            </button>
+            <div className="flex items-center gap-1.5 shrink-0 ml-2">
+              <button
+                type="button"
+                onClick={handleReset}
+                className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 dark:hover:bg-rose-800 text-rose-700 dark:text-rose-200 transition-colors"
+              >
+                Xếp lại
+              </button>
+              <button
+                type="button"
+                onClick={handleGiveUp}
+                className="px-2.5 py-1 rounded-lg bg-rose-200/70 hover:bg-rose-300/80 dark:bg-rose-900/90 text-rose-800 dark:text-rose-100 font-semibold transition-colors flex items-center gap-1"
+                title="Bỏ qua và xem đáp án câu này"
+              >
+                <Eye className="w-3.5 h-3.5" />
+                <span>Không nhớ</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">

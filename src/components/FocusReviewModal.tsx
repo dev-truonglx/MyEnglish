@@ -968,16 +968,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   };
 
   // Letter tiles done: built on the first try = remembered (hint -> Hard), after wrong tries = Again
-  const handleTilesComplete = async (attempts: number, rating: Rating) => {
+  const handleTilesComplete = async (attempts: number, rating: Rating, isCorrectResult?: boolean) => {
     if (isAnswered || !currentItem || currentItem.kind !== "word") return;
     const item = currentItem;
     const index = currentIndex;
     const wordObj = item.word;
-    const firstTry = attempts === 0;
+    const firstTry = attempts === 0 && rating !== Rating.Again && isCorrectResult !== false;
     setIsAnswered(true);
-    // UI luôn hiển thị đúng như khi hoàn thành từ (tránh gây hiểu nhầm cho người dùng)
-    setIsCorrect(true);
-    // Vẫn giữ logic SRS sau nhiều lần sai: tính là cần học lại (Rating.Again) và đưa lại vào hàng đợi
+    setIsCorrect(firstTry);
     if (!firstTry) requeueItem(item);
     try {
       const praise = await trackSave(
@@ -988,8 +986,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         index,
         firstTry
           ? `${praise ? praiseText(praise) : `Đúng rồi: "${wordObj.word}" 🎉 `}${NEXT_HINT}`
-          : // Recorded as Again: say so instead of praising, the word comes back soon
-            `Ghép xong "${wordObj.word}" sau ${attempts} lần sai — từ này sẽ được ôn lại sớm. ${NEXT_HINT}`
+          : rating === Rating.Again && attempts <= 1
+            ? `Chưa nhớ ra từ "${wordObj.word}" — từ này sẽ được ôn lại sớm. ${NEXT_HINT}`
+            : `Ghép xong "${wordObj.word}" sau ${attempts} lần sai — từ này sẽ được ôn lại sớm. ${NEXT_HINT}`
       );
     } catch (err) {
       console.warn("Failed to record letter tiles review:", err);
@@ -1585,7 +1584,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   hideHeader
                   hideHints
                   onSpeak={(t) => handleSpeak(t)}
-                  onComplete={(_ok, attempts, rating) => handleTilesComplete(attempts, rating)}
+                  onComplete={(isCorrect, attempts, rating) => handleTilesComplete(attempts, rating, isCorrect)}
                 />
               )}
 

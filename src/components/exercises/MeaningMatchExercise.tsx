@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { CheckCircle2, Link2 } from "lucide-react";
+import { CheckCircle2, Link2, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
@@ -93,6 +93,15 @@ export default function MeaningMatchExercise({
     setTimeout(() => setWrongFlash(null), 600);
   };
 
+  const handleGiveUp = () => {
+    if (done) return;
+    setDone(true);
+    setMatched(new Set(pairs.map((p) => p.wordId)));
+    onSpeak(word.word);
+    if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+    onComplete(false, Math.max(targetMistakes, 1), Rating.Again);
+  };
+
   const handleWordClick = (wordId: string) => {
     if (done || matched.has(wordId)) return;
     setSelectedWordId((prev) => (prev === wordId ? null : wordId));
@@ -169,9 +178,9 @@ export default function MeaningMatchExercise({
         </div>
       </div>
 
-      <div className="h-[40px] flex items-center justify-center text-xs">
+      <div className="flex items-center justify-between text-xs px-1 min-h-[40px]">
         {done ? (
-          <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold">
+          <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold mx-auto">
             <CheckCircle2 className="w-4 h-4" />
             {targetMistakes === 0 && !byElimination
               ? `Chính xác! "${word.word}" đã được nối đúng ngay.`
@@ -180,9 +189,20 @@ export default function MeaningMatchExercise({
               : `Đã nối xong. "${word.word}" cần ôn lại sớm.`}
           </span>
         ) : (
-          <span className="text-slate-400 dark:text-zinc-500">
-            Chỉ cặp của từ <strong>{word.word}</strong> được tính điểm; nối nhầm các từ khác chỉ được sửa lại.
-          </span>
+          <>
+            <span className="text-slate-400 dark:text-zinc-500">
+              Chỉ cặp của từ <strong>{word.word}</strong> được tính điểm.
+            </span>
+            <button
+              type="button"
+              onClick={handleGiveUp}
+              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 font-semibold transition-colors"
+              title="Xem đáp án các cặp nối"
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span>Không nhớ</span>
+            </button>
+          </>
         )}
       </div>
     </div>

@@ -105,7 +105,19 @@ describe("LetterTilesExercise - buildTiles and slot verification", () => {
 
     expect(completed).toBe(false);
     expect(html).toContain("Làm lại");
+    expect(html).toContain("Không nhớ");
     expect(html).toContain("Xếp chữ cái thành từ tiếng Anh");
+
+    // Even when hideHints is true (e.g. FocusReviewModal), "Không nhớ" must still be visible
+    const htmlNoHints = renderToStaticMarkup(
+      createElement(LetterTilesExercise, {
+        word: { id: 1, word: "cat", meaning_vn: "con mèo" } as any,
+        hideHints: true,
+        onComplete: () => {},
+        onSpeak: () => {},
+      })
+    );
+    expect(htmlNoHints).toContain("Không nhớ");
   });
 
   it("decomposes Vietnamese Telex characters accurately", async () => {
