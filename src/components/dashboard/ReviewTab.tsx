@@ -5,14 +5,16 @@ import { DUE_LIST_LIMIT, PAGE_CONTAINER, type LibraryStats } from "./shared";
 import WeeklyProgressCard from "../WeeklyProgressCard";
 import ComebackCard from "./ComebackCard";
 import type { ComebackStatus } from "@/services/comeback";
-import { getUnmasteredWords, youngWordCap } from "@/services/smartReview";
+import { getUnmasteredWords, youngWordCap, type TodayWork } from "@/services/smartReview";
 import { isSimpleMode } from "@/services/learnerProfile";
+import { vocabDetail } from "./todayPlan";
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const ADD_WORD_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
 
 interface ReviewTabProps {
   dueCount: number;
+  todayWork?: TodayWork;
   /** Back after a break: today's share of the backlog replaces the queue overview */
   comeback?: ComebackStatus | null;
   libraryStats: LibraryStats;
@@ -25,6 +27,7 @@ interface ReviewTabProps {
 /** TAB 3 landing: queue overview, start/practice buttons, per-topic review and due list */
 export default function ReviewTab({
   dueCount,
+  todayWork,
   comeback,
   libraryStats,
   availableTopics,
@@ -38,6 +41,9 @@ export default function ReviewTab({
   const simple = isSimpleMode();
   // Both counts are words: the list shows due words, not the session size (dueCount)
   const dueWordCount = libraryStats.dueWords.length;
+  const reviews = todayWork?.reviews ?? dueCount;
+  const newToday = todayWork?.newToday ?? 0;
+  const detailText = vocabDetail(reviews, newToday);
 
   return (
     <div className={`${PAGE_CONTAINER} space-y-6`}>
@@ -56,16 +62,36 @@ export default function ReviewTab({
       {!inComeback && (
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-gradient-to-r dark:from-zinc-900 dark:via-zinc-900/90 dark:to-zinc-950 p-6 space-y-4 shadow-sm">
         <div className="flex items-center justify-between">
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400 uppercase tracking-wider block">
               Việc hôm nay
             </span>
-            <div className="text-2xl font-extrabold text-slate-900 dark:text-white flex items-center gap-2">
+            <div className="text-2xl font-extrabold text-slate-900 dark:text-white flex items-baseline gap-2">
               <span>{dueCount}</span>
               <span className="text-sm font-normal text-slate-500 dark:text-zinc-400">
-                {dueCount > 0 ? "thẻ đến hạn ôn tập" : "Đã ôn tập hết hôm nay 🎉"}
+                {dueCount > 0
+                  ? reviews > 0 && newToday > 0
+                    ? "thẻ cần học"
+                    : reviews > 0
+                    ? "thẻ đến hạn ôn tập"
+                    : "từ mới hôm nay"
+                  : "Đã hoàn thành hết hôm nay 🎉"}
               </span>
             </div>
+            {dueCount > 0 && (reviews > 0 || newToday > 0) && (
+              <div className="flex flex-wrap items-center gap-2 pt-0.5" title={detailText}>
+                {reviews > 0 && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-orange-50 dark:bg-orange-950/60 text-orange-700 dark:text-orange-300 border border-orange-200/80 dark:border-orange-800/50">
+                    {reviews} thẻ ôn
+                  </span>
+                )}
+                {newToday > 0 && (
+                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300 border border-cyan-200/80 dark:border-cyan-800/50">
+                    {newToday} từ mới
+                  </span>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="w-12 h-12 rounded-2xl bg-orange-100 dark:bg-orange-500/10 border border-orange-200 dark:border-orange-500/20 flex items-center justify-center text-orange-600 dark:text-orange-400">
@@ -88,7 +114,11 @@ export default function ReviewTab({
             )}
             <span>
               {dueCount > 0
-                ? `Bắt đầu ôn tập (${dueCount})`
+                ? reviews > 0 && newToday > 0
+                  ? `Bắt đầu học (${dueCount})`
+                  : reviews > 0
+                  ? `Bắt đầu ôn tập (${dueCount})`
+                  : `Học từ mới (${dueCount})`
                 : isCapped
                 ? `Ôn luyện từ chưa thuộc (${unmasteredCount})`
                 : "Học thêm từ mới (+5)"}

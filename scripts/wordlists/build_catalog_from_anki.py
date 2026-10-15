@@ -123,10 +123,19 @@ def build(notes, it_words):
             vn = (sense.get("meaning_vi") or "").strip()
             if vn and not any(s["pos"] == pos and s["vn"] == vn for s in senses):
                 senses.append({"pos": pos, "vn": vn})
+            sense_idx = next(
+                (i for i, s in enumerate(senses) if s["pos"] == pos and s["vn"] == vn),
+                max(0, len(senses) - 1)
+            )
             for ex in sense.get("examples", []):
                 en, vi = (ex.get("example_en") or "").strip(), (ex.get("example_vi") or "").strip()
                 if en and vi and not any(e["en"] == en for e in examples):
-                    examples.append({"en": en, "vi": vi, "focus": unique(ex.get("focus_en") or [])})
+                    examples.append({
+                        "en": en,
+                        "vi": vi,
+                        "focus": unique(ex.get("focus_en") or []),
+                        "senseIndex": sense_idx,
+                    })
         if not senses or not examples:
             problems.append(f"no meaning/example: {word}")
             continue
@@ -203,7 +212,7 @@ def main():
         json.dump({
             "source": DECK_URL,
             "note": "Words, CEFR levels and IPA from the Oxford 3000/5000; Vietnamese meanings and examples by the deck's author (examples marked llm_authored in the deck).",
-            "version": 1,
+            "version": 2,
             "retrieved": datetime.date.today().isoformat(),
             "words": words,
         }, f, ensure_ascii=False, separators=(",", ":"))

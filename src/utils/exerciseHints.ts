@@ -19,6 +19,14 @@ export function splitMeaningSenses(meaningVn: string): string[] {
     .filter((sense) => sense.length > 0);
 }
 
+/** Raw sense clauses of a Vietnamese meaning: split at ";" and new lines, trimmed, preserving parenthesized notes */
+export function splitMeaningClauses(meaningVn: string): string[] {
+  return (meaningVn || "")
+    .split(/[;\n]/)
+    .map((c) => c.trim())
+    .filter((c) => c.length > 0);
+}
+
 /** Whether `needle` occurs in `haystack` as whole words (no letter or digit right before or after) */
 function occursAsWords(haystack: string, needle: string): boolean {
   if (!needle) return false;
@@ -30,13 +38,41 @@ function occursAsWords(haystack: string, needle: string): boolean {
   return false;
 }
 
+export interface ExampleSenseRef {
+  sentence_vn?: string | null;
+  sense_index?: number | null;
+}
+
 /**
- * The sense of a meaning that the example sentence uses (M5): the one found in `exampleVi` with the
- * longest match. Without a match, or without a Vietnamese sentence, the first sense.
+ * The sense of a meaning that the example sentence uses (M5):
+ * 1. By exact senseIndex if available (0-indexed).
+ * 2. By whole-word search in sentence_vn / exampleVi.
+ * 3. Fallback to the first sense.
  */
-export function pickSenseForExample(meaningVn: string, exampleVi: string): string {
+export function pickSenseForExample(
+  meaningVn: string,
+  exampleViOrExample?: string | ExampleSenseRef | null
+): string {
   const senses = splitMeaningSenses(meaningVn);
-  const sentence = normalizeText(exampleVi || "");
+  if (senses.length === 0) return "";
+  if (senses.length === 1) return senses[0];
+
+  let sentenceVi = "";
+  let senseIndex: number | null | undefined = null;
+
+  if (typeof exampleViOrExample === "string") {
+    sentenceVi = exampleViOrExample;
+  } else if (exampleViOrExample && typeof exampleViOrExample === "object") {
+    sentenceVi = exampleViOrExample.sentence_vn || "";
+    senseIndex = exampleViOrExample.sense_index;
+  }
+
+  if (typeof senseIndex === "number" && senseIndex >= 0) {
+    const targetIdx = Math.min(senseIndex, senses.length - 1);
+    return senses[targetIdx];
+  }
+
+  const sentence = normalizeText(sentenceVi || "");
   let best = senses[0] ?? "";
   let bestLength = 0;
   for (const sense of senses) {
@@ -47,6 +83,32 @@ export function pickSenseForExample(meaningVn: string, exampleVi: string): strin
     }
   }
   return best;
+}
+
+/**
+ * The raw sense clause of a meaning that matches an example (preserving parenthesized notes for concise formatting).
+ */
+export function getExampleSenseMeaning(
+  meaningVn: string,
+  example?: ExampleSenseRef | null
+): string {
+  const clauses = splitMeaningClauses(meaningVn);
+  if (clauses.length <= 1) return meaningVn || "";
+
+  if (example && typeof example.sense_index === "number" && example.sense_index >= 0) {
+    const targetIdx = Math.min(example.sense_index, clauses.length - 1);
+    return clauses[targetIdx];
+  }
+
+  if (example?.sentence_vn) {
+    const cleanSense = pickSenseForExample(meaningVn, example.sentence_vn);
+    if (cleanSense) {
+      const match = clauses.find((c) => c.toLowerCase().includes(cleanSense.toLowerCase()));
+      if (match) return match;
+    }
+  }
+
+  return clauses[0] ?? meaningVn;
 }
 
 /** Whether two meanings share a sense, so one would be a right answer to the other's word */

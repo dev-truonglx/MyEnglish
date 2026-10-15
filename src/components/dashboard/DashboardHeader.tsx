@@ -6,6 +6,8 @@ import { useWordsStore } from "@/stores/wordsStore";
 import type { GlobalToastData } from "./DashboardBanners";
 import { navGroupOf, type DashboardTab, type FilterMode, type LibraryStats, type ViewMode } from "./shared";
 import { AI_VOCAB_ENABLED } from "@/services/features";
+import type { TodayWork } from "@/services/smartReview";
+import { vocabDetail } from "./todayPlan";
 
 interface DashboardHeaderProps {
   searchInputRef: RefObject<HTMLInputElement>;
@@ -19,6 +21,7 @@ interface DashboardHeaderProps {
   setFilterMode: (mode: FilterMode) => void;
   streakStats: ReturnType<typeof calculateStreakAndGoal>;
   dueCount: number;
+  todayWork?: TodayWork;
   libraryStats: LibraryStats;
   effectiveLevel: string;
   setGlobalToast: (toast: GlobalToastData | null) => void;
@@ -42,6 +45,7 @@ export default function DashboardHeader({
   setFilterMode,
   streakStats,
   dueCount,
+  todayWork,
   libraryStats,
   effectiveLevel,
   setGlobalToast,
@@ -257,9 +261,11 @@ export default function DashboardHeader({
             onClick={isReviewing ? () => setActiveTab("review") : onStartReview}
             title={
               isReviewing
-                ? "Quay lại buổi ôn đang làm dở"
+                ? "Quay lại buổi học đang làm dở"
                 : dueCount > 0
-                  ? `Ôn tập nhanh ${dueCount} từ đã đến hạn`
+                  ? todayWork
+                    ? `Học nhanh ${dueCount} thẻ (${vocabDetail(todayWork.reviews, todayWork.newToday)})`
+                    : `Học nhanh ${dueCount} thẻ`
                   : "Bắt đầu buổi ôn tập nhanh (Flashcards & Bài tập)"
             }
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"

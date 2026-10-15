@@ -3,10 +3,22 @@
  * word itself removed so the prompt never gives the answer away.
  */
 import { escapeRegExp } from "./smartReview";
+import { getExampleSenseMeaning, type ExampleSenseRef } from "@/utils/exerciseHints";
 
-export function getConciseMeaning(meaning: string, targetWord?: string): string {
+export { getExampleSenseMeaning, type ExampleSenseRef };
+
+export function getConciseMeaning(
+  meaning: string,
+  targetWord?: string,
+  example?: ExampleSenseRef | null
+): string {
   if (!meaning) return "";
   let text = meaning.trim();
+
+  // 0. Nếu có ví dụ (với sense_index hoặc sentence_vn) và từ có nhiều senses (;), lấy đúng sense ngữ cảnh
+  if (example && text.includes(";")) {
+    text = getExampleSenseMeaning(text, example);
+  }
 
   // 1. Kiểm tra cấu trúc: "Thuật ngữ (word): giải thích..." -> Lấy ngay phần "Thuật ngữ" đầu tiên
   const colonIdx = text.indexOf(":");

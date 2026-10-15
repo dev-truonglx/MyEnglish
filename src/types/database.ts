@@ -45,6 +45,8 @@ export interface WordExample {
   source?: string | null;
   /** JSON string[]: the form(s) of the word this sentence uses ("is" for "be"), from the deck */
   focus?: string | null;
+  /** Index in senses array of the sense this example illustrates (null for non-catalog or legacy) */
+  sense_index?: number | null;
 }
 
 export type FSRSState = 0 | 1 | 2 | 3; // 0: New, 1: Learning, 2: Review, 3: Relearning

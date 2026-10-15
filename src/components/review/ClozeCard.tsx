@@ -1,11 +1,11 @@
 import type { RefObject } from "react";
 import { Volume2, CheckCircle2, Eye, FileCode, HelpCircle, RotateCcw, AlertCircle, SkipForward } from "lucide-react";
-import type { ReviewCard } from "@/types/database";
+import type { ReviewCard, WordExample } from "@/types/database";
 import type { FeedbackMessage } from "@/hooks/useReviewSession";
 import RevealedWordContent from "./RevealedWordContent";
 import { highlightWord } from "./highlightWord";
 import { handleSpeak } from "./speech";
-import { maskTargetInMeaning } from "@/utils/exerciseHints";
+import { getExampleSenseMeaning, maskTargetInMeaning } from "@/utils/exerciseHints";
 
 interface ClozeCardProps {
   currentWord: ReviewCard;
@@ -27,6 +27,7 @@ interface ClozeCardProps {
   clozeDisplaySentence: string;
   /** The form of the word the blank needs ("deployed"), shown in hints and in the answer */
   answerForm: string;
+  clozeExample?: WordExample;
 }
 
 /** MODE 2: CLOZE DELETION (type the missing word into the context sentence) */
@@ -49,6 +50,7 @@ export default function ClozeCard({
   originalSentence,
   clozeDisplaySentence,
   answerForm,
+  clozeExample,
 }: ClozeCardProps) {
   // The length of the word is shown only after the learner asks for a hint
   const lengthRevealed = showHint || wrongAttempts >= 2;
@@ -80,7 +82,12 @@ export default function ClozeCard({
               {/* Vietnamese Meaning Hint */}
               <div className="pt-2.5 border-t border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 flex items-start gap-2">
                 <span className="text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">Nghĩa tiếng Việt:</span>
-                <span className="font-medium">{maskTargetInMeaning(currentWord.meaning_vn, currentWord.word)}</span>
+                <span className="font-medium">
+                  {maskTargetInMeaning(
+                    getExampleSenseMeaning(currentWord.meaning_vn, clozeExample),
+                    currentWord.word
+                  )}
+                </span>
               </div>
             </div>
 

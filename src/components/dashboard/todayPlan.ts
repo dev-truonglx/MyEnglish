@@ -62,7 +62,7 @@ export interface TodayTaskInput {
 
 export const GRAMMAR_TASK_MINUTES = 5;
 
-function vocabDetail(reviews: number, newToday: number): string {
+export function vocabDetail(reviews: number, newToday: number): string {
   if (reviews + newToday === 0) return "Đã xong phần từ hôm nay";
   return [reviews > 0 ? `${reviews} thẻ ôn` : "", newToday > 0 ? `${newToday} từ mới` : ""].filter(Boolean).join(" · ");
 }

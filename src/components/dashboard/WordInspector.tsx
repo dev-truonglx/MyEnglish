@@ -54,6 +54,21 @@ export default function WordInspector({
   const allWords = useWordsStore((s) => s.words);
   const inDeck = (term: string) => allWords.some((w) => w.word.trim().toLowerCase() === term.trim().toLowerCase());
 
+  const [catalogEntry, setCatalogEntry] = useState<CatalogEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!selectedWord?.catalog_id) {
+      setCatalogEntry(null);
+      return;
+    }
+    getCatalogEntries([selectedWord.catalog_id])
+      .then(([e]) => !cancelled && setCatalogEntry(e ?? null))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedWord?.catalog_id]);
+
   /** Related terms are not added automatically (that bypassed the daily new-word limit); the learner chooses */
   const addRelatedTerm = (term: string, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -615,13 +630,29 @@ export default function WordInspector({
             </div>
 
             <div className="space-y-3.5">
-              {selectedWord.examples.map((ex, idx) => (
-                <div
-                  key={ex.id || idx}
-                  className="rounded-2xl bg-slate-50 dark:bg-zinc-950 p-4 border border-slate-200 dark:border-zinc-800/90 space-y-3 shadow-sm"
-                >
-                  {/* English sentence with pronounce button */}
-                  <div className="flex items-start justify-between gap-2">
+              {selectedWord.examples.map((ex, idx) => {
+                const sense = (ex.sense_index != null && catalogEntry?.senses)
+                  ? catalogEntry.senses[ex.sense_index]
+                  : undefined;
+                return (
+                  <div
+                    key={ex.id || idx}
+                    className="rounded-2xl bg-slate-50 dark:bg-zinc-950 p-4 border border-slate-200 dark:border-zinc-800/90 space-y-3 shadow-sm"
+                  >
+                    {/* Sense tag if known */}
+                    {sense && (
+                      <div className="flex items-center gap-1.5 text-xs">
+                        <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50">
+                          {sense.pos}
+                        </span>
+                        <span className="text-slate-600 dark:text-zinc-300 font-medium">
+                          {sense.vn}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* English sentence with pronounce button */}
+                    <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2">
                       <span className="font-mono text-cyan-600 dark:text-cyan-400 font-bold text-xs shrink-0 mt-0.5">
                         #{idx + 1}
@@ -669,7 +700,8 @@ export default function WordInspector({
                     </div>
                   </div>
                 </div>
-              ))}
+              );
+            })}
             </div>
           </div>
         )}

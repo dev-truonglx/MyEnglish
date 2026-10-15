@@ -12,7 +12,7 @@ import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
 import { AI_VOCAB_ENABLED } from "@/services/features";
-import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords } from "@/services/vocabFeed";
+import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords, syncWordsWithCatalog } from "@/services/vocabFeed";
 import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
 import { ensureGrammarBookSeeded } from "@/services/grammarBook";
 import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
@@ -252,7 +252,9 @@ export default function MainDashboard({
       })
       .catch(() => {});
     // Not awaited here: the catalog readers below wait for the same (shared) seeding themselves
-    ensureCatalogSeeded().catch(() => {});
+    ensureCatalogSeeded()
+      .then(() => syncWordsWithCatalog().catch(() => {}))
+      .catch(() => {});
     ensureGrammarBookSeeded().catch(() => {});
   }, []);
 
@@ -1050,6 +1052,7 @@ export default function MainDashboard({
           setFilterMode={setFilterMode}
           streakStats={streakStats}
           dueCount={dueCount}
+          todayWork={todayWork}
           libraryStats={libraryStats}
           effectiveLevel={effectiveLevel}
           setGlobalToast={setGlobalToast}
@@ -1141,6 +1144,7 @@ export default function MainDashboard({
         {activeTab === "review" && !isReviewing && (
           <ReviewTab
             dueCount={dueCount}
+            todayWork={todayWork}
             comeback={comeback}
             libraryStats={libraryStats}
             availableTopics={availableTopics}

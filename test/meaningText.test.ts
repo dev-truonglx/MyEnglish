@@ -40,6 +40,31 @@ describe("getConciseMeaning", () => {
     const ai2 = "Từ này có nghĩa là bảng điều khiển trực quan";
     expect(getConciseMeaning(ai2, "dashboard")).toBe("Bảng điều khiển trực quan");
   });
+
+  it("resolves contextual concise meaning when example with sense_index is provided", () => {
+    const over = "ở trên, phía trên; qua, sang (phía bên kia); sang, ghé qua (chỗ ai)";
+    // Sense 0: lamp over the table
+    expect(getConciseMeaning(over, "over", { sentence_vn: "Có một chiếc đèn ở phía trên bàn.", sense_index: 0 }))
+      .toBe("Ở trên, phía trên");
+
+    // Sense 1: walked over the bridge
+    expect(getConciseMeaning(over, "over", { sentence_vn: "Chúng tôi đi qua cây cầu.", sense_index: 1 }))
+      .toBe("Qua, sang (phía bên kia)");
+
+    // Sense 2: Come over and sit with us
+    expect(getConciseMeaning(over, "over", { sentence_vn: "Hãy sang đây và ngồi cùng chúng tôi.", sense_index: 2 }))
+      .toBe("Sang, ghé qua (chỗ ai)");
+
+    // Clamp out-of-bounds sense_index to the last sense
+    expect(getConciseMeaning(over, "over", { sense_index: 99 }))
+      .toBe("Sang, ghé qua (chỗ ai)");
+  });
+
+  it("falls back to sentence_vn text matching when sense_index is missing", () => {
+    const light = "ánh sáng; nhẹ; châm (lửa)";
+    expect(getConciseMeaning(light, "light", { sentence_vn: "Cái túi này rất nhẹ." }))
+      .toBe("Nhẹ");
+  });
 });
 
 import { getPosLabel } from "@/components/FocusReviewModal";

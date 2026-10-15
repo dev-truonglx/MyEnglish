@@ -1,6 +1,8 @@
+import { useState, useEffect } from "react";
 import { Volume2, RotateCcw, Code2, BookOpen } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import { isLeech } from "@/services/smartReview";
+import { getCatalogEntries, type CatalogEntry } from "@/services/vocabCatalog";
 import { highlightWord } from "./highlightWord";
 import MnemonicPanel from "./MnemonicPanel";
 
@@ -20,6 +22,21 @@ export default function RevealedWordContent({
 }) {
   const hasExamples = Boolean(currentWord.examples && currentWord.examples.length > 0);
   const wordIsLeech = isLeech(currentWord.srs);
+
+  const [catalogEntry, setCatalogEntry] = useState<CatalogEntry | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!currentWord.catalog_id) {
+      setCatalogEntry(null);
+      return;
+    }
+    getCatalogEntries([currentWord.catalog_id])
+      .then(([e]) => !cancelled && setCatalogEntry(e ?? null))
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [currentWord.catalog_id]);
 
   return (
     <div
@@ -98,12 +115,26 @@ export default function RevealedWordContent({
 
         {hasExamples ? (
           <div className="space-y-3">
-            {currentWord.examples.map((ex, idx) => (
-              <div
-                key={idx}
-                className="rounded-2xl bg-slate-50 dark:bg-zinc-900/90 p-4 border border-slate-200 dark:border-zinc-800/80 space-y-2.5 shadow-2xs hover:border-cyan-500/40 transition-colors"
-              >
-                <div className="flex items-start justify-between gap-3">
+            {currentWord.examples.map((ex, idx) => {
+              const sense = (ex.sense_index != null && catalogEntry?.senses)
+                ? catalogEntry.senses[ex.sense_index]
+                : undefined;
+              return (
+                <div
+                  key={idx}
+                  className="rounded-2xl bg-slate-50 dark:bg-zinc-900/90 p-4 border border-slate-200 dark:border-zinc-800/80 space-y-2.5 shadow-2xs hover:border-cyan-500/40 transition-colors"
+                >
+                  {sense && (
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="px-2 py-0.5 rounded-md font-mono font-bold text-[10px] bg-purple-100 dark:bg-purple-950/70 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/50">
+                        {sense.pos}
+                      </span>
+                      <span className="text-slate-600 dark:text-zinc-300 font-medium">
+                        {sense.vn}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex items-start justify-between gap-3">
                   <p className="text-sm md:text-base font-semibold text-slate-900 dark:text-zinc-100 font-mono leading-relaxed">
                     "{highlightWord(ex.sentence_en, currentWord.word)}"
                   </p>
@@ -134,7 +165,8 @@ export default function RevealedWordContent({
                   </div>
                 )}
               </div>
-            ))}
+            );
+          })}
           </div>
         ) : (
           <div className="text-center py-12 text-slate-400 dark:text-zinc-500 space-y-2">

@@ -404,6 +404,7 @@ export default function FlashcardReview({
             originalSentence={originalSentence}
             clozeDisplaySentence={clozeDisplaySentence}
             answerForm={clozeAnswerForm}
+            clozeExample={clozeExample}
           />
         )}
 

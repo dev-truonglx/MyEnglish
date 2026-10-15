@@ -1198,13 +1198,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [settings.blurOverlay]);
 
-  // Từ vựng: Nghĩa tiếng Việt & ví dụ ẩn từ
+  // Từ vựng: Nghĩa tiếng Việt & ví dụ ẩn từ theo đúng ngữ cảnh câu ví dụ
+  const primaryExample = currentWord ? pickExample(currentWord) : undefined;
   const conciseMeaning = useMemo(() => {
     if (!currentWord) return "";
-    return getConciseMeaning(currentWord.meaning_vn, currentWord.word);
-  }, [currentWord]);
-
-  const primaryExample = currentWord ? pickExample(currentWord) : undefined;
+    return getConciseMeaning(currentWord.meaning_vn, currentWord.word, primaryExample);
+  }, [currentWord, primaryExample]);
   const maskedSentence = useMemo(() => {
     if (!primaryExample?.sentence_en || !currentWord?.word) return null;
     // Every form of the word is blanked (a second occurrence would reveal the answer)

@@ -2265,7 +2265,7 @@ pub fn run() {
             // Tauri creates a second icon automatically alongside this one.
             {
                 use tauri::menu::{MenuBuilder, MenuItemBuilder};
-                use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+                use tauri::tray::TrayIconBuilder;
 
                 let review_item = MenuItemBuilder::with_id("review_now", "Ôn ngay").build(app)?;
                 let show_item = MenuItemBuilder::with_id("show", "Mở Dashboard").build(app)?;
@@ -2291,9 +2291,7 @@ pub fn run() {
                 }
                 let _tray = tray_builder
                     .menu(&tray_menu)
-                    // Left click toggles the main window; the menu is on right click only
-                    // (with both, Windows shows the menu and toggles at once)
-                    .show_menu_on_left_click(false)
+                    .show_menu_on_left_click(true)
                     .tooltip("MyEnglish")
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => {
@@ -2323,30 +2321,6 @@ pub fn run() {
                             let _ = app.emit_to("main", TRAY_REMINDER_EVENT, serde_json::json!({ "action": id }));
                         }
                         _ => {}
-                    })
-                    .on_tray_icon_event(|tray, event| {
-                        if let TrayIconEvent::Click {
-                            button: MouseButton::Left,
-                            button_state: MouseButtonState::Up,
-                            ..
-                        } = event
-                        {
-                            let app = tray.app_handle();
-                            if let Some(rp) = app.get_webview_window("review-popup") {
-                                if rp.is_visible().unwrap_or(false) {
-                                    let _ = rp.hide();
-                                }
-                            }
-                            if let Some(w) = app.get_webview_window("main") {
-                                if w.is_visible().unwrap_or(false) {
-                                    let _ = w.hide();
-                                } else {
-                                    let _ = w.show();
-                                    let _ = w.unminimize();
-                                    let _ = w.set_focus();
-                                }
-                            }
-                        }
                     })
                     .build(app)?;
             }

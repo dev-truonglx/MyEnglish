@@ -37,6 +37,16 @@ describe("vocabulary deck (Oxford 5000, A1–C1)", () => {
     }
   });
 
+  it("every example has a valid senseIndex pointing to one of the word's senses", () => {
+    for (const w of words) {
+      for (const ex of w.examples) {
+        expect(typeof ex.senseIndex, `${w.word}: senseIndex defined`).toBe("number");
+        expect(ex.senseIndex, `${w.word}: senseIndex >= 0`).toBeGreaterThanOrEqual(0);
+        expect(ex.senseIndex, `${w.word}: senseIndex < senses.length`).toBeLessThan(w.senses.length);
+      }
+    }
+  });
+
   it("the cloze can blank the word in nearly every example (with the deck's forms and spellings)", () => {
     let total = 0;
     let blankable = 0;

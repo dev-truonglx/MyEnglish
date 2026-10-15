@@ -13,7 +13,7 @@ export const STUDY_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 export type StudyLevel = (typeof STUDY_LEVELS)[number];
 
 /** Must match `version` in vocabCatalog.json: a new version is copied into SQLite on the next launch */
-export const CATALOG_VERSION = 1;
+export const CATALOG_VERSION = 2;
 
 /** Words per level in the deck (checked against the JSON by a test) */
 export const CATALOG_LEVEL_COUNTS: Record<StudyLevel, number> = { A1: 911, A2: 808, B1: 697, B2: 1302, C1: 1286 };
@@ -23,6 +23,8 @@ export interface CatalogExample {
   vi: string;
   /** The form(s) of the word the sentence uses */
   focus: string[];
+  /** Index in senses array of the sense this example illustrates */
+  senseIndex: number;
 }
 
 export interface CatalogEntry {

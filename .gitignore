@@ -29,3 +29,7 @@ secrets/
 # Grammar book data converted from the user's own copy: personal use only, never commit or bundle
 json-data/
 scratch/swift-cache/
+
+__pycache__/
+*.pyc
+*.apkg

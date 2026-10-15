@@ -38,8 +38,7 @@ export default function ReverseClozeExercise({
   // the sense the example sentence uses, not always the first one; no distractor may share a sense with the word.
   const options = useMemo(() => {
     const others = allWords.filter((w) => !sharesSense(word.meaning_vn, w.meaning_vn));
-    const exampleVi = example?.sentence_vn?.trim() ?? "";
-    const sense = exampleVi ? cleanMeaningForOption(pickSenseForExample(word.meaning_vn, exampleVi)) : "";
+    const sense = example ? cleanMeaningForOption(pickSenseForExample(word.meaning_vn, example)) : "";
     return generateMultipleChoiceQuestion(word, others, "en_to_vn").options.map((o) => ({
       id: o.id,
       text: o.isCorrect && sense ? sense : o.text,

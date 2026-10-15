@@ -241,6 +241,38 @@ export async function syncWordsWithCatalog(): Promise<number> {
     );
   }
   const changed = updates.length;
+
+  // Backfill sense_index on existing catalog examples that don't have it yet
+  try {
+    const unindexed = await db.select<Array<{ id: string; word_id: string; sentence_en: string }>>(
+      `SELECT e.id, e.word_id, e.sentence_en FROM examples e
+       JOIN words w ON w.id = e.word_id
+       WHERE w.catalog_id IS NOT NULL AND e.sense_index IS NULL`
+    );
+    if (unindexed.length > 0) {
+      const wordIds = [...new Set(unindexed.map((u) => u.word_id))];
+      const catalogRows = await db.select<Array<{ word_id: string; catalog_id: string }>>(
+        `SELECT id as word_id, catalog_id FROM words WHERE id IN (${wordIds.map((_, i) => `$${i + 1}`).join(", ")})`,
+        wordIds
+      );
+      const catalogEntries = await getCatalogEntries(catalogRows.map((r) => r.catalog_id));
+      const entryByCatalogId = new Map(catalogEntries.map((e) => [e.id, e]));
+      const catalogIdByWordId = new Map(catalogRows.map((r) => [r.word_id, r.catalog_id]));
+
+      for (const exRow of unindexed) {
+        const catId = catalogIdByWordId.get(exRow.word_id);
+        const entry = catId ? entryByCatalogId.get(catId) : undefined;
+        if (!entry) continue;
+        const matchedEx = entry.examples.find((e) => e.en.trim() === exRow.sentence_en.trim());
+        if (matchedEx && matchedEx.senseIndex !== undefined) {
+          await db.execute(`UPDATE examples SET sense_index = $1 WHERE id = $2`, [matchedEx.senseIndex, exRow.id]);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn("Backfill sense_index notice:", err);
+  }
+
   await db.execute(
     `INSERT INTO vocab_catalog_meta (key, value) VALUES ($1, $2) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
     [WORDS_SYNCED_KEY, version]

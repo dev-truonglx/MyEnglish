@@ -5,7 +5,7 @@ import { logTerminal } from "./logger";
 import { INTRO_READY_MS, nextLocalDayStart } from "./cards";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 12;
+const SCHEMA_VERSION = 13;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -39,6 +39,7 @@ export const EXAMPLE_COLUMNS = [
   "grammar_analysis",
   "source",
   "focus",
+  "sense_index",
 ].join(", ");
 
 /** Columns selected for SRSReview records */
@@ -126,6 +127,8 @@ export async function initSchema(db: Database): Promise<void> {
       sentence_vn TEXT,
       grammar_analysis TEXT NOT NULL,
       source TEXT,
+      focus TEXT,
+      sense_index INTEGER,
       FOREIGN KEY (word_id) REFERENCES words(id) ON DELETE CASCADE
     );
   `);
@@ -640,6 +643,12 @@ async function runMigrations(db: Database): Promise<void> {
     await createGrammarBookTables(tryExec);
   }
 
+  await checkpoint(12);
+  if (version < 13) {
+    // Schema v13: Add sense_index to examples table so each example is directly mapped to its sense
+    await tryExec(`ALTER TABLE examples ADD COLUMN sense_index INTEGER;`);
+  }
+
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
   // steps are retried on the next launch (later blocks still run, so new columns always exist)
   if (version < SCHEMA_VERSION) {
@@ -1031,7 +1040,7 @@ export interface CatalogWordInput {
   cefr: string;
   variants: string[];
   forms: string[];
-  examples: Array<{ en: string; vi: string; focus: string[] }>;
+  examples: Array<{ en: string; vi: string; focus: string[]; senseIndex?: number }>;
   /** Also the recognition card's due date: new cards are introduced oldest first */
   createdAt: string;
 }
@@ -1103,16 +1112,16 @@ export async function insertCatalogWordsReport(
       created.push(item.catalogId);
       srsRows.push(real, item.createdAt);
       for (const ex of item.examples) {
-        exampleRows.push(crypto.randomUUID(), real, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus));
+        exampleRows.push(crypto.randomUUID(), real, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus), ex.senseIndex ?? 0);
       }
     }
     if (srsRows.length > 0) {
       await db.execute(`INSERT OR IGNORE INTO srs_reviews (word_id, next_review_date) VALUES ${values(srsRows, 2)}`, srsRows);
     }
-    for (let e = 0; e < exampleRows.length; e += 7 * 100) {
-      const chunk = exampleRows.slice(e, e + 7 * 100);
+    for (let e = 0; e < exampleRows.length; e += 8 * 100) {
+      const chunk = exampleRows.slice(e, e + 8 * 100);
       await db.execute(
-        `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source, focus) VALUES ${values(chunk, 7)}`,
+        `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source, focus, sense_index) VALUES ${values(chunk, 8)}`,
         chunk
       );
     }

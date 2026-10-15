@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { maskTargetInMeaning, pickSenseForExample, samePronunciation, sharesSense } from "@/utils/exerciseHints";
+import { getExampleSenseMeaning, maskTargetInMeaning, pickSenseForExample, samePronunciation, sharesSense } from "@/utils/exerciseHints";
 
 describe("pickSenseForExample (M5)", () => {
   it("picks the sense the Vietnamese example uses", () => {
     expect(pickSenseForExample("ánh sáng; nhẹ; châm (lửa)", "Cái túi này nhỏ và nhẹ.")).toBe("nhẹ");
+  });
+
+  it("uses sense_index when example object is provided", () => {
+    const over = "ở trên, phía trên; qua, sang (phía bên kia); sang, ghé qua (chỗ ai)";
+    expect(pickSenseForExample(over, { sense_index: 0 })).toBe("ở trên, phía trên");
+    expect(pickSenseForExample(over, { sense_index: 1 })).toBe("qua, sang");
+    expect(pickSenseForExample(over, { sense_index: 2 })).toBe("sang, ghé qua");
+    expect(pickSenseForExample(over, { sense_index: 99 })).toBe("sang, ghé qua");
   });
 
   it("falls back to the first sense when no sense occurs in the example", () => {
@@ -22,6 +30,15 @@ describe("pickSenseForExample (M5)", () => {
     // "đi" occurs inside "Điều" but is not a word there
     expect(pickSenseForExample("ăn; đi", "Điều này rất khó.")).toBe("ăn");
     expect(pickSenseForExample("Nhẹ; ánh sáng", "Cái túi này NHẸ.")).toBe("Nhẹ");
+  });
+});
+
+describe("getExampleSenseMeaning", () => {
+  it("extracts raw clause preserving parentheses for target sense", () => {
+    const over = "ở trên, phía trên; qua, sang (phía bên kia); sang, ghé qua (chỗ ai)";
+    expect(getExampleSenseMeaning(over, { sense_index: 2 })).toBe("sang, ghé qua (chỗ ai)");
+    expect(getExampleSenseMeaning(over, { sense_index: 1 })).toBe("qua, sang (phía bên kia)");
+    expect(getExampleSenseMeaning(over, { sense_index: 0 })).toBe("ở trên, phía trên");
   });
 });
 
