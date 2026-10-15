@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Keyboard, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import type { StudyLevel } from "@/services/vocabCatalog";
 import { defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import {
@@ -25,12 +25,6 @@ const LEVELS: Array<{ level: LevelChoice; label: string; hint: string }> = [
   { level: "B2", label: "Khá", hint: "Đọc docs mà ít phải tra từ" },
   { level: "C1", label: "Thành thạo", hint: "Đọc, viết, họp khá tự nhiên" },
 ];
-
-/** Shortcut for "add a word from anywhere": Cmd on macOS, Ctrl elsewhere */
-const ADD_WORD_KEYS =
-  typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
-    ? "⌘⇧E"
-    : "Ctrl+Shift+E";
 
 interface OnboardingFlowProps {
   /** startNow = open the first session right after the words are added */
@@ -313,12 +307,6 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
                   </p>
                 </div>
               )}
-            </div>
-            <div className="flex items-start gap-2.5 p-3 rounded-xl bg-slate-50 dark:bg-zinc-800/50 text-xs text-slate-600 dark:text-zinc-400">
-              <Keyboard className="w-4 h-4 shrink-0 text-slate-400" />
-              <span>
-                Gặp từ lạ khi làm việc? Nhấn <b>{ADD_WORD_KEYS}</b> và gõ từ đó: nếu có trong 5.000 từ Oxford, nó sẽ là từ mới tiếp theo bạn học.
-              </span>
             </div>
             {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex items-center justify-between pt-1">

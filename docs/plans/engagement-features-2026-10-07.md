@@ -9,7 +9,7 @@
 
 App đã có gần đủ cơ chế game hóa (streak có đóng băng, XP, huy hiệu, thử thách tuần, lời khen khi từ vào trí nhớ dài hạn,
 thống kê thói quen). Chỗ trống nằm ở: **ngày đầu tiên**, **gắn việc học với công việc thật**, **kỹ năng viết**, và **lúc user
-nghỉ vài ngày rồi quay lại**. Không làm: bảng xếp hạng (cần server), thêm huy hiệu theo số lượng, nhắc kiểu dọa dẫm.
+nghỉ vài ngày rồi quay lại**. Không làm: bảng xếp hạng (cần server; làm sau, xem `supabase-sync-leaderboard-2026-10-15.md`), thêm huy hiệu theo số lượng, nhắc kiểu dọa dẫm.
 
 ## Đã làm (theo thứ tự)
 

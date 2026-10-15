@@ -67,7 +67,7 @@ export function initTheme(): () => void {
 
   mediaQuery.addEventListener("change", handleSystemChange);
 
-  // Floating windows (nudge/popup/quick-input) live as long as the app: localStorage is shared
+  // Floating windows (nudge/popup) live as long as the app: localStorage is shared
   // across same-origin webviews, so follow theme changes made in the main window
   const handleStorage = (event: StorageEvent) => {
     if (event.key === THEME_STORAGE_KEY || event.key === null) applyTheme(getSavedTheme());

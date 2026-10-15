@@ -1,3 +1,4 @@
+import { RankPanel, useRankPanelVisible } from "./RankWidgets";
 import { useEffect, useMemo, useState } from "react";
 import { BookOpenText, Flame, Layers, Target } from "lucide-react";
 import type { WordDetail } from "@/types/database";
@@ -82,6 +83,7 @@ export default function TodayTab({
 }: TodayTabProps) {
   const now = fixedNow ?? new Date();
   const today = getLocalDateString(now);
+  const showRank = useRankPanelVisible();
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [pron, setPron] = useState<TodayTaskInput["pronunciation"]>(null);
   const [grammar, setGrammar] = useState<TodayTaskInput["grammar"]>(null);
@@ -184,7 +186,9 @@ export default function TodayTab({
 
   return (
     <div className={PAGE_CONTAINER}>
-      <div className="max-w-3xl mx-auto space-y-5">
+      {/* Two columns when the weekly race is shown: today on the left, the ranking on the right */}
+      <div className={showRank ? "mx-auto grid min-[1000px]:grid-cols-[minmax(0,1fr)_300px] gap-6 items-start" : "max-w-3xl mx-auto"}>
+      <div className={`min-w-0 max-w-3xl w-full space-y-5 ${showRank ? "" : "mx-auto"}`}>
         <div>
           <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{greeting(now.getHours())} 👋</h2>
           <p className="text-sm text-slate-500 dark:text-zinc-400">
@@ -234,7 +238,7 @@ export default function TodayTab({
         )}
 
         {/* Three numbers */}
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
           <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4">
             <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400">
               <Flame className="w-4 h-4 text-orange-500" /> Chuỗi ngày học
@@ -282,6 +286,13 @@ export default function TodayTab({
         <TodayRoadmapCard simple={simpleMode} milestone={milestone.show} onOpenPath={() => setActiveTab("capture")} />
 
         <WeeklySummaryCard simple={simpleMode} now={fixedNow} />
+      </div>
+
+      {showRank && (
+        <aside className="min-[1000px]:sticky min-[1000px]:top-0 min-w-0">
+          <RankPanel onNavigate={setActiveTab} />
+        </aside>
+      )}
       </div>
     </div>
   );

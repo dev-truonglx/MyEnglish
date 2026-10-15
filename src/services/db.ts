@@ -3,9 +3,10 @@ import type { Word, WordExample, SRSReview, CreateWordInput, WordDetail } from "
 import { initReviewLogsTable, registerWordForms } from "./smartReview";
 import { logTerminal } from "./logger";
 import { INTRO_READY_MS, nextLocalDayStart } from "./cards";
+import { WORD_KEY_SQL } from "./sync/keys";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 13;
+const SCHEMA_VERSION = 16;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -256,18 +257,25 @@ async function repairMissingSrsRows(db: Database): Promise<void> {
       INSERT INTO srs_reviews (word_id, next_review_date)
       SELECT id, created_at FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews);
     `);
-    await db.execute(`
-      UPDATE srs_reviews
-      SET last_review = (
-            SELECT timestamp FROM review_logs
-            WHERE word_id = srs_reviews.word_id AND exercise_type = 'intro'
-            ORDER BY timestamp DESC LIMIT 1
-          )
-      WHERE last_review IS NULL
-        AND word_id IN (
-          SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'intro'
-        );
-    `);
+    // One-time: the scan below reads review_logs by exercise_type, and ran in every window at every start
+    const introDone = await db.select<{ value: string }[]>(
+      `SELECT value FROM app_kv WHERE key = 'repair_intro_last_review_v1';`
+    );
+    if (introDone.length === 0) {
+      await db.execute(`
+        UPDATE srs_reviews
+        SET last_review = (
+              SELECT timestamp FROM review_logs
+              WHERE word_id = srs_reviews.word_id AND exercise_type = 'intro'
+              ORDER BY timestamp DESC LIMIT 1
+            )
+        WHERE last_review IS NULL
+          AND word_id IN (
+            SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'intro'
+          );
+      `);
+      await db.execute(`INSERT OR REPLACE INTO app_kv (key, value) VALUES ('repair_intro_last_review_v1', '1');`);
+    }
     // One-time fix for cards stuck by the old letter_tiles grading. Must not run on every window open:
     // it would also promote genuine Learning/Relearning cards (e.g. a fresh lapse) to Review +3 days.
     const done = await db.select<{ value: string }[]>(
@@ -649,6 +657,40 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`ALTER TABLE examples ADD COLUMN sense_index INTEGER;`);
   }
 
+  await checkpoint(13);
+  if (version < 14) {
+    // Schema v14: cloud sync. `words.updated_at` marks words whose own fields changed (suspended, content,
+    // moved up the queue) since cards carry their own last_review; `sync_state` keeps the sync cursors
+    // and this device's id (outside localStorage: it must survive a WebView data wipe)
+    await tryExec(`ALTER TABLE words ADD COLUMN updated_at TIMESTAMP;`);
+    await tryExec(`CREATE TABLE IF NOT EXISTS sync_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);`);
+  }
+
+  await checkpoint(14);
+  if (version < 15) {
+    // Schema v15: indexes for queries that scanned whole tables as the logs grow
+    await initReviewLogsTable(db);
+    // By exercise type: today's new cards ('intro' / 'known' lookups, every minute) and the intro repair
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_review_logs_type_time ON review_logs(exercise_type, timestamp, word_id);`);
+    // Covers the per-word answer stats of hydrateWords (no table rows read)
+    await tryExec(
+      `CREATE INDEX IF NOT EXISTS idx_review_logs_word_stats ON review_logs(word_id, exercise_type, is_scheduled, rating);`
+    );
+    // Sync change collection reads these by time without a type / state filter
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_learning_events_at ON learning_events(at);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_srs_reviews_last_review ON srs_reviews(last_review);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_srs_production_last_review ON srs_production(last_review);`);
+  }
+
+  await checkpoint(15);
+  if (version < 16) {
+    // Schema v16: deletions to sync (a deleted word must not come back from the account)
+    await tryExec(
+      `CREATE TABLE IF NOT EXISTS sync_tombstones (kind TEXT NOT NULL, key TEXT NOT NULL, at TEXT NOT NULL, PRIMARY KEY (kind, key));`
+    );
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_sync_tombstones_at ON sync_tombstones(at);`);
+  }
+
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
   // steps are retried on the next launch (later blocks still run, so new columns always exist)
   if (version < SCHEMA_VERSION) {
@@ -821,6 +863,9 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     );
   }
 
+  // Marks the word as changed for the cloud sync
+  await db.execute(`UPDATE words SET updated_at = $1 WHERE id = $2;`, [now, wordId]).catch(() => {});
+
   // CEFR level of the term (kept when a re-enrichment doesn't report one)
   if (input.cefr_level) {
     await db.execute(`UPDATE words SET cefr_level = $1 WHERE id = $2;`, [input.cefr_level, wordId]);
@@ -948,13 +993,23 @@ function defaultSrsFor(word: Word): SRSReview {
 /**
  * Attach examples and SRS rows to a list of words using 2 batched queries instead of 2 per word.
  */
-async function hydrateWords(db: Database, words: Word[], wordFilterSql: string, params: unknown[]): Promise<WordDetail[]> {
+async function hydrateWords(
+  db: Database,
+  words: Word[],
+  wordFilterSql: string,
+  params: unknown[],
+  { lite = false }: { lite?: boolean } = {}
+): Promise<WordDetail[]> {
   if (words.length === 0) return [];
   const [examples, srsRows, productionRows, logStats] = await Promise.all([
-    db.select<WordExample[]>(`SELECT ${EXAMPLE_COLUMNS} FROM examples WHERE word_id IN (${wordFilterSql});`, params),
+    lite
+      ? Promise.resolve([] as WordExample[])
+      : db.select<WordExample[]>(`SELECT ${EXAMPLE_COLUMNS} FROM examples WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${wordFilterSql});`, params),
     db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_production WHERE word_id IN (${wordFilterSql});`, params),
-    db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
+    lite
+      ? Promise.resolve([] as Array<{ word_id: string; total: number; correct: number; wrong: number }>)
+      : db.select<Array<{ word_id: string; total: number; correct: number; wrong: number }>>(
       // "known" rows (a word marked as already known) are no attempt, but show the word has a history.
       // Only answers that moved the schedule (or legacy rows) count: extra practice (is_scheduled = 0) and
       // recognition credited from a recall answer (2) are no attempt of their own (S18).
@@ -1143,6 +1198,23 @@ export async function getAllWords(): Promise<WordDetail[]> {
 }
 
 /**
+ * Words with both schedules but without examples and answer stats (`examples` is empty, `stats` comes from
+ * the schedule counters): for choosing cards, distractors, badge counts. Skips the two heavy parts of
+ * getAllWords (every example sentence, a GROUP BY over all review_logs).
+ * `studiedOnly`: only words with at least one answered card.
+ */
+export async function getWordsLite({ studiedOnly = false }: { studiedOnly?: boolean } = {}): Promise<WordDetail[]> {
+  const db = await getDatabase();
+  const filter = studiedOnly
+    ? `SELECT word_id FROM srs_reviews WHERE reps > 0 UNION SELECT word_id FROM srs_production WHERE reps > 0`
+    : `SELECT id FROM words`;
+  const words = await db.select<Word[]>(
+    `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${filter}) ORDER BY created_at DESC;`
+  );
+  return hydrateWords(db, words, filter, [], { lite: true });
+}
+
+/**
  * SQL form of cards.isDueSrs on a schedule table (alias): a Review card on a schedule of a day or more is due
  * for its whole due day (local time), any other card to the minute. `$1` = now, `$2` = start of the next
  * local day (ISO strings, as next_review_date is stored).
@@ -1277,6 +1349,20 @@ export async function countDueWords(now: Date = new Date()): Promise<number> {
  */
 export async function deleteWord(wordId: string): Promise<void> {
   const db = await getDatabase();
+  // Cloud sync: a tombstone, so the account (and other machines) drop the word instead of bringing it back
+  await db
+    .execute(
+      `INSERT INTO sync_tombstones (kind, key, at)
+       SELECT 'word', ${WORD_KEY_SQL}, $2 FROM words w WHERE w.id = $1
+       ON CONFLICT(kind, key) DO UPDATE SET at = excluded.at`,
+      [wordId, new Date().toISOString()]
+    )
+    .catch((err) => console.warn("Failed to record the deletion for sync:", err));
+  await deleteWordRows(db, wordId);
+}
+
+/** Removes a word and everything attached to it (no tombstone: also used when applying a synced deletion) */
+export async function deleteWordRows(db: Database, wordId: string): Promise<void> {
   // Delete the parent row first so a partial failure never leaves a word without its SRS row
   await db.execute(`DELETE FROM words WHERE id = $1;`, [wordId]);
   await db.execute(`DELETE FROM srs_reviews WHERE word_id = $1;`, [wordId]);
@@ -1291,5 +1377,5 @@ export async function deleteWord(wordId: string): Promise<void> {
 export async function updateWordTopic(wordId: string, topic: string): Promise<void> {
   const db = await getDatabase();
   const cleanTopic = topic.trim() || "General Tech";
-  await db.execute(`UPDATE words SET topic = $1 WHERE id = $2;`, [cleanTopic, wordId]);
+  await db.execute(`UPDATE words SET topic = $1, updated_at = $3 WHERE id = $2;`, [cleanTopic, wordId, new Date().toISOString()]);
 }

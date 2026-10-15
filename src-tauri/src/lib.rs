@@ -1,8 +1,6 @@
-use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 #[cfg(not(target_os = "macos"))]
 use tauri_plugin_notification::NotificationExt;
 
@@ -491,150 +489,8 @@ fn trigger_review_navigation(app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Most clipboard text the webview ever receives (quick input only uses short words).
-const CLIPBOARD_MAX_CHARS: usize = 500;
-
-/// Prefixes of common API keys, tokens and private keys.
-const SECRET_PREFIXES: &[&str] = &[
-    "sk-", "sk_", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "glpat-", "AKIA", "ASIA", "AIza", "xox", "eyJ",
-    "-----BEGIN",
-];
-
-/// Heuristic for clipboard content that must not be handed to the webview: a known key prefix,
-/// or a single long token (> 24 chars, no spaces) mixing letters with digits/symbols.
-fn looks_like_secret(text: &str) -> bool {
-    let t = text.trim();
-    if SECRET_PREFIXES.iter().any(|p| t.starts_with(p)) {
-        return true;
-    }
-    if t.chars().count() > 24 && !t.chars().any(char::is_whitespace) {
-        let has_letter = t.chars().any(|c| c.is_alphabetic());
-        // Hyphens, apostrophes and dots also appear in long ordinary words/compounds
-        let has_digit_or_symbol = t
-            .chars()
-            .any(|c| c.is_ascii_digit() || (c.is_ascii_punctuation() && !"-'.".contains(c)));
-        return has_letter && has_digit_or_symbol;
-    }
-    false
-}
-
-/// What of the clipboard may be sent to the webview: nothing for likely secrets, else at most
-/// CLIPBOARD_MAX_CHARS characters.
-fn clipboard_for_webview(text: &str) -> String {
-    if looks_like_secret(text) {
-        return String::new();
-    }
-    text.chars().take(CLIPBOARD_MAX_CHARS).collect()
-}
-
-static CLIPBOARD_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-/// Raw clipboard text. Blocking (spawns pbpaste, retries with sleeps): never call it on the main thread.
-fn read_clipboard_text() -> String {
-    let _guard = CLIPBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-
-    #[cfg(target_os = "macos")]
-    {
-        // On macOS, always use pbpaste (spawns a subprocess).
-        // Accessing NSPasteboard via arboard from background tokio worker threads is NOT thread-safe
-        // and crashes with EXC_BAD_ACCESS (SIGSEGV) in -[NSPasteboard _updateTypeCacheIfNeeded].
-        // Timeout: a pasteboard owned by a frozen app can hang pbpaste, and we hold CLIPBOARD_LOCK
-        for cmd in &["/usr/bin/pbpaste", "pbpaste"] {
-            if let Ok(output) =
-                output_with_timeout(std::process::Command::new(cmd), std::time::Duration::from_secs(2))
-            {
-                if output.status.success() {
-                    return String::from_utf8_lossy(&output.stdout).to_string();
-                }
-            }
-        }
-        String::new()
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        // Cross-platform clipboard via arboard (supports Windows, Linux)
-        for _ in 0..3 {
-            if let Ok(mut clipboard) = arboard::Clipboard::new() {
-                if let Ok(text) = clipboard.get_text() {
-                    return text;
-                }
-            }
-            std::thread::sleep(std::time::Duration::from_millis(30));
-        }
-
-        String::new()
-    }
-}
-
-/// Clipboard for the quick input window (capped, secrets withheld).
-#[tauri::command(async)]
-fn get_clipboard_text() -> String {
-    clipboard_for_webview(&read_clipboard_text())
-}
-
-/// Position quick-input on the monitor under the cursor, hand it the clipboard and show it.
-/// Shared by the toggle command and the global shortcut. Reads the clipboard (blocking), so it
-/// must run off the main thread; window calls are dispatched to the event loop by Tauri.
-fn show_quick_input(app: &AppHandle, window: &tauri::WebviewWindow) -> Result<(), String> {
-    // If review popup is active, hide it so quick-input is unobstructed
-    if let Some(rp) = app.get_webview_window("review-popup") {
-        if rp.is_visible().unwrap_or(false) {
-            let _ = rp.hide();
-        }
-    }
-    if let Some(monitor) = get_monitor_at_cursor(window) {
-        let m_pos = monitor.position();
-        let m_size = monitor.size();
-        if let Ok(w_size) = window.outer_size() {
-            // Clamp so a window wider/taller than the monitor never lands off-screen
-            let free_w = (m_size.width as i32 - w_size.width as i32).max(0);
-            let free_h = (m_size.height as i32 - w_size.height as i32).max(0);
-            let x = m_pos.x + free_w / 2;
-            let y = m_pos.y + free_h / 3;
-            let _ = window.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
-        }
-    }
-    // Capped and with likely secrets withheld (clipboard_for_webview)
-    let clipboard = get_clipboard_text();
-    let _ = window.emit("quick-input-opened", serde_json::json!({ "clipboard": clipboard }));
-    let _ = window.set_always_on_top(true);
-    let _ = window.unminimize();
-    window.show().map_err(|e| e.to_string())?;
-    window.set_focus().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Async so the blocking clipboard read in show_quick_input stays off the main thread.
-#[tauri::command(async)]
-fn toggle_quick_input(app: AppHandle) -> Result<bool, String> {
-    if let Some(window) = app.get_webview_window("quick-input") {
-        let is_visible = window.is_visible().map_err(|e| e.to_string())?;
-        if is_visible {
-            window.hide().map_err(|e| e.to_string())?;
-            Ok(false)
-        } else {
-            show_quick_input(&app, &window)?;
-            Ok(true)
-        }
-    } else {
-        Err("Quick input window not found".to_string())
-    }
-}
-
-#[tauri::command]
-fn hide_quick_input(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("quick-input") {
-        window.hide().map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
 #[tauri::command]
 fn show_main_window(app: AppHandle) -> Result<(), String> {
-    if let Some(qi) = app.get_webview_window("quick-input") {
-        let _ = qi.hide();
-    }
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         window.show().map_err(|e| e.to_string())?;
@@ -1797,25 +1653,6 @@ async fn generate_vocabulary_recommendations_ai(
 }
 
 #[tauri::command]
-fn submit_word(app: AppHandle, word: String) -> Result<String, String> {
-    let clean_word = word.trim().to_lowercase();
-    if clean_word.is_empty() {
-        return Err("Word cannot be empty".to_string());
-    }
-
-    // Emit event across windows for real-time background processing
-    app.emit("word-submitted", serde_json::json!({ "word": clean_word }))
-        .map_err(|e| e.to_string())?;
-
-    // Auto-hide the quick input window upon submission
-    if let Some(window) = app.get_webview_window("quick-input") {
-        let _ = window.hide();
-    }
-
-    Ok(clean_word)
-}
-
-#[tauri::command]
 async fn grade_sentence_ai(
     word: String,
     meaning_vn: String,
@@ -2221,28 +2058,6 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_autostart::Builder::new().build())
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(|app, _shortcut, event| {
-                    if event.state() == ShortcutState::Pressed {
-                        if let Some(window) = app.get_webview_window("quick-input") {
-                            if window.is_visible().unwrap_or(false) {
-                                let _ = window.hide();
-                            } else {
-                                // This handler runs on the main thread: pbpaste and the clipboard
-                                // retry loop (with sleeps) would freeze the UI, so show from a worker.
-                                let app = app.clone();
-                                std::thread::spawn(move || {
-                                    if let Err(e) = show_quick_input(&app, &window) {
-                                        eprintln!("[QuickInput] Failed to show: {}", e);
-                                    }
-                                });
-                            }
-                        }
-                    }
-                })
-                .build(),
-        )
         .setup(|app| {
             #[cfg(target_os = "macos")]
             {
@@ -2253,12 +2068,6 @@ pub fn run() {
                 let bundle = mac_notification_sys::get_bundle_identifier_or_default("MyEnglish");
                 let _ = mac_notification_sys::set_application(&bundle);
             }
-            if let Ok(shortcut) = Shortcut::from_str("CmdOrCtrl+Shift+E") {
-                if let Err(e) = app.global_shortcut().register(shortcut) {
-                    eprintln!("[GlobalShortcut] Warning: Failed to register CmdOrCtrl+Shift+E: {:?}", e);
-                }
-            }
-
             // ── System tray icon (all platforms) ─────────────────────────────
             // macOS: appears in menu bar (top). Windows/Linux: system tray.
             // Note: tauri.conf.json must NOT have a "trayIcon" section, otherwise
@@ -2337,14 +2146,10 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            toggle_quick_input,
-            hide_quick_input,
             show_main_window,
-            submit_word,
             enrich_word_with_gemini,
             generate_grammar_exercises_ai,
             generate_vocabulary_recommendations_ai,
-            get_clipboard_text,
             check_cli_status,
             send_desktop_notification,
             trigger_review_navigation,
@@ -2394,7 +2199,7 @@ pub fn run() {
                 // If an update is in progress, allow the process to die normally.
                 // Otherwise hide to tray so the app keeps running in background. Applies to every
                 // window: they are created once from tauri.conf.json, so a Cmd+W / Alt+F4 that really
-                // closed quick-input or the review popup would break them until the next launch.
+                // closed the review popup would break them until the next launch.
                 if !ALLOW_EXIT.load(Ordering::SeqCst) {
                     api.prevent_close();
                     if let Some(w) = app_handle.get_webview_window(&label) {
@@ -2724,28 +2529,6 @@ mod tests {
         assert!(prompt.contains("word_form"));
         assert!(prompt.contains("B1: "));
         assert!(prompt.len() < 1800, "{} chars", prompt.len());
-    }
-
-    #[test]
-    fn clipboard_secrets_are_withheld_and_text_is_capped() {
-        for secret in [
-            "sk-proj-abcdefghijklmnop",
-            "ghp_1234567890abcdefghijklmnopqrstuvwxyz",
-            "AKIAIOSFODNN7EXAMPLE",
-            "xoxb-123-456-abc",
-            "-----BEGIN OPENSSH PRIVATE KEY-----\nabc",
-            "a8Fk2LmQ9zX7pR4tV1nB6cY3wE5uJ0hD",
-            "  eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.sig  ",
-        ] {
-            assert!(looks_like_secret(secret), "{:?} should look like a secret", secret);
-            assert_eq!(clipboard_for_webview(secret), "");
-        }
-        for ok in ["deploy", "event loop", "state-of-the-art-engineering-practices", "The quick brown fox jumps over 2 lazy dogs"] {
-            assert!(!looks_like_secret(ok), "{:?} should be allowed", ok);
-            assert_eq!(clipboard_for_webview(ok), ok);
-        }
-        let long = "word ".repeat(300);
-        assert_eq!(clipboard_for_webview(&long).chars().count(), CLIPBOARD_MAX_CHARS);
     }
 
     #[test]

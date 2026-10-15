@@ -322,4 +322,3 @@ export async function requeuePendingWords(): Promise<number> {
   }
 }
 
-export { looksLikeSentence, stashPendingContext, takePendingContext } from "./contextHandover";

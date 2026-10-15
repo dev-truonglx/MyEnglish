@@ -262,7 +262,7 @@ describe("duoMotivation algorithm", () => {
       expect(res.ratingLabel).toBe("Good");
     });
 
-    it("rates slow correct answer as Hard", async () => {
+    it("rates a slow correct answer as Good (speed never lowers the grade)", async () => {
       const res = await evaluateMicroQuizAnswer({
         wordId: "w2",
         selectedChoiceId: "opt1",
@@ -271,8 +271,8 @@ describe("duoMotivation algorithm", () => {
         responseTimeMs: 16000,
       });
       expect(res.isCorrect).toBe(true);
-      expect(res.rating).toBe(Rating.Hard);
-      expect(res.ratingLabel).toBe("Hard");
+      expect(res.rating).toBe(Rating.Good);
+      expect(res.ratingLabel).toBe("Good");
     });
 
     it("rates incorrect answer as Again", async () => {

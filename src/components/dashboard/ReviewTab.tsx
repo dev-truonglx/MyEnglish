@@ -9,9 +9,6 @@ import { getUnmasteredWords, youngWordCap, type TodayWork } from "@/services/sma
 import { isSimpleMode } from "@/services/learnerProfile";
 import { vocabDetail } from "./todayPlan";
 
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-const ADD_WORD_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
-
 interface ReviewTabProps {
   dueCount: number;
   todayWork?: TodayWork;
@@ -266,7 +263,7 @@ export default function ReviewTab({
           <CheckCircle className="w-10 h-10 text-emerald-500 dark:text-emerald-400 mx-auto" />
           <h3 className="text-base font-bold text-slate-900 dark:text-white">Đã ôn hết các từ đang chờ!</h3>
           <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-sm mx-auto">
-            Bấm &quot;Luyện tất cả&quot; để ôn lại bất cứ lúc nào, hoặc thêm từ mới khi gặp từ lạ bằng {ADD_WORD_SHORTCUT}.
+            Bấm &quot;Luyện tất cả&quot; để ôn lại bất cứ lúc nào.
           </p>
         </div>
       )}

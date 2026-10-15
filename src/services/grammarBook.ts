@@ -1281,22 +1281,42 @@ export async function clearGrammarBook(): Promise<void> {
 
 let bookSeeding: Promise<void> | null = null;
 
+/** app_kv flag: this database has had a book (seeded or imported). Not a localStorage key (not mirrored). */
+const BOOK_SEEDED_KEY = "grammar_book_seeded_v1";
+
 /**
- * Seed all 31 chapters into SQLite from the bundled grammarCatalog.json if the database has 0 chapters.
+ * Seed all 31 chapters into SQLite from the bundled grammarCatalog.json, once per database: a book the
+ * learner cleared stays cleared (it used to be re-imported, 1.1 MB, at the next start).
+ * `reseed`: seed even if it was done before (app reset, release wipe), when the database has 0 chapters.
  * Safe to call concurrently: multiple calls share a single operation.
  */
-export function ensureGrammarBookSeeded(): Promise<void> {
-  bookSeeding ??= seedGrammarBook().finally(() => {
+export function ensureGrammarBookSeeded({ reseed = false }: { reseed?: boolean } = {}): Promise<void> {
+  bookSeeding ??= seedGrammarBook(reseed).finally(() => {
     bookSeeding = null;
   });
   return bookSeeding;
 }
 
-async function seedGrammarBook(): Promise<void> {
+async function markBookSeeded(db: BookDb): Promise<void> {
+  await db
+    .execute(`INSERT OR REPLACE INTO app_kv (key, value) VALUES ('${BOOK_SEEDED_KEY}', '1');`)
+    .catch(() => {});
+}
+
+async function seedGrammarBook(reseed: boolean): Promise<void> {
   try {
     const db = await bookDatabase();
     const rows = await db.select<Array<{ count: number }>>("SELECT count(*) as count FROM grammar_book_chapters;");
-    if (rows[0] && rows[0].count > 0) return;
+    if (rows[0] && rows[0].count > 0) {
+      await markBookSeeded(db);
+      return;
+    }
+    if (!reseed) {
+      const seeded = await db
+        .select<Array<{ value: string }>>(`SELECT value FROM app_kv WHERE key = '${BOOK_SEEDED_KEY}';`)
+        .catch(() => []);
+      if (seeded.length > 0) return;
+    }
 
     const catalog = await import("@/data/grammarCatalog.json").then(
       (m) => m.default as unknown as { version: number; files: GrammarBookFile[] }
@@ -1304,13 +1324,16 @@ async function seedGrammarBook(): Promise<void> {
     if (!catalog?.files || catalog.files.length === 0) return;
 
     const merged = mergeChapterParts(catalog.files);
+    let written = 0;
     for (const chapter of merged.values()) {
       try {
         await writeChapter(db, chapter, { mode: "replace" });
+        written++;
       } catch (err) {
         console.warn(`Failed to seed grammar chapter ${chapter.chapterId}:`, err);
       }
     }
+    if (written > 0) await markBookSeeded(db);
     notifyBookUpdated(Array.from(merged.keys()));
   } catch (err) {
     console.warn("Failed to seed grammar book:", err);

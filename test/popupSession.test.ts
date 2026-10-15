@@ -75,10 +75,10 @@ describe("#3 popup answers are graded like flashcards", () => {
   it.each([
     [false, "multiple_choice", 2000, false, Rating.Again],
     [true, "multiple_choice", 2000, false, Rating.Good],
-    [true, "multiple_choice", 16000, false, Rating.Hard],
+    [true, "multiple_choice", 16000, false, Rating.Good], // slow but right: still Good
     [true, "spelling", 5000, true, Rating.Hard],
     [true, "spelling", 5000, false, Rating.Good],
-    [true, "spelling", 21000, false, Rating.Hard],
+    [true, "spelling", 21000, false, Rating.Good],
   ] as const)("correct=%s %s %ims nearMiss=%s -> %i", (correct, type, ms, near, expected) => {
     expect(popupAnswerRating(correct, type, ms, near)).toBe(expected);
   });
@@ -118,39 +118,45 @@ describe("#6 ignored reminders back off", () => {
 });
 
 describe("#7 smart popup exercise mode ladder", () => {
-  it("gives letter_tiles to brand new words", () => {
-    const fresh = makeWord("fresh");
-    expect(selectSmartPopupMode(fresh)).toBe("letter_tiles");
-  });
+  const recall = (word: string, srs: Partial<import("@/types/database").SRSReview>, extra = {}) =>
+    toCard(
+      makeWord(word, { srs: reviewSrs(10, 2), srsProduction: { ...(srs as never), word_id: word }, ...extra }),
+      "production"
+    );
 
-  it("gives letter_tiles to Review words with only 1 rep or low stability (< 2 days)", () => {
-    const young = makeWord("young", { srs: reviewSrs(1, 1) });
-    expect(selectSmartPopupMode(young)).toBe("letter_tiles");
-  });
-
-  it("switches to typing for Learning (state 1) or Relearning (state 3) steps after the first rep so the card can graduate", () => {
-    const learningStep = makeWord("have to", {
+  it("asks recognition cards as multiple choice, whatever their state", () => {
+    expect(selectSmartPopupMode(toCard(makeWord("fresh"), "recognition"))).toBe("multiple_choice");
+    const learning = makeWord("have to", {
       srs: { state: 1, reps: 1, lapses: 0, stability: 1.29, difficulty: 5, next_review_date: new Date().toISOString() },
     });
-    expect(selectSmartPopupMode(learningStep)).toBe("typing");
+    expect(selectSmartPopupMode(toCard(learning, "recognition"))).toBe("multiple_choice");
+    expect(selectSmartPopupMode(toCard(makeWord("mature", { srs: reviewSrs(40, 3) }), "recognition"))).toBe(
+      "multiple_choice"
+    );
+  });
 
-    const relearningStep = makeWord("so", {
-      srs: { state: 3, reps: 4, lapses: 1, stability: 0.8, difficulty: 6, next_review_date: new Date().toISOString() },
+  it("recall cards: letter tiles while new or weak, typing once the memory has some strength", () => {
+    expect(selectSmartPopupMode(recall("fresh", { state: 0, reps: 0, next_review_date: new Date().toISOString() }))).toBe(
+      "letter_tiles"
+    );
+    expect(selectSmartPopupMode(recall("young", reviewSrs(1, 1)))).toBe("letter_tiles");
+    expect(selectSmartPopupMode(recall("mature", reviewSrs(5, 3)))).toBe("typing");
+    expect(selectSmartPopupMode(recall("leech", reviewSrs(1, 4, { lapses: 5 })))).toBe("letter_tiles");
+  });
+
+  it("a recall card failed at the tiles stage gets tiles again, not typing", () => {
+    const failedTiles = recall("so", {
+      state: 1, reps: 1, lapses: 0, stability: 0.21, difficulty: 7, next_review_date: new Date().toISOString(),
     });
-    expect(selectSmartPopupMode(relearningStep)).toBe("typing");
+    expect(selectSmartPopupMode(failedTiles)).toBe("letter_tiles");
+    // Relearning a word whose memory is still fairly strong: typing
+    const relearningStrong = recall("cache", {
+      state: 3, reps: 6, lapses: 1, stability: 3, difficulty: 6, next_review_date: new Date().toISOString(),
+    });
+    expect(selectSmartPopupMode(relearningStrong)).toBe("typing");
   });
 
-  it("gives typing recall to practiced words with stability >= 2 days and reps > 1", () => {
-    const mature = makeWord("mature", { srs: reviewSrs(5, 3) });
-    expect(selectSmartPopupMode(mature)).toBe("typing");
-  });
-
-  it("falls back to letter_tiles for Review leeches with low stability", () => {
-    const leech = makeWord("leech", { srs: reviewSrs(1, 4, { lapses: 5 }) });
-    expect(selectSmartPopupMode(leech)).toBe("letter_tiles");
-  });
-
-  it("graduates a new word from letter_tiles -> typing -> Review (state = 2) without getting stuck in Learning", async () => {
+  it("a Learning card answered Hard moves on and graduates instead of repeating its step", async () => {
     const { freshServices } = await import("./helpers");
     const { db, srs } = await freshServices();
     const id = await db.insertEnrichedWord({
@@ -161,23 +167,15 @@ describe("#7 smart popup exercise mode ladder", () => {
       examples: [],
     });
 
-    // Step 1: Brand new word in popup -> letter_tiles -> answered correctly on 1st try -> Rating.Good
-    let [word] = await db.getWordsByIds([id]);
-    expect(selectSmartPopupMode(word)).toBe("letter_tiles");
-    const r1 = popupAnswerRating(true, "letter_tiles", 3000, false);
-    expect(r1).toBe(Rating.Good);
-    const step1 = await srs.recordReview(id, r1, "recognition");
-    expect(step1.state).toBe(1); // Learning
+    // New word, multiple choice, right on the first try -> Good -> Learning (second step)
+    const step1 = await srs.recordReview(id, popupAnswerRating(true, "multiple_choice", 3000), "recognition");
+    expect(step1.state).toBe(1);
 
-    // Step 2: Learning step in popup -> typing -> answered correctly -> Rating.Good -> graduates to State.Review (2)
-    [word] = await db.getWordsByIds([id]);
-    expect(selectSmartPopupMode(word)).toBe("typing");
-    const r2 = popupAnswerRating(true, "spelling", 3000, false);
-    expect(r2).toBe(Rating.Good);
-    const step2 = await srs.recordReview(id, r2, "recognition");
-    expect(step2.state).toBe(2); // Graduated to Review!
-    expect(step2.stability).toBeGreaterThanOrEqual(2);
-    expect(step2.scheduled_days).toBeGreaterThanOrEqual(2);
+    // Next session: right but with the hint -> Hard. ts-fsrs alone would keep the card on the same step
+    // (back in a few minutes, i.e. practice), so it would never leave Learning.
+    const step2 = await srs.recordReview(id, popupAnswerRating(true, "spelling", 3000, false, false, true), "recognition");
+    expect(step2.state).toBe(2);
+    expect(step2.scheduled_days).toBeGreaterThanOrEqual(1);
   });
 
   it("auto-repairs cards previously trapped in State.Learning by old letter_tiles Hard loop on initSchema", async () => {

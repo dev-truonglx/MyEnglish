@@ -9,7 +9,12 @@ const stub = path.resolve(proj, "test/stubs/tauriApi.ts");
 export default defineConfig({
   root: __dirname,
   plugins: [react()],
-  define: { __APP_VERSION__: JSON.stringify("verify") },
+  define: {
+    __APP_VERSION__: JSON.stringify("verify"),
+    // A fake project: main.tsx answers its requests (?account, ?leaderboard), nothing leaves the browser
+    "import.meta.env.VITE_SUPABASE_URL": JSON.stringify("https://fake.supabase.co"),
+    "import.meta.env.VITE_SUPABASE_ANON_KEY": JSON.stringify("fake-anon-key"),
+  },
   css: { postcss: proj },
   resolve: {
     alias: {

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { AlertTriangle, RotateCcw, Loader2, CheckCircle2, X } from "lucide-react";
 import { resetAllAppData } from "@/services/appReset";
+import { useAuthStore } from "@/stores/authStore";
 
 interface ResetAppDataModalProps {
   isOpen: boolean;
@@ -13,6 +14,7 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
   const [resetStage, setResetStage] = useState<string>("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const signedIn = useAuthStore((state) => !!state.user);
 
   // Reset form states when modal opens/closes
   useEffect(() => {
@@ -123,6 +125,14 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
                 <strong>Trở về màn khảo sát ban đầu:</strong> Bạn sẽ được chọn lại trình độ hiện tại, thì tiếng Anh bắt đầu học (mặc định thì hiện tại đơn cho người mất gốc) và kế hoạch học mỗi ngày.
               </span>
             </li>
+            {signedIn && (
+              <li className="flex items-start gap-2">
+                <span className="text-rose-500 font-bold">•</span>
+                <span>
+                  <strong>Xóa luôn bản đồng bộ trên tài khoản:</strong> tiến trình, XP và vị trí trên bảng xếp hạng của tài khoản cũng bị xóa (nếu không, lần đồng bộ sau sẽ tải lại). Cần có mạng. Tài khoản đăng nhập vẫn được giữ.
+                </span>
+              </li>
+            )}
             <li className="flex items-start gap-2">
               <span className="text-slate-400 font-bold">•</span>
               <span>

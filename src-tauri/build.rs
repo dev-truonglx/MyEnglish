@@ -4,14 +4,10 @@
 /// grants them (capabilities/*.json). A command missing here is rejected at runtime, so keep this
 /// list in sync (the `build_rs_lists_every_registered_command` test checks it).
 const APP_COMMANDS: &[&str] = &[
-    "toggle_quick_input",
-    "hide_quick_input",
     "show_main_window",
-    "submit_word",
     "enrich_word_with_gemini",
     "generate_grammar_exercises_ai",
     "generate_vocabulary_recommendations_ai",
-    "get_clipboard_text",
     "check_cli_status",
     "send_desktop_notification",
     "trigger_review_navigation",

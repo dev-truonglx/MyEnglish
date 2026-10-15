@@ -39,7 +39,7 @@ import {
 } from "./vocabCatalog";
 
 const LEVELS_KEY = "myenglish_study_levels_v1";
-/** Deck words the learner pulled in themselves ("Học sớm", ⌘⇧E): kept when the levels change */
+/** Deck words the learner pulled in themselves ("Học sớm"): kept when the levels change */
 const PICKED_KEY = "myenglish_picked_words_v1";
 /** Unstudied words kept in `words` beyond the daily new-word budget */
 export const BUFFER_EXTRA = 5;
@@ -435,7 +435,7 @@ export async function learnEarly(entryId: string, now: Date = new Date()): Promi
   if (existing[0]) {
     const { id, reps, state } = existing[0];
     if ((reps ?? 0) > 0 || (state ?? 0) !== 0) return "studied";
-    await db.execute(`UPDATE words SET created_at = $1, suspended = 0 WHERE id = $2`, [at, id]);
+    await db.execute(`UPDATE words SET created_at = $1, suspended = 0, updated_at = $1 WHERE id = $2`, [at, id]);
     await db.execute(`UPDATE srs_reviews SET next_review_date = $1 WHERE word_id = $2`, [at, id]);
     rememberPicked(entryId);
     return "moved";
@@ -691,7 +691,7 @@ export async function nextWaitingWord(excludeIds: string[]): Promise<WordDetail 
 }
 
 /**
- * A word met outside the deck's order (Quick Input, reading a text, a related term): learnt early when
+ * A word met outside the deck's order (reading a text, a related term): learnt early when
  * the deck has it, with the sentence it was met in kept as its first example.
  */
 export async function pullWordFromDeck(

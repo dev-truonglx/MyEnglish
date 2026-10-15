@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useRef, useCallback, useDeferredValue, la
 import { listen } from "@tauri-apps/api/event";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
 import { Layers, X } from "lucide-react";
-import { takePendingContext, pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
+import { pipeline, requeuePendingWords, type PipelineItem } from "@/services/pipeline";
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { isPlaceholderMeaning } from "@/services/db";
@@ -12,7 +12,7 @@ import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
 import { AI_VOCAB_ENABLED } from "@/services/features";
-import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, pullMessage, pullWordFromDeck, topUpNewWords, syncWordsWithCatalog } from "@/services/vocabFeed";
+import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, topUpNewWords, syncWordsWithCatalog } from "@/services/vocabFeed";
 import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
 import { ensureGrammarBookSeeded } from "@/services/grammarBook";
 import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
@@ -47,6 +47,8 @@ const ReadingTab = lazy(() => import("./dashboard/ReadingTab"));
 const WritingTab = lazy(() => import("./dashboard/WritingTab"));
 const PronunciationTab = lazy(() => import("./dashboard/PronunciationTab"));
 const TodayTab = lazy(() => import("./dashboard/TodayTab"));
+const LeaderboardTab = lazy(() => import("./dashboard/LeaderboardTab"));
+const AccountTab = lazy(() => import("./dashboard/AccountTab"));
 const VocabTab = lazy(() => import("./dashboard/VocabTab"));
 const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
 const GrammarTenseSetupModal = lazy(() => import("./grammar/GrammarTenseSetupModal"));
@@ -75,6 +77,7 @@ import ReviewTab from "./dashboard/ReviewTab";
 import WordInspector from "./dashboard/WordInspector";
 import DeleteWordModal from "./dashboard/DeleteWordModal";
 import type { WordCardMeta } from "./dashboard/WordCard";
+import type { WordsChangedDetail } from "@/services/reviewRecorder";
 import {
   GALLERY_PAGE_SIZE,
   type DashboardTab,
@@ -96,12 +99,10 @@ const EMPTY_BUCKET_COUNTS: Record<ReviewTimeBucket, number> = {
 const EMPTY_CARD_META = new Map<string, WordCardMeta>();
 
 interface MainDashboardProps {
-  onOpenQuickInputPreview?: () => void;
   onOpenReviewPopupPreview?: () => void;
 }
 
 export default function MainDashboard({
-  onOpenQuickInputPreview,
   onOpenReviewPopupPreview,
 }: MainDashboardProps) {
   // The words store outlives this component: start every mount from a clean slate
@@ -112,6 +113,7 @@ export default function MainDashboard({
   const selectedWord = useWordsStore((s) => s.selectedWord);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
   const refreshWords = useWordsStore((s) => s.refreshWords);
+  const refreshWordsByIds = useWordsStore((s) => s.refreshWordsByIds);
 
   const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
@@ -311,15 +313,23 @@ export default function MainDashboard({
   const refreshDirtyRef = useRef(false);
   const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
-  const scheduleRefresh = () => {
+  // Words changed since the last refresh, when every change named its words (a review in the popup):
+  // only those are reloaded. null: something else changed, everything is reloaded.
+  const pendingIdsRef = useRef<Set<string> | null>(new Set());
+  const scheduleRefresh = (wordIds?: string[]) => {
     if (isReviewingRef.current && activeTabRef.current === "review") {
       refreshDirtyRef.current = true;
       return;
     }
+    if (!wordIds) pendingIdsRef.current = null;
+    else if (pendingIdsRef.current) for (const id of wordIds) pendingIdsRef.current.add(id);
     if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current);
     refreshTimerRef.current = setTimeout(() => {
       refreshTimerRef.current = null;
-      refreshWords();
+      const ids = pendingIdsRef.current;
+      pendingIdsRef.current = new Set();
+      if (ids && ids.size > 0) refreshWordsByIds([...ids]);
+      else if (!ids) refreshWords();
     }, 300);
   };
   useEffect(() => {
@@ -443,39 +453,7 @@ export default function MainDashboard({
       if (finished) scheduleRefresh();
     });
 
-    // Listen to real-time word submissions from Quick Input floating bar (Cmd+Shift+E)
     let isCancelled = false;
-    let unlistenFn: (() => void) | null = null;
-
-    listen<{ word: string }>("word-submitted", (event) => {
-      if (isCancelled) return;
-      const w = event.payload.word;
-      if (!AI_VOCAB_ENABLED) {
-        // The deck is the only source of words: a word typed in Quick Input is learnt early if it is in it
-        pullWordFromDeck(w, takePendingContext(w))
-          .then((r) => {
-            setMessage(pullMessage(r));
-            scheduleRefresh();
-          })
-          .catch(() => {});
-        return;
-      }
-      pipeline.enqueue(w, { context: takePendingContext(w) }).then((res) => {
-        setMessage(
-          res.accepted ? `Received "${w}" from Quick Input. Gemini AI is analyzing...` : `Không thể thêm "${w}": ${res.reason}`
-        );
-      });
-    })
-      .then((fn) => {
-        if (isCancelled) {
-          fn();
-        } else {
-          unlistenFn = fn;
-        }
-      })
-      .catch((err) => {
-        console.warn("Event listener not active in preview mode:", err);
-      });
 
     // Listen for automatic navigation to review tab triggered by notification click or window focus
     let unlistenReviewFn: (() => void) | null = null;
@@ -526,17 +504,21 @@ export default function MainDashboard({
 
     // Reviews recorded in the popup / other windows
     let unlistenWordsChangedFn: (() => void) | null = null;
-    const handleWordsChanged = () => {
-      if (!isCancelled) scheduleRefresh();
+    const handleWordsChanged = (e: Event) => {
+      if (!isCancelled) scheduleRefresh((e as CustomEvent<WordsChangedDetail | null>).detail?.wordIds);
     };
     window.addEventListener("words-changed", handleWordsChanged);
     const ownLabel = getInitialWindowLabel();
-    listen<{ source?: string } | null>("words-changed", (event) => {
+    listen<WordsChangedDetail | null>("words-changed", (event) => {
       if (isCancelled) return;
-      scheduleRefresh();
       // A change from another window (the popup): re-dispatch the DOM event, so the cards listening to it
-      // (Today roadmap, vocabulary tab, insights) reload too. This window's own changes already dispatched it.
-      if (event.payload?.source !== ownLabel) window.dispatchEvent(new CustomEvent("words-changed"));
+      // (Today roadmap, vocabulary tab, insights) reload too, and this window's list with them (the DOM
+      // listener above). This window's own changes already dispatched it.
+      if (event.payload?.source !== ownLabel) {
+        window.dispatchEvent(
+          new CustomEvent<WordsChangedDetail>("words-changed", { detail: { wordIds: event.payload?.wordIds } })
+        );
+      }
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -565,7 +547,6 @@ export default function MainDashboard({
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
       window.removeEventListener("focus", handleFocus);
       if (unlistenWordsChangedFn) unlistenWordsChangedFn();
-      if (unlistenFn) unlistenFn();
       if (unlistenReviewFn) unlistenReviewFn();
       if (unlistenNotifFn) unlistenNotifFn();
     };
@@ -1033,7 +1014,6 @@ export default function MainDashboard({
         dueCount={dueCount}
         streakStats={streakStats}
         libraryStats={libraryStats}
-        onOpenQuickInputPreview={onOpenQuickInputPreview}
         simpleMode={simpleMode}
       />
 
@@ -1180,6 +1160,12 @@ export default function MainDashboard({
             }}
           />
         )}
+
+        {/* LEADERBOARD: XP race (needs an account) */}
+        {activeTab === "leaderboard" && <LeaderboardTab onOpenSettings={() => handleSelectTab("account")} />}
+
+        {/* ACCOUNT: sign-in and sync */}
+        {activeTab === "account" && <AccountTab onOpenLeaderboard={() => handleSelectTab("leaderboard")} />}
 
         {/* PRONUNCIATION: final sounds, -s/-ed endings, th, stress, IT words */}
         {activeTab === "pronunciation" && <PronunciationTab resetKey={tabResetKey} />}

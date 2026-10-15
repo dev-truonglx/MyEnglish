@@ -33,6 +33,11 @@ import { setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
 import PlacementTest from "@/components/PlacementTest";
+import AccountSettings from "@/components/dashboard/AccountSettings";
+import LeaderboardTab from "@/components/dashboard/LeaderboardTab";
+import { useAuthStore } from "@/stores/authStore";
+import { RankPanel, RankLine, RankDelta } from "@/components/dashboard/RankWidgets";
+import { useStandingStore } from "@/stores/standingStore";
 import { calculateStreakAndGoal } from "@/services/streak";
 import GrammarHub from "@/components/grammar/GrammarHub";
 import { mergeChapterParts, saveGrammarBookChapter } from "@/services/grammarBook";
@@ -125,6 +130,17 @@ function Flash() {
   const [state, setState] = useState<{ session: any[]; all: any[] } | null>(null);
   React.useEffect(() => {
     (async () => {
+      // ?flash&newonly: a session of three new words and no reviews (a learner's first day)
+      if (new URLSearchParams(location.search).has("newonly")) {
+        const db = await getDatabase();
+        for (const [id, word, meaning] of [["w-cache", "cache", "Bộ nhớ đệm"], ["w-queue", "queue", "Hàng đợi"]]) {
+          await db.execute(
+            `INSERT OR REPLACE INTO words (id, word, part_of_speech, meaning_vn, synonyms, antonyms, topic, created_at) VALUES ($1,$2,'noun',$3,'[]','[]','DevOps',$4)`,
+            [id, word, meaning, iso(-5 * DAY)]
+          );
+        }
+        await db.execute(`UPDATE srs_reviews SET next_review_date = $1 WHERE word_id = 'w-deploy'`, [iso(5 * DAY)]);
+      }
       const due = await getDueWordsFromDb();
       const session = buildReviewSession(due, await getNewCardsIntroducedToday());
       setState({ session, all: await getAllWords() });
@@ -292,6 +308,10 @@ function Today() {
   }, []);
   React.useEffect(() => {
     (async () => {
+      if (q.has("signedin")) {
+        installFakeCloud(q);
+        await useAuthStore.getState().init();
+      }
       const db = await getDatabase();
       // localStorage outlives a reload (the database does not): start each scenario clean
       for (const k of ["myenglish_pronunciation_last_day_v1", "myenglish_remembered_milestone_v1", "myenglish_weekly_card_v1",
@@ -446,6 +466,7 @@ function App() {
   }, []);
   if (!ready) return <div>seeding…</div>;
   const q = new URLSearchParams(location.search);
+  if (q.has("account") || q.has("leaderboard") || q.has("rank")) return <Account />;
   if (q.has("weekly")) return <Weekly />;
   if (q.has("flash")) return <Flash />;
   if (q.has("insights")) return <Insights />;
@@ -491,6 +512,75 @@ function App() {
   }
   return q.has("nudge") ? <ReviewNudge onDone={() => ((window as any).__nudgeDone = true)} /> : <FocusReviewModal isPreview />;
 }
+/** Pre-seeds a stored session and answers fake.supabase.co requests (see Account) */
+function installFakeCloud(q: URLSearchParams) {
+  const me = { id: "u-me", email: "me@example.com" };
+    if (q.has("signedin") || q.has("leaderboard") || q.has("rank")) {
+      localStorage.setItem("sb-fake-auth-token", JSON.stringify({
+        access_token: "x", refresh_token: "y", token_type: "bearer", expires_in: 3600, expires_at: Math.floor(Date.now() / 1000) + 3600, user: { ...me, aud: "authenticated", app_metadata: {}, user_metadata: {} },
+      }));
+    }
+    const board = [
+      { rank: 1, display_name: "Linh", avatar: "fox-amber", xp: 1820, level: 9, streak: 21, is_me: false },
+      { rank: 2, display_name: "Minh", avatar: "owl-violet", xp: 1340, level: 8, streak: 5, is_me: false },
+      { rank: 3, display_name: "Hà", avatar: null, xp: 990, level: 7, streak: 12, is_me: false },
+      { rank: 4, display_name: "Bạn A", avatar: "rocket-indigo", xp: 410, level: 5, streak: 3, is_me: true },
+    ];
+    const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    const realFetch = window.fetch.bind(window);
+    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+      if (!url.startsWith("https://fake.supabase.co")) return realFetch(input, init);
+      // ?legacy: a project without migration 0006 (the app falls back to my_standing + leaderboard)
+      if (url.includes("/rpc/standing_board")) {
+        if (q.has("legacy")) {
+          return new Response(JSON.stringify({ code: "PGRST202", message: "Could not find the function public.standing_board(p_from, p_group, p_limit) in the schema cache" }), { status: 404, headers: { "content-type": "application/json" } });
+        }
+        const flags = (r: (typeof board)[number]) => ({ ...r, is_above: r.display_name === "Hà", is_below: false, total: 24 });
+        return json([...board.map(flags), { rank: 5, display_name: "Tú", avatar: null, xp: 120, level: 3, streak: 1, is_me: false, is_above: false, is_below: true, total: 24 }]);
+      }
+      if (url.includes("/rpc/my_standing")) return json([{ rank: 4, total: 24, xp: 410, above_name: "Hà", above_xp: 990, below_name: "Tú", below_xp: 120 }]);
+      if (url.includes("/rpc/leaderboard")) return json(q.has("empty") ? [] : board);
+      if (url.includes("/rpc/my_groups")) return json([{ id: "g1", name: "Team IT", invite_code: "3F9A12BC", member_count: 4, is_owner: true }]);
+      if (url.includes("/rest/v1/profiles")) return json({ display_name: "Bạn A", level: 5, streak: 3, avatar: "rocket-indigo" });
+      if (url.includes("/rpc/")) return json([]);
+      if (url.includes("/auth/v1/user")) return json({ ...me, aud: "authenticated" });
+      return json({});
+    };
+}
+
+/**
+ * ?account[&signedin] / ?leaderboard: the real account screens against a fake Supabase. Requests to
+ * fake.supabase.co are answered here (real supabase-js code runs); signedin pre-seeds a stored session.
+ */
+function Account() {
+  const q = new URLSearchParams(location.search);
+  const [ready, setReady] = useState(false);
+  React.useEffect(() => {
+    installFakeCloud(q);
+    useAuthStore.getState().init().then(async () => {
+      if (q.has("rank")) await useStandingStore.getState().refresh(true);
+      setReady(true);
+    });
+  }, []);
+  if (!ready) return <div>signing in…</div>;
+  if (q.has("rank")) {
+    useStandingStore.getState().captureBaseline();
+    return (
+      <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 p-6 max-w-xl mx-auto space-y-4">
+        <RankPanel onNavigate={() => {}} />
+        <div className="w-64"><RankLine onOpen={() => {}} /></div>
+        <RankDelta />
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-screen bg-slate-50 dark:bg-zinc-950 p-6 max-w-3xl mx-auto">
+      {q.has("leaderboard") ? <LeaderboardTab /> : <AccountSettings />}
+    </div>
+  );
+}
+
 // The app switches Tailwind's dark mode with a class: follow the (emulated) system theme
 if (window.matchMedia("(prefers-color-scheme: dark)").matches) document.documentElement.classList.add("dark");
 ReactDOM.createRoot(document.getElementById("root")!).render(<App />);

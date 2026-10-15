@@ -26,8 +26,9 @@ import {
   Bell,
   Hourglass,
   Clock,
+  Trophy,
+  UserRound,
 } from "lucide-react";
-import { invoke } from "@tauri-apps/api/core";
 import type { PipelineItem } from "@/services/pipeline";
 import type { calculateStreakAndGoal } from "@/services/streak";
 import { getSavedTheme, setTheme, type ThemeMode } from "@/services/theme";
@@ -46,11 +47,10 @@ import {
   triggerReviewPopup,
   type ReminderSettings,
 } from "@/services/reminderSettings";
+import { useAuthStore } from "@/stores/authStore";
+import { RankLine } from "./RankWidgets";
+import Avatar from "../Avatar";
 import { SIMPLE_NAV_GROUPS, type DashboardTab, type LibraryStats, type NavGroupId } from "./shared";
-
-/** The Quick Input shortcut as the learner's keyboard shows it */
-const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
-const QUICK_INPUT_SHORTCUT = IS_MAC ? "⌘⇧E" : "Ctrl+Shift+E";
 
 export function formatDisplayTime(ms: number): string {
   if (!ms || ms <= 0) return "Chưa có";
@@ -134,12 +134,11 @@ interface SidebarProps {
   dueCount: number;
   streakStats: ReturnType<typeof calculateStreakAndGoal>;
   libraryStats: LibraryStats;
-  onOpenQuickInputPreview?: () => void;
   /** Simple mode: five entries (Hôm nay · Từ vựng · Ngữ pháp · Luyện thêm · Cài đặt) instead of ten tabs */
   simpleMode?: boolean;
 }
 
-/** LEFT SIDEBAR: logo + update badge, navigation, learning stats, Quick Input & theme switcher */
+/** LEFT SIDEBAR: logo + update badge, navigation, learning stats, account & theme switcher */
 export default function Sidebar({
   activeTab,
   setActiveTab,
@@ -147,13 +146,16 @@ export default function Sidebar({
   dueCount,
   streakStats,
   libraryStats,
-  onOpenQuickInputPreview,
   simpleMode = false,
 }: SidebarProps) {
   const words = useWordsStore((s) => s.words);
   const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const [xpState, setXpState] = useState<XPState>(getXPState);
+  const accountUser = useAuthStore((s) => s.user);
+  const accountName = useAuthStore((s) => s.profile?.displayName);
+  const accountAvatar = useAuthStore((s) => s.profile?.avatar);
+  const syncStatus = useAuthStore((s) => s.sync.status);
 
   // Realtime Popup Reminder status & countdown
   const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(getReminderSettings);
@@ -292,6 +294,7 @@ export default function Sidebar({
         }
       : { tab: "capture", label: "Lộ trình từ vựng", icon: Layers, iconClass: "text-cyan-500" },
     { tab: "analytics", label: "Tiến độ", icon: BarChart3, iconClass: "text-emerald-400" },
+    { tab: "leaderboard", label: "Xếp hạng", icon: Trophy, iconClass: "text-amber-500" },
     { tab: "guide", label: "Cài đặt", icon: Terminal, iconClass: "text-cyan-500" },
   ];
 
@@ -302,10 +305,11 @@ export default function Sidebar({
     grammar: { icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     practice: { icon: Dumbbell, iconClass: "text-violet-500" },
     settings: { icon: Terminal, iconClass: "text-cyan-500" },
+    account: { icon: UserRound },
   };
   const visibleItems: Array<{ key: string; label: string; icon: typeof BookOpen; iconClass?: string; badge?: ReactNode; active: boolean; onClick: () => void }> =
     simpleMode
-      ? SIMPLE_NAV_GROUPS.map((g) => {
+      ? SIMPLE_NAV_GROUPS.filter((g) => g.id !== "account").map((g) => {
           const active = g.tabs.some((t) => t.tab === activeTab);
           return {
             key: g.id,
@@ -321,16 +325,6 @@ export default function Sidebar({
     streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
       ? "Đã ôn hết ✓"
       : `${streakStats.todayCount}/${streakStats.dailyGoal} câu`;
-
-  const handleToggleQuickInput = async () => {
-    try {
-      await invoke("toggle_quick_input");
-    } catch {
-      if (onOpenQuickInputPreview) {
-        onOpenQuickInputPreview();
-      }
-    }
-  };
 
   return (
     <aside className="w-64 min-h-0 border-r border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/50 flex flex-col shrink-0 select-none">
@@ -574,6 +568,9 @@ export default function Sidebar({
           </div>
         </button>
 
+        {/* Weekly XP rank: one line under the streak (signed-in learners) */}
+        <RankLine onOpen={() => setActiveTab("leaderboard")} />
+
         {/* Realtime Popup reminder status widget */}
         {(() => {
           const isReminderEnabled = reminderSettings.enabled && reminderSettings.intervalMinutes > 0;
@@ -696,17 +693,39 @@ export default function Sidebar({
         })()}
       </div>
 
-      {/* Quick Input & theme switcher (always visible) */}
+      {/* Account & theme switcher (always visible) */}
       <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 space-y-2 shrink-0">
+        {/* Account: its own entry, below the others (sign-in, sync, leaderboard) */}
         <button
-          onClick={handleToggleQuickInput}
-          title="Mở ô nhập nhanh: dùng được cả khi đang ở ứng dụng khác"
-          className="w-full flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/80 hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors text-left shadow-sm"
+          onClick={() => setActiveTab("account")}
+          aria-current={activeTab === "account" ? "page" : undefined}
+          title={accountUser ? `Đã đăng nhập: ${accountUser.email}` : "Đăng nhập để đồng bộ tiến trình và đua XP"}
+          className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border transition-colors text-left shadow-sm ${
+            activeTab === "account"
+              ? "bg-cyan-50 dark:bg-cyan-500/10 border-cyan-200 dark:border-cyan-500/20 text-cyan-700 dark:text-cyan-400"
+              : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/80 hover:bg-slate-100 dark:hover:bg-zinc-800/60 text-slate-800 dark:text-zinc-200"
+          }`}
         >
-          <span className="text-xs font-medium text-slate-800 dark:text-zinc-200 truncate">Quick Input</span>
-          <kbd className="shrink-0 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
-            {QUICK_INPUT_SHORTCUT}
-          </kbd>
+          <span className="flex items-center gap-2 min-w-0">
+            {accountUser ? (
+              <Avatar id={accountAvatar} name={accountName ?? accountUser.email} size="sm" />
+            ) : (
+              <UserRound className="w-4 h-4 shrink-0" />
+            )}
+            <span className="text-xs font-medium truncate">
+              {accountUser ? (accountName ?? accountUser.email) : "Tài khoản"}
+            </span>
+          </span>
+          {accountUser ? (
+            <span
+              className={`shrink-0 w-2 h-2 rounded-full ${
+                syncStatus === "error" ? "bg-rose-500" : syncStatus === "syncing" ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
+              }`}
+              title={syncStatus === "error" ? "Đồng bộ lỗi" : syncStatus === "syncing" ? "Đang đồng bộ" : "Đã đồng bộ"}
+            />
+          ) : (
+            <span className="shrink-0 text-[10px] font-semibold text-cyan-700 dark:text-cyan-300">Đăng nhập</span>
+          )}
         </button>
 
         {/* Theme Selector (segmented control) */}

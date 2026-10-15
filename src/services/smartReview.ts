@@ -17,6 +17,7 @@ import { getCardRetrievability, getStudyLimits } from "./srs";
 import { shuffle } from "@/lib/utils";
 import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs } from "./cards";
 import { persistKeyNow } from "./storageBackup";
+import { recordXpEarned, XP_DAILY_LOG_KEY, XP_TOTAL_KEY } from "./sync/xpLedger";
 import { COMMON_WORDS } from "@/data/commonWords";
 import { FULL_VERB_FORMS, IRREGULAR_PLURALS, IRREGULAR_VERB_FORMS } from "@/data/irregularForms";
 
@@ -729,20 +730,6 @@ function spreadLeeches(cards: ReviewCard[], settings: LeechSettings): ReviewCard
 
 // ─── 3b. RATING DERIVATION ─────────────────────────────────────────────────
 
-
-/** Correct answers slower than this (ms) are graded Hard, until the learner has enough history */
-const SLOW_RESPONSE_MS: Partial<Record<ExerciseType, number>> = {
-  multiple_choice: 15000,
-  context_match: 30000,
-  meaning_match: 45000,
-  sentence_builder: 40000,
-  reverse_cloze: 20000,
-  spelling: 20000,
-  cloze: 25000,
-  listening: 20000,
-  letter_tiles: 25000,
-};
-
 // ─── Free writing (AI-graded own sentence) ───────────────────────────────────
 
 const FREE_WRITING_KEY = "myenglish_free_writing_v1";
@@ -775,64 +762,6 @@ export function ratingFromSentenceGrade(g: { correct: boolean; score: number; us
   return Rating.Good;
 }
 
-/** A correct answer this many times slower than the learner's own typical time was a struggle */
-const SLOW_FACTOR = 2.5;
-/** Correct scheduled answers needed per exercise type before the personal threshold is used */
-const MIN_TIMING_SAMPLES = 20;
-
-/** Median time of the learner's correct, scheduled answers per exercise type (loaded from review_logs) */
-let typicalResponseMs: Partial<Record<ExerciseType, number>> = {};
-
-export function setTypicalResponseTimes(times: Partial<Record<ExerciseType, number>>): void {
-  typicalResponseMs = { ...times };
-}
-
-/**
- * Load the learner's median response time per exercise type from the last 200 correct scheduled answers
- * of each type. Called when a session starts; grading falls back to fixed thresholds without it.
- */
-export async function loadTypicalResponseTimes(): Promise<Partial<Record<ExerciseType, number>>> {
-  try {
-    const db = await getDatabase();
-    const rows = await db.select<Array<{ exercise_type: string; response_time_ms: number }>>(
-      `SELECT exercise_type, response_time_ms FROM (
-         SELECT exercise_type, response_time_ms,
-                ROW_NUMBER() OVER (PARTITION BY exercise_type ORDER BY timestamp DESC) AS rn
-         FROM review_logs
-         WHERE is_scheduled = 1 AND rating >= 3 AND response_time_ms > 0
-       ) WHERE rn <= 200`
-    );
-    const byType = new Map<string, number[]>();
-    for (const r of rows) {
-      const list = byType.get(r.exercise_type) ?? [];
-      list.push(r.response_time_ms);
-      byType.set(r.exercise_type, list);
-    }
-    const times: Partial<Record<ExerciseType, number>> = {};
-    for (const [type, list] of byType) {
-      if (list.length < MIN_TIMING_SAMPLES) continue;
-      list.sort((a, b) => a - b);
-      times[type as ExerciseType] = list[Math.floor(list.length / 2)];
-    }
-    setTypicalResponseTimes(times);
-    return times;
-  } catch {
-    return typicalResponseMs;
-  }
-}
-
-/**
- * "Too slow" threshold: 2.5x the learner's own median for this exercise when known (so slow readers and
- * typists are not punished), bounded to 60%–150% of the fixed default.
- */
-export function slowThresholdMs(exerciseType: ExerciseType): number | undefined {
-  const fallback = SLOW_RESPONSE_MS[exerciseType];
-  if (!fallback) return undefined;
-  const typical = typicalResponseMs[exerciseType];
-  if (!typical) return fallback;
-  return Math.min(fallback * 1.5, Math.max(fallback * 0.6, typical * SLOW_FACTOR));
-}
-
 export interface AnswerOutcome {
   exerciseType: ExerciseType;
   wrongAttempts: number;
@@ -848,8 +777,9 @@ export interface AnswerOutcome {
  * Map an exercise outcome to an FSRS grade following FSRS semantics:
  *  - any wrong attempt means the memory failed -> Again
  *  - picked a synonym of the target, hint, small typo -> Hard
- *  - correct on first try -> Good
- *  - a correct but very slow answer (relative to the learner's own speed) -> Hard
+ *  - correct on first try -> Good, however long it took: a slow but correct answer is still a recall,
+ *    and Hard raises difficulty for good (FSRS-6 only lowers it on Easy), so slow beginners would get
+ *    ever shorter intervals. Response time is only logged.
  *  - automatic grading never gives Easy (Easy stays a manual choice on recall flip cards).
  *    Speed-based Easy was tried twice: in simulation G,G,E,E schedules 19 -> 136 days against
  *    11 -> 46 for G,G,G,G, far beyond what a 2-second multiple-choice answer proves.
@@ -858,9 +788,6 @@ export function deriveRating(outcome: AnswerOutcome): Rating {
   // A wrong answer is a memory failure, even after a synonym was tried first
   if (outcome.wrongAttempts > 0) return Rating.Again;
   if (outcome.confusedWithSynonym || outcome.usedHint || outcome.nearMiss) return Rating.Hard;
-  // Response time only ever lowers the grade: a correct but very slow answer was a struggle.
-  const slowMs = slowThresholdMs(outcome.exerciseType);
-  if (slowMs && outcome.responseTimeMs > slowMs) return Rating.Hard;
   return Rating.Good;
 }
 
@@ -1156,8 +1083,8 @@ export async function getTodayReviewCount(): Promise<number> {
 
 // ─── 5. XP SYSTEM ───────────────────────────────────────────────────────────
 
-const XP_STORAGE_KEY = "myenglish_xp_v1";
-const XP_LOG_KEY = "myenglish_xp_log_v1";
+const XP_STORAGE_KEY = XP_TOTAL_KEY;
+const XP_LOG_KEY = XP_DAILY_LOG_KEY;
 
 export interface XPState {
   totalXP: number;
@@ -1341,6 +1268,8 @@ export function awardXP(amount: number): { previousLevel: number; newLevel: numb
     // Update daily log
     const logs: XPDailyLog = JSON.parse(localStorage.getItem(XP_LOG_KEY) || "{}");
     const today = getTodayStr();
+    // Cloud-sync ledger of what this device earned (created from the state before this award on first use)
+    recordXpEarned(today, amount, { total: previousState.totalXP, log: { ...logs } });
     logs[today] = (logs[today] || 0) + amount;
     localStorage.setItem(XP_LOG_KEY, JSON.stringify(logs));
     persistKeyNow(XP_STORAGE_KEY);
@@ -1458,9 +1387,10 @@ export const TYPING_STABILITY_DAYS = 7;
  *  - S 3–21d: multiple choice, listening (audio → meaning), reading in context
  *  - S >= 21d: listening, reading in context, matching
  * Production (produce the English word): a ladder, each step with less help
- *  - new / leech / S < 2d: letter tiles (build the word from shuffled letters, graded Hard at most)
- *  - learning / relearning: cloze, spelling without a usable sentence. Hard repeats a learning step, so a
- *    step passed only through letter tiles would never graduate
+ *  - new / leech / S < 2d: letter tiles (build the word from shuffled letters)
+ *  - learning / relearning with S < 2d (failed at the tiles stage, or a lapse that left a weak memory):
+ *    letter tiles again. A failure steps the ladder down, never up to typing a word that could not be built
+ *  - learning / relearning with S >= 2d: cloze, spelling without a usable sentence
  *  - S 2–7d: cloze (the sentence is a cue), spelling when the word has no usable sentence
  *  - S 7–21d: cloze and spelling in turn
  *  - S >= 21d: spelling from the meaning alone
@@ -1473,7 +1403,10 @@ export function selectExerciseType(card: WordDetail & { direction?: CardDirectio
   const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
 
   if ((card.direction ?? "recognition") === "production") {
-    if (state === 1 || state === 3) return hasExamples ? "cloze" : "spelling";
+    if (state === 1 || state === 3) {
+      if (stability < TILES_STABILITY_DAYS) return "letter_tiles";
+      return hasExamples ? "cloze" : "spelling";
+    }
     if (state === 0 || reps === 0 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) return "letter_tiles";
     if (stability < TYPING_STABILITY_DAYS) return hasExamples ? "cloze" : "spelling";
     if (stability < MATURE_STABILITY_DAYS) return hasExamples ? rotate<ExerciseType>(["cloze", "spelling"], reps) : "spelling";

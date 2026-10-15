@@ -23,6 +23,11 @@ function isBackedUpKey(key: string): boolean {
 /** Clear the in-memory cache of mirrored keys (used during full app data reset) */
 export function clearBackupCache(): void {
   lastBackedUp.clear();
+  pendingKeys.clear();
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
 }
 
 /** null when localStorage can't be read (never treat that as "every key was deleted") */
@@ -96,30 +101,69 @@ export async function backupLocalStorageToDb(): Promise<void> {
   for (const [key, value] of changed) lastBackedUp.set(key, value);
 }
 
+/** Keys waiting for flushPersistedKeys, and when they are written */
+const pendingKeys = new Set<string>();
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+const PERSIST_DELAY_MS = 1500;
+let flushOnHideInstalled = false;
+
 /**
- * Write one key to SQLite right away (fire-and-forget). Used for progress that must survive a crash
- * between periodic backups (XP, daily activity / streak). Any window may call it.
+ * Write one key to SQLite soon (fire-and-forget). Used for progress that must survive a crash between
+ * periodic backups (XP, daily activity / streak). Any window may call it. Writes are batched: grammar
+ * answers update several large maps per answer, and each used to be a full-value upsert of its own.
+ * Pending keys are also written when the window is hidden or closed.
  */
 export function persistKeyNow(key: string): void {
   if (!isBackedUpKey(key)) return;
-  let value: string | null = null;
-  try {
-    value = localStorage.getItem(key);
-  } catch {
-    return;
+  pendingKeys.add(key);
+  if (!flushOnHideInstalled && typeof document !== "undefined") {
+    flushOnHideInstalled = true;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") void flushPersistedKeys();
+    });
+    window.addEventListener("pagehide", () => void flushPersistedKeys());
   }
-  if (value === null || lastBackedUp.get(key) === value) return;
-  const v = value;
-  getDatabase()
-    .then((db) =>
-      db.execute(
-        `INSERT INTO app_kv (key, value, updated_at) VALUES ($1, $2, $3)
-         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`,
-        [key, v, new Date().toISOString()]
-      )
-    )
-    .then(() => lastBackedUp.set(key, v))
-    .catch(() => {});
+  if (flushTimer === null) flushTimer = setTimeout(() => void flushPersistedKeys(), PERSIST_DELAY_MS);
+}
+
+/** Write the keys queued by persistKeyNow, with their current localStorage values, in one statement. */
+export async function flushPersistedKeys(): Promise<void> {
+  if (flushTimer !== null) {
+    clearTimeout(flushTimer);
+    flushTimer = null;
+  }
+  if (pendingKeys.size === 0) return;
+  const keys = [...pendingKeys];
+  pendingKeys.clear();
+  const rows: Array<[string, string]> = [];
+  for (const key of keys) {
+    let value: string | null = null;
+    try {
+      value = localStorage.getItem(key);
+    } catch {
+      continue;
+    }
+    // Removed since (e.g. an app reset), or already written
+    if (value === null || lastBackedUp.get(key) === value) continue;
+    rows.push([key, value]);
+  }
+  if (rows.length === 0) return;
+  const now = new Date().toISOString();
+  const params: unknown[] = [];
+  const values = rows.map(([key, value], i) => {
+    params.push(key, value, now);
+    const o = i * 3;
+    return `($${o + 1}, $${o + 2}, $${o + 3})`;
+  });
+  try {
+    const db = await getDatabase();
+    await db.execute(
+      `INSERT INTO app_kv (key, value, updated_at) VALUES ${values.join(", ")}
+       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at;`,
+      params
+    );
+    for (const [key, value] of rows) lastBackedUp.set(key, value);
+  } catch {}
 }
 
 /** Run only in the main window after a successful restore (other windows share localStorage). */

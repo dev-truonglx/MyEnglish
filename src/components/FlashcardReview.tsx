@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
@@ -9,6 +10,7 @@ import ReverseClozeExercise from "./exercises/ReverseClozeExercise";
 import FreeWritingExercise from "./exercises/FreeWritingExercise";
 import { getUserOverrideLevel } from "@/services/userProficiency";
 import { useReviewSession } from "@/hooks/useReviewSession";
+import { useStandingStore } from "@/stores/standingStore";
 import { formInSentence, pickExample, wordFormsPattern } from "@/services/smartReview";
 import { handleSpeak } from "./review/speech";
 import SayAloudPrompt from "./review/SayAloudPrompt";
@@ -100,6 +102,11 @@ export default function FlashcardReview({
     celebration,
     lastPracticeReason,
   } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active });
+
+  // The rank before this session: the end screen shows what the session's XP changed
+  useEffect(() => {
+    useStandingStore.getState().captureBaseline();
+  }, []);
 
   // Hidden behind another tab: the exercises are unmounted so their window key listeners stop
   if (!active) return null;
@@ -231,7 +238,7 @@ export default function FlashcardReview({
           </div>
         ) : quizRightAfterIntro ? (
           <div className="mt-1 text-center text-[11px] text-cyan-700 dark:text-cyan-300">
-            Vừa xem từ này xong nên câu này chỉ để luyện — lần chấm điểm đầu tiên sẽ là lúc gặp lại sau khoảng 10 phút.
+            Vừa xem từ này xong nên câu này chỉ để luyện — từ sẽ được hỏi lại ở cuối phiên (hoặc lần ôn sau) để chấm điểm.
           </div>
         ) : !practiceMode && !exerciseCountsForSchedule ? (
           <div className="mt-1 text-center text-[11px] text-amber-700 dark:text-amber-300">

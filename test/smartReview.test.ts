@@ -50,10 +50,10 @@ describe("deriveRating", () => {
     expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, nearMiss: true })).toBe(Rating.Hard);
   });
 
-  it("never gives Easy automatically; very slow correct answers are Hard", () => {
+  it("never gives Easy automatically; slow correct answers stay Good", () => {
     expect(deriveRating({ ...base, exerciseType: "spelling", wrongAttempts: 0, srs: { state: 2 } })).toBe(Rating.Good);
-    expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 25000 })).toBe(Rating.Hard);
-    expect(deriveRating({ exerciseType: "multiple_choice", wrongAttempts: 0, responseTimeMs: 16000 })).toBe(Rating.Hard);
+    expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 25000 })).toBe(Rating.Good);
+    expect(deriveRating({ exerciseType: "multiple_choice", wrongAttempts: 0, responseTimeMs: 60000 })).toBe(Rating.Good);
   });
 });
 

@@ -128,25 +128,31 @@ describe("leeches recover (M2)", () => {
 });
 
 describe("letter tiles (M9)", () => {
-  it("grades Good on first try without hint, Hard with hint or slow response, and Again on wrong attempts", () => {
+  it("grades Good on first try without hint (however slow), Hard with hint, and Again on wrong attempts", () => {
     expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 2000 })).toBe(Rating.Good);
     expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, usedHint: true, responseTimeMs: 2000 })).toBe(Rating.Hard);
     expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, nearMiss: true, responseTimeMs: 2000 })).toBe(Rating.Hard);
-    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 30000 })).toBe(Rating.Hard);
+    expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 0, responseTimeMs: 30000 })).toBe(Rating.Good);
     expect(deriveRating({ exerciseType: "letter_tiles", wrongAttempts: 1, responseTimeMs: 2000 })).toBe(Rating.Again);
     expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 2000 })).toBe(Rating.Good);
   });
 
-  it("learning steps are typed (Hard would repeat the step forever)", () => {
-    const learning = makeWord("cache", {
+  it("a failure steps the ladder down: weak learning cards get tiles, stronger ones are typed", () => {
+    const weak = makeWord("cache", {
       examples: ex("cache"),
       srs: reviewSrs(10, 2),
       srsProduction: { word_id: "cache", ease_factor: 2.5, interval: 0, repetitions: 1, state: 1, reps: 1, stability: 1, next_review_date: new Date().toISOString() },
     });
+    expect(selectExerciseType(toCard(weak, "production"))).toBe("letter_tiles");
+    const learning = makeWord("cache", {
+      examples: ex("cache"),
+      srs: reviewSrs(10, 2),
+      srsProduction: { word_id: "cache", ease_factor: 2.5, interval: 0, repetitions: 1, state: 1, reps: 1, stability: 2.3, next_review_date: new Date().toISOString() },
+    });
     expect(selectExerciseType(toCard(learning, "production"))).toBe("cloze");
     const relearningNoSentence = makeWord("cache", {
       srs: reviewSrs(10, 2),
-      srsProduction: { word_id: "cache", ease_factor: 2.5, interval: 0, repetitions: 5, state: 3, reps: 5, stability: 1, next_review_date: new Date().toISOString() },
+      srsProduction: { word_id: "cache", ease_factor: 2.5, interval: 0, repetitions: 5, state: 3, reps: 5, stability: 3, next_review_date: new Date().toISOString() },
     });
     expect(selectExerciseType(toCard(relearningNoSentence, "production"))).toBe("spelling");
   });

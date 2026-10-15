@@ -10,8 +10,6 @@ import {
   prepareMeaningMatch,
   ratingFromSentenceGrade,
   selectExerciseType,
-  setTypicalResponseTimes,
-  slowThresholdMs,
   todayWorkFromCounts,
   splitNewCardBudget,
   calculateXPReward,
@@ -32,18 +30,6 @@ describe("grading never rewards speed with Easy", () => {
     expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, responseTimeMs: 900 })).toBe(Rating.Good);
     expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 1, responseTimeMs: 900 })).toBe(Rating.Again);
     expect(deriveRating({ exerciseType: "spelling", wrongAttempts: 0, confusedWithSynonym: true, responseTimeMs: 900 })).toBe(Rating.Hard);
-  });
-
-  it("uses the learner's own speed for 'too slow' within bounds", () => {
-    setTypicalResponseTimes({});
-    expect(slowThresholdMs("multiple_choice")).toBe(15000);
-    setTypicalResponseTimes({ multiple_choice: 8000 }); // slow reader: 2.5x = 20s
-    expect(slowThresholdMs("multiple_choice")).toBe(20000);
-    setTypicalResponseTimes({ multiple_choice: 1000 }); // very fast: bounded at 60% of the default
-    expect(slowThresholdMs("multiple_choice")).toBe(9000);
-    setTypicalResponseTimes({ multiple_choice: 60000 }); // bounded at 150%
-    expect(slowThresholdMs("multiple_choice")).toBe(22500);
-    setTypicalResponseTimes({});
   });
 
   it("maps an AI sentence grade to FSRS", () => {

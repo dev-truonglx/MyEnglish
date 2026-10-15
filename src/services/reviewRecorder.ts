@@ -182,15 +182,22 @@ async function creditRecognition(card: ReviewCard, exerciseType: ExerciseType, n
 
 export async function setWordSuspended(wordId: string, suspended: boolean): Promise<void> {
   const db = await getDatabase();
-  await db.execute(`UPDATE words SET suspended = $1 WHERE id = $2`, [suspended ? 1 : 0, wordId]);
+  await db.execute(`UPDATE words SET suspended = $1, updated_at = $3 WHERE id = $2`, [suspended ? 1 : 0, wordId, new Date().toISOString()]);
+}
+
+/** Payload of the "words-changed" event (Tauri) and `detail` of the DOM event */
+export interface WordsChangedDetail {
+  source?: string;
+  /** Only these words changed (a review, an introduction): listeners may reload just them. Absent: anything. */
+  wordIds?: string[];
 }
 
 /** Tells every window the words changed. `source`: the Tauri event also comes back to the window that sent it,
  *  which has already had the DOM event, so only other windows' changes are re-dispatched there. */
-export function notifyWordsChanged(): void {
-  emit("words-changed", { source: getInitialWindowLabel() }).catch(() => {});
+export function notifyWordsChanged(wordIds?: string[]): void {
+  emit("words-changed", { source: getInitialWindowLabel(), wordIds } satisfies WordsChangedDetail).catch(() => {});
   try {
-    window.dispatchEvent(new CustomEvent("words-changed"));
+    window.dispatchEvent(new CustomEvent<WordsChangedDetail>("words-changed", { detail: { wordIds } }));
   } catch {}
 }
 
@@ -283,7 +290,7 @@ export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnsw
     !!result && rating >= Rating.Hard && before?.retrievability != null && before.retrievability < RESCUE_RETRIEVABILITY;
 
   if (input.countsForDailyGoal && !gradedSince) recordDailyActivity(1);
-  if (result || implicit || suspended) notifyWordsChanged();
+  if (result || implicit || suspended) notifyWordsChanged([card.id]);
 
   return { result, xp, implicit, becameLeech, suspended, mastered, rescued, scheduled, practiceReason };
 }
@@ -314,7 +321,7 @@ export async function recordIntro(card: ReviewCard, now: Date = new Date()): Pro
     before: reviewLogBefore(card.srs, now),
   }).catch((err) => console.warn("Intro log save failed:", err));
 
-  notifyWordsChanged();
+  notifyWordsChanged([card.id]);
 }
 
 /** First check of a word marked "Đã biết": spread over this many days, by word id */
@@ -388,7 +395,7 @@ export async function markWordKnown(wordId: string, now: Date = new Date()): Pro
     before: before ? reviewLogBefore(before, now) : undefined,
   });
   await logLearningEvent("known", { wordId, direction: "recognition", at: now });
-  notifyWordsChanged();
+  notifyWordsChanged([wordId]);
   return true;
 }
 

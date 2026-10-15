@@ -11,7 +11,9 @@ export type DashboardTab =
   | "analytics"
   | "guide"
   | "grammar"
-  | "pronunciation";
+  | "pronunciation"
+  | "leaderboard"
+  | "account";
 export type FilterMode = "all" | "due" | "mastered" | "leech";
 export type ViewMode = "gallery" | "table";
 
@@ -35,11 +37,11 @@ export interface LibraryStats {
 }
 
 /**
- * Simple mode's sidebar: five entries instead of ten. An entry with several tabs opens its first tab, and
+ * Simple mode's sidebar: five entries (plus the account button at its bottom) instead of ten. An entry with several tabs opens its first tab, and
  * while one of its tabs is shown the header has a small bar to switch between them. Tab ids are unchanged
  * (other screens call setActiveTab("…")); every tab belongs to exactly one entry.
  */
-export type NavGroupId = "today" | "vocab" | "grammar" | "practice" | "settings";
+export type NavGroupId = "today" | "vocab" | "grammar" | "practice" | "settings" | "account";
 export interface NavGroup {
   id: NavGroupId;
   label: string;
@@ -52,6 +54,7 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
     tabs: [
       { tab: "today", label: "Hôm nay" },
       { tab: "analytics", label: "Tiến độ" },
+      { tab: "leaderboard", label: "Xếp hạng" },
     ],
   },
   {
@@ -74,6 +77,8 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
     ],
   },
   { id: "settings", label: "Cài đặt", tabs: [{ tab: "guide", label: "Cài đặt" }] },
+  // Not in the list of entries: the sidebar shows it at its bottom, next to the theme switcher
+  { id: "account", label: "Tài khoản", tabs: [{ tab: "account", label: "Tài khoản" }] },
 ];
 
 /** The simple-mode entry a tab belongs to */

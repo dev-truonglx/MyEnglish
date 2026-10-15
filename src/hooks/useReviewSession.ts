@@ -26,7 +26,6 @@ import {
   pickExample,
   prepareContextMatch,
   prepareMeaningMatch,
-  loadTypicalResponseTimes,
   freeWritingUsedToday,
   FREE_WRITING_PER_DAY,
   MATURE_STABILITY_DAYS,
@@ -169,6 +168,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
   const queueRef = useRef(queue);
   queueRef.current = queue;
   const requeueCountRef = useRef<Map<string, number>>(new Map());
+  // New cards asked once more at the end of the session because their quiz came too soon after the intro
+  const introRetryRef = useRef<Set<string>>(new Set());
   // Cards (word + direction) already recorded in FSRS this session: retries are practice only,
   // so one bad session can't drive difficulty to the maximum
   const scheduledThisSessionRef = useRef<Set<string>>(new Set());
@@ -306,11 +307,9 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
   const currentWord = queue[currentIndex];
   const currentKey = currentWord ? `${currentWord.id}:${currentWord.direction}` : "";
 
-  // Personal response-time thresholds for "slow -> Hard"
   // Introductions shown recently in any window (popup / earlier session): those words go straight to their quiz
   const [introsLoaded, setIntrosLoaded] = useState(false);
   useEffect(() => {
-    loadTypicalResponseTimes().catch(() => {});
     // Deck meanings: another deck word typed is not a typo, one with the same meaning is a synonym
     loadCatalogMeanings().catch(() => {});
     getRecentIntros()
@@ -389,8 +388,18 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
 
   /** The card is quizzed right after its introduction: the answer will be practice, graded next time */
   const introAt = currentKey ? introducedAtRef.current.get(currentKey) : undefined;
-  const quizRightAfterIntro =
-    !!currentWord && !isIntroCard && introAt !== undefined && isNewCard(currentWord) && Date.now() - introAt < INTRO_MIN_GAP_MS;
+  const introWaitMs =
+    !!currentWord && !isIntroCard && introAt !== undefined && isNewCard(currentWord)
+      ? INTRO_MIN_GAP_MS - (Date.now() - introAt)
+      : 0;
+  const quizRightAfterIntro = introWaitMs > 0;
+  // The note goes away once the gap has passed while the card is on screen: the answer is then graded
+  const [, setIntroGapPassed] = useState(0);
+  useEffect(() => {
+    if (introWaitMs <= 0) return;
+    const timer = setTimeout(() => setIntroGapPassed((n) => n + 1), introWaitMs + 50);
+    return () => clearTimeout(timer);
+  }, [currentKey, currentIndex, introWaitMs > 0]);
 
   /** Whether the current exercise can update this card's schedule (shown before answering) */
   const exerciseCountsForSchedule = !!currentWord && !practiceMode && isValidEvidence(effectiveExerciseType, currentWord.direction);
@@ -530,7 +539,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
     const attemptCount = attempts ?? wrongAttempts;
     const isFirstTry = attemptCount === 0 && !showHint;
     const cardKey = `${currentWord.id}:${currentWord.direction}`;
-    const isRequeuedCard = (requeueCountRef.current.get(currentWord.id) ?? 0) > 0;
+    const isRequeuedCard =
+      (requeueCountRef.current.get(currentWord.id) ?? 0) > 0 || introRetryRef.current.has(cardKey);
 
     // Only the first answer to a due card, through an exercise that tests this card's direction,
     // moves its schedule. Retries after Again, practice sessions and mismatched exercises are practice.
@@ -544,6 +554,13 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
 
     const firstAnswer = !answeredThisSessionRef.current.has(cardKey);
     answeredThisSessionRef.current.add(cardKey);
+    // Quizzed seconds after its introduction (practice): asked once more at the end of the session, a minute
+    // or more later, so a session of only new words still grades them. Pointless as the last card.
+    const retryIntro =
+      decision.reason === "intro_too_recent" &&
+      rating !== Rating.Again &&
+      !introRetryRef.current.has(cardKey) &&
+      currentIndex < queueRef.current.length - 1;
     let recorded: Awaited<ReturnType<typeof recordCardAnswer>>;
     try {
       recorded = await recordCardAnswer({
@@ -581,8 +598,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
       // The recorder may downgrade a scheduled answer to practice (card graded since the queue was built)
       const scheduled = recorded.scheduled;
       if (decision.scheduled) scheduledThisSessionRef.current.add(cardKey);
-      if (decision.reason === "intro_too_recent") {
-        // Asked seconds after its introduction: its first graded quiz waits for the next session
+      if (decision.reason === "intro_too_recent" && !retryIntro) {
+        // Asked seconds after its introduction and not asked again here: its first graded quiz waits
         postponeNewCard(currentWord.id, currentWord.direction).catch(() => {});
       }
       setLastPracticeReason(scheduled ? null : recorded.practiceReason ?? decision.reason ?? null);
@@ -645,6 +662,11 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
         const insertAt = requeuePosition(prev.length, index, REQUEUE_GAP);
         return [...prev.slice(0, insertAt), updatedWord, ...prev.slice(insertAt)];
       });
+      nextQueueLength += 1;
+    } else if (retryIntro) {
+      introRetryRef.current.add(cardKey);
+      const card = currentWord;
+      setQueue((prev) => [...prev, card]);
       nextQueueLength += 1;
     }
     return { nextQueueLength, reviewCountAfter: reviewCount + 1 };
@@ -785,7 +807,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
       });
       handleSpeak(currentWord.word);
 
-      // FSRS grade: any wrong attempt = Again, hint / typo / very slow = Hard, otherwise Good
+      // FSRS grade: any wrong attempt = Again, hint / typo = Hard, otherwise Good
       const rating = deriveRating({
         exerciseType: effectiveExerciseType,
         wrongAttempts,

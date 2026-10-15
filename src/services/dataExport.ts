@@ -6,6 +6,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "./db";
 import { backupLocalStorageToDb } from "./storageBackup";
+import { resetPushCursors } from "./sync/state";
 
 const EXPORT_TABLES = [
   "words",
@@ -239,5 +240,7 @@ export async function importBackup(backup: BackupFile): Promise<ImportReport> {
     }
     report.inserted[table] = count;
   }
+  // Rows from a backup are older than the cloud sync's cursors: have the next pass send them
+  await resetPushCursors().catch(() => {});
   return report;
 }

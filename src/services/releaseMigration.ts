@@ -108,7 +108,7 @@ async function runReleaseMigrationV27(): Promise<boolean> {
 
     // 5. Re-import all catalog data freshly
     await ensureCatalogSeeded().catch((err) => console.warn("[ReleaseMigration] Failed to seed vocab catalog:", err));
-    await ensureGrammarBookSeeded().catch((err) => console.warn("[ReleaseMigration] Failed to seed grammar catalog:", err));
+    await ensureGrammarBookSeeded({ reseed: true }).catch((err) => console.warn("[ReleaseMigration] Failed to seed grammar catalog:", err));
 
     // 6. Record release wipe completion flag
     if (typeof localStorage !== "undefined") {

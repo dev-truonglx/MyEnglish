@@ -2,14 +2,13 @@ import { useEffect, useState, lazy, Suspense } from "react";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
 import { applyUiScale } from "@/services/learnerProfile";
 import ErrorBoundary from "@/components/ErrorBoundary";
-// Each window (main, quick-input, review-popup) loads only the code it renders
-const QuickInput = lazy(() => import("@/components/QuickInput"));
+// Each window (main, review-popup, review-nudge) loads only the code it renders
 const MainDashboard = lazy(() => import("@/components/MainDashboard"));
 const FocusReviewModal = lazy(() => import("@/components/FocusReviewModal"));
 const ReviewNudge = lazy(() => import("@/components/ReviewNudge"));
 
 /** Floating windows rendered over other apps on a transparent background */
-const TRANSPARENT_WINDOWS = ["review-popup", "quick-input", "review-nudge"];
+const TRANSPARENT_WINDOWS = ["review-popup", "review-nudge"];
 import { useUpdateStore } from "@/services/updateService";
 import { syncAutostartWithSystem } from "@/services/autostartService";
 
@@ -41,6 +40,27 @@ export default function App() {
     return () => window.clearInterval(timer);
   }, [checkForUpdates, windowLabel]);
 
+  // Account (Supabase): restore the session and keep the progress in step with it. Main window only: it is
+  // the one that runs sync, and the floating windows share the same database.
+  useEffect(() => {
+    if (windowLabel !== "main") return;
+    let stops: Array<() => void> = [];
+    let cancelled = false;
+    (async () => {
+      const [{ useAuthStore }, { startSyncScheduler }, { startStanding }] = await Promise.all([
+        import("@/stores/authStore"),
+        import("@/services/sync/manager"),
+        import("@/stores/standingStore"),
+      ]);
+      await useAuthStore.getState().init();
+      if (!cancelled) stops = [startSyncScheduler(), startStanding()];
+    })().catch((err) => console.warn("Account init failed:", err));
+    return () => {
+      cancelled = true;
+      stops.forEach((stop) => stop());
+    };
+  }, [windowLabel]);
+
   useEffect(() => {
     // Fallback sync in case window label is resolved late
     const label = getInitialWindowLabel();
@@ -62,35 +82,6 @@ export default function App() {
       document.body.classList.remove("transparent-window");
     }
   }, [windowLabel]);
-
-  // When inside the Quick Input floating window
-  if (windowLabel === "quick-input") {
-    return (
-      <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
-      <div className="w-screen h-screen overflow-hidden flex items-center justify-center bg-transparent">
-        <Suspense fallback={null}>
-        <QuickInput
-          onSubmitted={() => {
-            if (!("__TAURI_INTERNALS__" in window)) {
-              setTimeout(() => setWindowLabel("main"), 1200);
-            }
-          }}
-          onOpenDashboard={() => {
-            if (!("__TAURI_INTERNALS__" in window)) {
-              setWindowLabel("main");
-            }
-          }}
-          onDismiss={() => {
-            if (!("__TAURI_INTERNALS__" in window)) {
-              setWindowLabel("main");
-            }
-          }}
-        />
-        </Suspense>
-      </div>
-      </ErrorBoundary>
-    );
-  }
 
   // When inside the corner reminder window
   if (windowLabel === "review-nudge") {
@@ -131,7 +122,6 @@ export default function App() {
     <ErrorBoundary key={windowLabel} windowLabel={windowLabel}>
       <Suspense fallback={null}>
         <MainDashboard
-          onOpenQuickInputPreview={() => setWindowLabel("quick-input")}
           onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
         />
       </Suspense>

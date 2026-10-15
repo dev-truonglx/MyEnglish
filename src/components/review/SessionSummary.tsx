@@ -7,6 +7,7 @@ import type { SessionStats } from "@/hooks/useReviewSession";
 import { loadWorkloadForecast } from "@/services/progress";
 import { minutesFor } from "@/services/comeback";
 import { isSimpleMode } from "@/services/learnerProfile";
+import { RankDelta } from "../dashboard/RankWidgets";
 
 interface SessionSummaryProps {
   wordsToReview: Array<WordDetail | ReviewCard>;
@@ -145,6 +146,8 @@ export default function SessionSummary({
           </div>
         </div>
       </div>
+
+      <RankDelta />
 
       {!simple && lastResult && (
         <div className="w-full p-3 rounded-xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-200 dark:border-zinc-800 text-xs text-slate-600 dark:text-zinc-400 flex flex-wrap justify-between gap-2 font-mono">

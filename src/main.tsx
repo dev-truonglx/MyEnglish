@@ -18,7 +18,7 @@ async function bootstrap() {
   if ("__TAURI_INTERNALS__" in window) {
     try {
       if (getInitialWindowLabel() === "main") {
-        // Main window only: loaded on demand so the other windows (popup, nudge, quick input) don't pull the
+        // Main window only: loaded on demand so the other windows (popup, nudge) don't pull the
         // migration's services (grammar book, catalog, db, smart review) into their startup
         const { ensureReleaseMigrationV27 } = await import("./services/releaseMigration");
         await ensureReleaseMigrationV27();

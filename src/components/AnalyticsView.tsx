@@ -35,6 +35,7 @@ import Heatmap from "./Heatmap";
 import { PAGE_CONTAINER } from "./dashboard/shared";
 import ProficiencyAssessmentCard from "./ProficiencyAssessmentCard";
 import WeeklyProgressCard from "./WeeklyProgressCard";
+import WeeklyRankBadge from "./dashboard/WeeklyRankBadge";
 import { setWordSuspended } from "@/services/reviewRecorder";
 import { pipeline } from "@/services/pipeline";
 import LearningInsightsCard from "./LearningInsightsCard";
@@ -191,6 +192,7 @@ export default function AnalyticsView({
             <p className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
               {xpState.totalXP.toLocaleString()} XP ({xpState.todayXP} XP hôm nay)
             </p>
+            <WeeklyRankBadge />
           </div>
         </div>
       </div>

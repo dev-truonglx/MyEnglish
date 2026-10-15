@@ -280,6 +280,50 @@ export async function saveLessonProgress(progress: GrammarProgress): Promise<voi
   window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
 }
 
+/** The time a lesson's progress last changed: its last attempt or schedule update, whichever is later */
+export function grammarProgressTime(p: Pick<GrammarProgress, "lastAttemptDate" | "lastReview">): string | undefined {
+  return [p.lastAttemptDate, p.lastReview].filter((d): d is string => !!d).sort().pop();
+}
+
+/** Whether `incoming` is further along than `current`: more reviews, or the same number and a later change */
+export function grammarProgressIsAhead(incoming: GrammarProgress, current: GrammarProgress): boolean {
+  if ((incoming.reps ?? 0) !== (current.reps ?? 0)) return (incoming.reps ?? 0) > (current.reps ?? 0);
+  return isNewerDate(grammarProgressTime(incoming), grammarProgressTime(current));
+}
+
+/**
+ * Progress received from the account (cloud sync): a lesson's entry replaces the local one only when it is
+ * further along (more reviews, then a later change), and the once-only first-try bonus flag is never lost. Returns how many lessons changed.
+ */
+export async function applySyncedGrammarProgress(entries: GrammarProgress[]): Promise<number> {
+  if (entries.length === 0) return 0;
+  await initGrammarStorage().catch(() => {});
+  refreshFromLocalStorage();
+  const db = await getDatabase();
+  let changed = 0;
+  for (const incoming of entries) {
+    const current = progressCache[incoming.lessonId];
+    const bonus = !!incoming.firstTryBonusAwarded || !!current?.firstTryBonusAwarded;
+    if (current && !grammarProgressIsAhead(incoming, current)) {
+      if (bonus && !current.firstTryBonusAwarded) {
+        progressCache[incoming.lessonId] = { ...current, firstTryBonusAwarded: true };
+        await upsertProgressRow(db, progressCache[incoming.lessonId]).catch(() => {});
+        changed++;
+      }
+      continue;
+    }
+    const next = { ...incoming, firstTryBonusAwarded: bonus };
+    progressCache[incoming.lessonId] = next;
+    await upsertProgressRow(db, { ...next, lastAttemptDate: next.lastAttemptDate || new Date().toISOString() }).catch(() => {});
+    changed++;
+  }
+  if (changed > 0) {
+    saveToLocalStorage(progressCache);
+    window.dispatchEvent(new CustomEvent("myenglish-grammar-updated"));
+  }
+  return changed;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SAME_SESSION_MS = 12 * 60 * 60 * 1000;
 

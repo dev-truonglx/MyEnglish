@@ -4,6 +4,9 @@ import { ensureGrammarBookSeeded, notifyBookUpdated } from "./grammarBook";
 import { GRAMMAR_CONTENT_VERSION_KEY, TARGET_GRAMMAR_CONTENT_VERSION } from "./grammarReset";
 import { RELEASE_WIPE_VERSION_KEY, TARGET_RELEASE_WIPE_VERSION } from "./releaseMigration";
 import { clearBackupCache } from "./storageBackup";
+import { clearCloudProgress } from "./sync/cloudReset";
+import { resetSyncCursors } from "./sync/state";
+import { withSyncPaused } from "./sync/pause";
 
 export const TABLES_TO_RESET = [
   "review_logs",
@@ -20,6 +23,7 @@ export const TABLES_TO_RESET = [
   "grammar_book_sets",
   "grammar_book_lessons",
   "grammar_book_chapters",
+  "sync_tombstones",
   "vocab_catalog",
   "vocab_catalog_meta",
 ] as const;
@@ -36,6 +40,8 @@ export const PRESERVED_SETTINGS_KEYS = new Set([
 
 export interface ResetOptions {
   onProgress?: (stage: string) => void;
+  /** Leave the account's synced copy alone (switching to another account on this machine) */
+  keepCloud?: boolean;
 }
 
 /**
@@ -48,12 +54,25 @@ export interface ResetOptions {
  *
  * @returns true if reset and re-import succeeded.
  */
-export async function resetAllAppData(options?: ResetOptions): Promise<boolean> {
+export function resetAllAppData(options?: ResetOptions): Promise<boolean> {
+  // A sync pass running in between would push this machine's data back to the emptied account, or pull the
+  // account's back into the emptied machine
+  return withSyncPaused(() => resetAllAppDataNow(options));
+}
+
+async function resetAllAppDataNow(options?: ResetOptions): Promise<boolean> {
   const notify = (stage: string) => {
     try {
       options?.onProgress?.(stage);
     } catch {}
   };
+
+  // Signed in: the account's copy goes too (it would come back with the next sync). Throws when unreachable,
+  // before anything local is touched.
+  if (!options?.keepCloud) {
+    notify("Đang xóa dữ liệu trên tài khoản...");
+    await clearCloudProgress();
+  }
 
   try {
     notify("Đang kết nối cơ sở dữ liệu...");
@@ -104,7 +123,8 @@ export async function resetAllAppData(options?: ResetOptions): Promise<boolean> 
       try {
         for (let i = localStorage.length - 1; i >= 0; i--) {
           const key = localStorage.key(i);
-          if (key && !PRESERVED_SETTINGS_KEYS.has(key)) {
+          // "sb-…" is the Supabase session: a reset must not sign the learner out
+          if (key && !PRESERVED_SETTINGS_KEYS.has(key) && !key.startsWith("sb-")) {
             localStorage.removeItem(key);
           }
         }
@@ -128,6 +148,8 @@ export async function resetAllAppData(options?: ResetOptions): Promise<boolean> 
 
     // 5. Invalidate in-memory caches
     clearBackupCache();
+    // Nothing local is synced any more: the next pass starts from scratch
+    await resetSyncCursors().catch(() => {});
     notifyBookUpdated([]); // other windows (the review popup) drop their copy too
 
     // 6. Re-seed Oxford 5000 vocabulary catalog
@@ -138,7 +160,7 @@ export async function resetAllAppData(options?: ResetOptions): Promise<boolean> 
 
     // 7. Re-seed 31 grammar chapters
     notify("Đang nạp lại 31 chương ngữ pháp...");
-    await ensureGrammarBookSeeded().catch((err) => {
+    await ensureGrammarBookSeeded({ reseed: true }).catch((err) => {
       console.warn("[AppReset] Failed to seed grammar book:", err);
     });
 

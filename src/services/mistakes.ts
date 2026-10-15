@@ -172,7 +172,7 @@ let keyColumnReady: Promise<void> | null = null;
  * reading the whole table and normalizing every row. Rows saved without a key (older builds, other
  * windows) get theirs here.
  */
-function ensureKeyColumn(db: MistakesDb): Promise<void> {
+export function ensureKeyColumn(db: MistakesDb): Promise<void> {
   keyColumnReady ??= (async () => {
     try {
       await db.execute(`ALTER TABLE mistakes ADD COLUMN norm_key TEXT`);

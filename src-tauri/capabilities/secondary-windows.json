@@ -1,9 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "secondary-windows",
-  "description": "Quick input, review popup and reminder nudge: database access, notifications and the app commands of the shared review/reminder services (ErrorBoundary, srs.ts, reminderSettings.ts, duoMotivation.ts, logger.ts) which every window loads. No updater, process, opener or shortcuts.",
+  "description": "Review popup and reminder nudge: database access, notifications and the app commands of the shared review/reminder services (ErrorBoundary, srs.ts, reminderSettings.ts, duoMotivation.ts, logger.ts) which every window loads. No updater, process, opener or shortcuts.",
   "windows": [
-    "quick-input",
     "review-popup",
     "review-nudge"
   ],

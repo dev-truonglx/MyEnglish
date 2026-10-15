@@ -8,9 +8,10 @@ import {
   State,
   StrategyMode,
   GenSeedStrategyWithCardId,
+  BasicLearningStepsStrategy,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getAllWords, getDueWordsFromDb, SRS_COLUMNS } from "./db";
+import { getDatabase, getDueWordsFromDb, getWordsLite, SRS_COLUMNS } from "./db";
 import { isWordDue, nextLocalDayStart } from "./cards";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import { getStoredWeights } from "./fsrsOptimizer";
@@ -165,10 +166,29 @@ export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
 
   // Fuzz seeded per card + rep count (not the review time), so the interval shown on a grade
   // button is exactly what the card gets when that button is pressed a few seconds later
-  const scheduler = fsrs(params).useStrategy(StrategyMode.SEED, GenSeedStrategyWithCardId("card_id"));
+  const scheduler = fsrs(params)
+    .useStrategy(StrategyMode.SEED, GenSeedStrategyWithCardId("card_id"))
+    .useStrategy(StrategyMode.LEARNING_STEPS, hardAdvancesLearningSteps);
   cachedScheduler = { key, scheduler };
   return scheduler;
 }
+
+/**
+ * ts-fsrs keeps a Learning / Relearning card on the same step on Hard. Here a card is graded once per
+ * session (the in-session retry is practice), so the next graded answer is a later session and a card
+ * answered Hard every time (slow typist, a one-letter typo, the hint) would never graduate. Hard moves on
+ * like Good: to the next step, or out of learning on the last one. Hard still lowers stability and raises
+ * difficulty as usual; only the step changes.
+ */
+const hardAdvancesLearningSteps: typeof BasicLearningStepsStrategy = (params, state, curStep) => {
+  const steps = BasicLearningStepsStrategy(params, state, curStep);
+  if (state === State.Review || !steps[Rating.Hard]) return steps;
+  const next = { ...steps };
+  // No Good entry on the last step means graduation; without a Hard entry Hard graduates too
+  if (steps[Rating.Good]) next[Rating.Hard] = steps[Rating.Good];
+  else delete next[Rating.Hard];
+  return next;
+};
 
 /**
  * Convert SQLite SRSReview row into a ts-fsrs Card object
@@ -643,7 +663,7 @@ export async function markWordDueImmediately(wordId?: string): Promise<string | 
   let targetId = wordId;
   let targetWord = "";
   if (!targetId) {
-    const all = await getAllWords();
+    const all = await getWordsLite();
     if (all.length === 0) return null;
     targetId = all[0].id;
     targetWord = all[0].word;
@@ -1012,8 +1032,8 @@ class SRSBackgroundWorker {
           freezes: streakRes.freezes,
         });
 
-        const dueWords = await getDueWordsFromDb();
-        const allWords = await getAllWords();
+        // The question needs schedules and meanings only: the whole collection without examples or stats
+        const [dueWords, allWords] = await Promise.all([getDueWordsFromDb(), getWordsLite()]);
         microQuiz = selectMicroQuizQuestion(dueWords, allWords);
 
       } catch (err) {
