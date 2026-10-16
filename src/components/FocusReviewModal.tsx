@@ -15,7 +15,7 @@ import {
   SkipForward,
 } from "lucide-react";
 import { getDueWordsFromDb, getWordsByIds, getWordsLite, isPlaceholderMeaning } from "@/services/db";
-import { getStudyLimits } from "@/services/srs";
+import { formatIntervalPreview, getStudyLimits } from "@/services/srs";
 import { calculateStreakAndGoal, recordDailyActivity } from "@/services/streak";
 import { resolveComeback } from "@/services/comeback";
 import { checkAndUnlockAchievements, countBadgeWords, recordFirstTryCorrect } from "@/services/achievements";
@@ -214,6 +214,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   // Feedback banner
   const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  const [nextReviewText, setNextReviewText] = useState<string | null>(null);
 
   // Auto-advance timer ref for proper cleanup
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -428,6 +429,22 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
     const praise = celebrationFor({ ...recorded, direction: word.direction, word: word.word });
     noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, praise?.kind ?? null, !gradedElsewhere);
+
+    let reviewLabel: string;
+    if (!correct) {
+      reviewLabel = "ở cuối phiên này";
+    } else if (decision.reason === "intro_too_recent" && cardsAfterThis > 0) {
+      reviewLabel = "ở cuối phiên này";
+    } else if (gradedElsewhere || !dueKeysRef.current.has(cardKey) || recorded.practiceReason) {
+      reviewLabel = "luyện tập củng cố";
+    } else if (nextReview) {
+      const formatted = formatIntervalPreview(new Date(nextReview), new Date());
+      reviewLabel = `sau ${formatted}`;
+    } else {
+      reviewLabel = "sớm hôm nay";
+    }
+    setNextReviewText(reviewLabel);
+
     return praise;
   };
   const praiseText = (p: Celebration | null) => (p ? `${p.title} ${p.detail} ` : "");
@@ -593,6 +610,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setTypedInput("");
       setFeedbackMsg(null);
       setPracticeNote(null);
+      setNextReviewText(null);
       setCurrentIndex((prev) => prev + 1);
     } else {
       // Completed all items: show what was learned (closes by itself if left alone). The last answer may
@@ -778,6 +796,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setTypedInput("");
       setFeedbackMsg(null);
       setPracticeNote(null);
+      setNextReviewText(null);
     } catch (err) {
       console.error("Failed to load review queue for modal:", err);
     } finally {
@@ -986,11 +1005,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         // Xử lý bài tập ngữ pháp
         const ex = item.exercise;
         if (correct) {
+          setNextReviewText("đã ghi nhận tiến độ");
           await trackSave(recordGrammarAnswer(item, true, false, choice.word));
           showFeedbackFor(item, index, `Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           // Đẩy bài tập sai vào cuối hàng đợi
           requeueItem(item);
+          setNextReviewText("ở cuối phiên này");
           setFeedbackMsg(`Chưa chính xác! Đáp án đúng là: ${formatAnswerForms(ex)}`);
           await trackSave(recordGrammarAnswer(item, false, false, choice.word));
         }
@@ -1097,10 +1118,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
       try {
         if (correct) {
+          setNextReviewText("đã ghi nhận tiến độ");
           await trackSave(recordGrammarAnswer(item, true, false, typedInput));
           showFeedbackFor(item, index, `Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           requeueItem(item);
+          setNextReviewText("ở cuối phiên này");
           setFeedbackMsg(`Chưa chính xác. Đáp án đúng là: ${formatAnswerForms(ex)}`);
           await trackSave(recordGrammarAnswer(item, false, false, typedInput));
         }
@@ -1118,6 +1141,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setIsAnswered(true);
       setIsCorrect(false);
       requeueItem(currentItem);
+      setNextReviewText("ở cuối phiên này");
       setFeedbackMsg(`Từ chính xác là: "${wordObj.word}". Hãy ghi nhớ để thử lại nhé!`);
       try {
         await trackSave(gradeWord(wordObj, false, typingExercise));
@@ -1135,6 +1159,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     setIsAnswered(true);
     setIsCorrect(false);
     requeueItem(currentItem);
+    setNextReviewText("ở cuối phiên này");
     setFeedbackMsg(`Bạn đã bỏ qua câu này. Đáp án đúng là: ${formatAnswerForms(ex)}`);
 
     try {
@@ -1810,9 +1835,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   <div className="pt-1 flex justify-end">
                     <button
                       onClick={advanceNextItem}
-                      className="px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-xs"
+                      className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs"
                     >
                       <span>Tiếp tục</span>
+                      {nextReviewText && (
+                        <span className="text-[11px] font-normal opacity-75">
+                          ({nextReviewText.startsWith("ở") ? `gặp lại ${nextReviewText}` : nextReviewText.startsWith("sau") ? `gặp lại ${nextReviewText}` : nextReviewText.includes("luyện tập") || nextReviewText.includes("tiến độ") ? nextReviewText : `gặp lại sau ${nextReviewText}`})
+                        </span>
+                      )}
                       <ArrowRight className="w-3.5 h-3.5" />
                       <kbd className="px-1 py-0.2 bg-white/20 dark:bg-black/20 rounded text-[9px] font-mono">
                         Enter
@@ -2078,9 +2108,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                     <div className="pt-1 flex justify-end">
                       <button
                         onClick={advanceNextItem}
-                        className="px-4 py-1.5 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 hover:opacity-90 transition-opacity shadow-xs"
+                        className="px-4 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 font-bold text-xs flex items-center gap-1.5 transition-all shadow-xs"
                       >
                         <span>Tiếp tục</span>
+                        {nextReviewText && (
+                          <span className="text-[11px] font-normal opacity-75">
+                            ({nextReviewText.startsWith("ở") ? `gặp lại ${nextReviewText}` : nextReviewText.startsWith("sau") ? `gặp lại ${nextReviewText}` : nextReviewText.includes("luyện tập") || nextReviewText.includes("tiến độ") ? nextReviewText : `gặp lại sau ${nextReviewText}`})
+                          </span>
+                        )}
                         <ArrowRight className="w-3.5 h-3.5" />
                         <kbd className="px-1 py-0.2 bg-white/20 dark:bg-black/20 rounded text-[9px] font-mono">
                           Enter
@@ -2097,7 +2132,19 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         {/* Bottom Keyboard Hint Bar */}
         <div className="px-6 py-3 bg-slate-50/60 dark:bg-zinc-950/40 border-t border-slate-200/60 dark:border-zinc-800/60 flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 font-medium">
           <div className="flex items-center gap-3">
-            {activeMode === "multiple_choice" ? (
+            {isAnswered ? (
+              <span className="flex items-center gap-1.5 text-slate-800 dark:text-zinc-200 font-semibold">
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
+                  Enter
+                </kbd>
+                <span>Tiếp tục</span>
+                {nextReviewText && (
+                  <span className="text-[11px] text-cyan-600 dark:text-cyan-400 font-medium">
+                    · Gặp lại: {nextReviewText}
+                  </span>
+                )}
+              </span>
+            ) : activeMode === "multiple_choice" ? (
               <span className="flex items-center gap-1">
                 <kbd className="px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
                   1-4

@@ -352,7 +352,9 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               level={getUserOverrideLevel() ?? undefined}
-              onComplete={(_isCorrect, attempts, rating) => handleGrade(rating, "free_writing", attempts)}
+              onComplete={(_isCorrect, attempts, rating) => {
+                holdExerciseAnswer(rating, "free_writing", attempts);
+              }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("spelling")}
             />
@@ -456,6 +458,7 @@ export default function FlashcardReview({
         onContinue={confirmCorrectAnswer}
         introMode={isIntroCard}
         onIntroDone={handleIntroDone}
+        isPractice={practiceMode}
       />}
     </div>
   );

@@ -958,7 +958,11 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
         </div>
         {answered ? (
           <button type="button" disabled={busy} onClick={next} className={PRIMARY_BTN}>
-            Tiếp tục ↵
+            <span>Tiếp tục</span>
+            <span className="text-[11px] opacity-75 font-normal">
+              {outcome?.correct ? "(đã ghi nhận tiến độ)" : "(gặp lại ở cuối bài)"}
+            </span>
+            <span className="font-mono text-xs">↵</span>
           </button>
         ) : showCheck ? (
           <button type="button" disabled={!canCheck} onClick={check} className={PRIMARY_BTN}>

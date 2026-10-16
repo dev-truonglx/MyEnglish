@@ -25,6 +25,8 @@ interface GradingBarProps {
   /** A new word's introduction card: one "continue" button, nothing is graded */
   introMode?: boolean;
   onIntroDone?: () => void;
+  /** Practice mode: does not move FSRS schedule */
+  isPractice?: boolean;
 }
 
 /** BOTTOM ACTION BAR - Always present with fixed height (h-14) so card NEVER jumps */
@@ -45,6 +47,7 @@ export default function GradingBar({
   onContinue,
   introMode = false,
   onIntroDone,
+  isPractice = false,
 }: GradingBarProps) {
   // Simple mode: Vietnamese labels only (no Again/Hard/Good/Easy, no exercise code names)
   const simple = isSimpleMode();
@@ -69,7 +72,11 @@ export default function GradingBar({
         >
           <span>Tiếp tục</span>
           <span className="text-[11px] opacity-70">
-            (gặp lại sau {intervalPreviews[pendingRating as keyof IntervalPreviews]})
+            {isPractice
+              ? "(luyện tập củng cố)"
+              : pendingRating === Rating.Again
+              ? "(gặp lại ở cuối phiên)"
+              : `(gặp lại sau ${intervalPreviews[pendingRating as keyof IntervalPreviews]})`}
           </span>
           <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
         </button>
