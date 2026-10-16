@@ -2052,6 +2052,18 @@ async fn compute_fsrs_parameters(items: Vec<FsrsItemInput>) -> Result<FsrsOptimi
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(rp) = app.get_webview_window("review-popup") {
+                if rp.is_visible().unwrap_or(false) {
+                    let _ = rp.hide();
+                }
+            }
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            }
+        }))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .plugin(tauri_plugin_notification::init())
@@ -2102,6 +2114,15 @@ pub fn run() {
                     .menu(&tray_menu)
                     .show_menu_on_left_click(true)
                     .tooltip("MyEnglish")
+                    .on_tray_icon_event(|tray, event| {
+                        if let tauri::tray::TrayIconEvent::DoubleClick { .. } = event {
+                            if let Some(w) = tray.app_handle().get_webview_window("main") {
+                                let _ = w.show();
+                                let _ = w.unminimize();
+                                let _ = w.set_focus();
+                            }
+                        }
+                    })
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => {
                             if let Some(rp) = app.get_webview_window("review-popup") {
@@ -2132,6 +2153,12 @@ pub fn run() {
                         _ => {}
                     })
                     .build(app)?;
+            }
+
+            if let Some(w) = app.get_webview_window("main") {
+                if let Some(icon) = app.default_window_icon().cloned() {
+                    let _ = w.set_icon(icon);
+                }
             }
 
             // Spawn background timer heartbeat so reviews can trigger reliably
@@ -2203,7 +2230,18 @@ pub fn run() {
                 if !ALLOW_EXIT.load(Ordering::SeqCst) {
                     api.prevent_close();
                     if let Some(w) = app_handle.get_webview_window(&label) {
-                        let _ = w.hide();
+                        #[cfg(target_os = "windows")]
+                        {
+                            if label == "main" {
+                                let _ = w.minimize();
+                            } else {
+                                let _ = w.hide();
+                            }
+                        }
+                        #[cfg(not(target_os = "windows"))]
+                        {
+                            let _ = w.hide();
+                        }
                     }
                 }
             }

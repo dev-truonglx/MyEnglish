@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.1.10"
+version = "0.2.2"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -27,6 +27,7 @@ tauri-plugin-notification = "2.5.0"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 tauri-plugin-autostart = "2.7.0"
+tauri-plugin-single-instance = "2"
 # FSRS parameter optimizer (fsrs-rs, the engine Anki uses). 6.x = FSRS-6 with 21 parameters,
 # matching ts-fsrs 5.x on the frontend. Pure Rust (ndarray/rayon), no burn/libtorch at runtime.
 fsrs = "6.6"

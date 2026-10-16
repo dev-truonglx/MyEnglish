@@ -64,5 +64,6 @@
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
-  ; Nothing extra needed post-install
+  ; Force Windows Explorer to flush and refresh its icon and shell cache
+  System::Call 'shell32.dll::SHChangeNotify(i 0x08000000, i 0, i 0, i 0)'
 !macroend
