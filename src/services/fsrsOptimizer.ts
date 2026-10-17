@@ -5,6 +5,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 import { getDatabase } from "./db";
+import { persistKeyNow } from "./storageBackup";
 
 export const FSRS_WEIGHTS_KEY = "myenglish_fsrs_weights_v1";
 export const FSRS_PARAM_COUNT = 21;
@@ -69,11 +70,13 @@ export function saveWeights(result: OptimizerResult): void {
     after: result.new_metrics,
   };
   localStorage.setItem(FSRS_WEIGHTS_KEY, JSON.stringify(stored));
+  persistKeyNow(FSRS_WEIGHTS_KEY);
 }
 
 export function resetWeights(): void {
   try {
     localStorage.removeItem(FSRS_WEIGHTS_KEY);
+    persistKeyNow(FSRS_WEIGHTS_KEY);
   } catch {}
 }
 

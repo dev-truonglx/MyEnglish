@@ -411,6 +411,14 @@ fn ensure_macos_app_registered() {
     }
 }
 
+struct AtomicBoolGuard(&'static AtomicBool);
+
+impl Drop for AtomicBoolGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 #[tauri::command]
 fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Result<bool, String> {
     let now = SystemTime::now()
@@ -434,8 +442,10 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
 
         // If an earlier notification is still waiting for a click, don't park another thread forever
         let wait_for_click = !NOTIFICATION_WAITING.swap(true, Ordering::SeqCst);
+        let waiting_guard = wait_for_click.then(|| AtomicBoolGuard(&NOTIFICATION_WAITING));
 
         std::thread::spawn(move || {
+            let _waiting_guard = waiting_guard;
             let mut notif = mac_notification_sys::Notification::new();
             // No sound: it would ring out in meetings and screen shares, which are only partly detected (N20)
             notif.title(&title_c)
@@ -444,9 +454,7 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
                 .wait_for_click(wait_for_click);
 
             let response = notif.send();
-            if wait_for_click {
-                NOTIFICATION_WAITING.store(false, Ordering::SeqCst);
-            }
+            drop(_waiting_guard);
             if let Err(e) = &response {
                 eprintln!("[Notification] send failed: {:?}", e);
             }
@@ -751,28 +759,34 @@ mod macos_focus {
 
     /// Name of the frontmost app if one of its windows covers a whole display (full-screen video,
     /// slideshow, full-screen meeting). Our own windows are ignored.
-    pub fn fullscreen_frontmost_app() -> Option<String> {
+    fn fullscreen_frontmost_app(windows: &[WindowInfo]) -> Option<String> {
         let front = frontmost_app_pid()?;
         let own = std::process::id() as i64;
         if front == own {
             return None;
         }
         let displays = display_bounds();
-        on_screen_windows()
-            .into_iter()
+        windows
+            .iter()
             .filter(|w| w.pid == front && w.layer >= 0)
             .find(|w| displays.iter().any(|d| covers(&w.bounds, d)))
-            .map(|w| if w.owner.is_empty() { "ứng dụng toàn màn hình".to_string() } else { w.owner })
+            .map(|w| if w.owner.is_empty() { "ứng dụng toàn màn hình".to_string() } else { w.owner.clone() })
     }
 
     /// Processes that only show windows while the screen is being shared.
     const SCREEN_SHARE_OWNERS: &[&str] = &["CptHost"]; // Zoom screen-share host
 
-    pub fn screen_sharing_app() -> Option<String> {
-        on_screen_windows()
-            .into_iter()
+    fn screen_sharing_app(windows: &[WindowInfo]) -> Option<String> {
+        windows
+            .iter()
             .find(|w| SCREEN_SHARE_OWNERS.contains(&w.owner.as_str()))
             .map(|_| "Zoom (đang chia sẻ màn hình)".to_string())
+    }
+
+    /// (full-screen app in front, app sharing the screen), from one reading of the window list.
+    pub fn fullscreen_and_sharing_apps() -> (Option<String>, Option<String>) {
+        let windows = on_screen_windows();
+        (fullscreen_frontmost_app(&windows), screen_sharing_app(&windows))
     }
 
     pub fn idle_seconds() -> f64 {
@@ -814,9 +828,10 @@ struct PopupBlockers {
 fn get_popup_blockers() -> PopupBlockers {
     #[cfg(target_os = "macos")]
     {
+        let (fullscreen_app, screen_sharing_app) = macos_focus::fullscreen_and_sharing_apps();
         PopupBlockers {
-            fullscreen_app: macos_focus::fullscreen_frontmost_app(),
-            screen_sharing_app: macos_focus::screen_sharing_app(),
+            fullscreen_app,
+            screen_sharing_app,
             focus_mode: macos_focus::focus_mode_active(),
             idle_seconds: Some(macos_focus::idle_seconds()),
         }
@@ -934,8 +949,83 @@ fn fill_monitor(window: &tauri::WebviewWindow, monitor: &tauri::Monitor) {
     }
 }
 
+const REVIEW_POPUP: &str = "review-popup";
+const REVIEW_NUDGE: &str = "review-nudge";
+
+/// How long a hidden popup / reminder card is kept before its webview is destroyed: long enough for
+/// the page to finish saving after it hides, and for a "Học ngay" or a snooze to reuse it.
+const SECONDARY_RELEASE_DELAY: std::time::Duration = std::time::Duration::from_secs(120);
+static POPUP_RELEASE_GEN: AtomicU64 = AtomicU64::new(0);
+static NUDGE_RELEASE_GEN: AtomicU64 = AtomicU64::new(0);
+
+fn release_gen(label: &str) -> &'static AtomicU64 {
+    if label == REVIEW_NUDGE {
+        &NUDGE_RELEASE_GEN
+    } else {
+        &POPUP_RELEASE_GEN
+    }
+}
+
+/// The review popup or the reminder card, created when first needed. They are not created at launch:
+/// each webview is its own WebKit process (tens of MB) that would sit hidden for the app's whole life.
+/// Cancels a pending release. Call it off the main thread (async command / spawned task): building a
+/// webview from a synchronous command or an event handler deadlocks on Windows (WebView2).
+fn secondary_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow, String> {
+    release_gen(label).fetch_add(1, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window(label) {
+        return Ok(window);
+    }
+    let url = tauri::WebviewUrl::App("index.html".into());
+    let builder = tauri::WebviewWindowBuilder::new(app, label, url)
+        .visible(false)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .shadow(false)
+        .skip_taskbar(true);
+    let builder = if label == REVIEW_NUDGE {
+        builder
+            .title("MyEnglish Reminder")
+            .inner_size(NUDGE_WIDTH, 230.0)
+            .resizable(false)
+            .focused(false)
+            .focusable(false)
+            .accept_first_mouse(true)
+    } else {
+        builder
+            .title("MyEnglish Focus Review")
+            .inner_size(1920.0, 1080.0)
+            .center()
+            .resizable(true)
+    };
+    builder.build().map_err(|e| e.to_string())
+}
+
+/// Hide the popup / reminder card now and destroy its webview after SECONDARY_RELEASE_DELAY unless it
+/// was shown again meanwhile.
+fn hide_and_release(window: &tauri::WebviewWindow) {
+    let _ = window.hide();
+    let label = window.label().to_string();
+    let gen = release_gen(&label).fetch_add(1, Ordering::SeqCst) + 1;
+    let app = window.app_handle().clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(SECONDARY_RELEASE_DELAY);
+        if release_gen(&label).load(Ordering::SeqCst) != gen {
+            return;
+        }
+        if let Some(window) = app.get_webview_window(&label) {
+            if !window.is_visible().unwrap_or(false) {
+                if release_gen(&label).load(Ordering::SeqCst) != gen {
+                    return;
+                }
+                let _ = window.destroy();
+            }
+        }
+    });
+}
+
 fn is_review_popup_visible(app: &AppHandle) -> bool {
-    app.get_webview_window("review-popup")
+    app.get_webview_window(REVIEW_POPUP)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false)
 }
@@ -944,14 +1034,13 @@ fn is_review_popup_visible(app: &AppHandle) -> bool {
 /// focus (the window is not focusable and the app is not activated), so typing elsewhere is
 /// not interrupted. The payload (due count, countdown...) is forwarded to the card.
 #[tauri::command]
-fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary: Option<bool>) -> Result<bool, String> {
+async fn show_review_nudge(app: AppHandle, payload: serde_json::Value, prefer_primary: Option<bool>) -> Result<bool, String> {
     // A review is already on screen: no reminder on top of it
     if is_review_popup_visible(&app) {
         return Ok(false);
     }
-    let window = app
-        .get_webview_window("review-nudge")
-        .ok_or_else(|| "Review nudge window not found".to_string())?;
+    // A card created just now picks the payload up with take_review_nudge_payload once its page is ready
+    let window = secondary_window(&app, REVIEW_NUDGE)?;
     let _ = window.set_focusable(false);
     let _ = window.set_visible_on_all_workspaces(true);
     let _ = window.set_always_on_top(true);
@@ -989,8 +1078,21 @@ fn take_review_nudge_payload() -> Option<serde_json::Value> {
 /// DOM mouseenter/mouseleave are unreliable on this non-focusable transparent window.
 #[tauri::command]
 fn is_cursor_over_nudge(app: AppHandle) -> bool {
-    let Some(window) = app.get_webview_window("review-nudge") else { return false };
-    let (Ok(cursor), Ok(pos), Ok(size)) = (window.cursor_position(), window.outer_position(), window.outer_size()) else {
+    let Some(window) = app.get_webview_window(REVIEW_NUDGE) else { return false };
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    #[cfg(target_os = "macos")]
+    if let Some(cursor) = macos_cursor::get_global_cursor_pos() {
+        let scale = window.scale_factor().ok().filter(|&s| s > 0.0).unwrap_or(1.0);
+        let origin = pos.to_logical::<f64>(scale);
+        let bounds = size.to_logical::<f64>(scale);
+        return cursor.x >= origin.x
+            && cursor.x < origin.x + bounds.width
+            && cursor.y >= origin.y
+            && cursor.y < origin.y + bounds.height;
+    }
+    let Ok(cursor) = window.cursor_position() else {
         return false;
     };
     cursor.x >= pos.x as f64
@@ -1001,73 +1103,71 @@ fn is_cursor_over_nudge(app: AppHandle) -> bool {
 
 #[tauri::command]
 fn hide_review_nudge(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("review-nudge") {
-        window.hide().map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window(REVIEW_NUDGE) {
+        hide_and_release(&window);
     }
     Ok(())
 }
 
 #[tauri::command]
-fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<bool, String> {
+async fn show_review_popup(app: AppHandle, prefer_primary: Option<bool>) -> Result<bool, String> {
     let prefer_primary = prefer_primary.unwrap_or(false);
     // The nudge (if shown) is replaced by the full review
-    if let Some(nudge) = app.get_webview_window("review-nudge") {
-        let _ = nudge.hide();
+    if let Some(nudge) = app.get_webview_window(REVIEW_NUDGE) {
+        hide_and_release(&nudge);
     }
-    if let Some(window) = app.get_webview_window("review-popup") {
-        // Already open: just bring it forward. Re-emitting review-popup-opened would wipe the session.
-        if window.is_visible().unwrap_or(false) {
-            let _ = window.unminimize();
-            #[cfg(target_os = "macos")]
-            {
-                macos_app::activate_app_ignoring_other_apps();
-            }
-            let _ = window.set_focus();
-            return Ok(true);
-        }
-        let _ = window.set_visible_on_all_workspaces(true);
-        let _ = window.set_always_on_top(true);
+    // A popup created just now finds itself visible when its page mounts and opens the session then
+    let window = secondary_window(&app, REVIEW_POPUP)?;
+    // Already open: just bring it forward. Re-emitting review-popup-opened would wipe the session.
+    if window.is_visible().unwrap_or(false) {
         let _ = window.unminimize();
-
         #[cfg(target_os = "macos")]
         {
             macos_app::activate_app_ignoring_other_apps();
         }
-
-        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
-            fill_monitor(&window, &monitor);
-        }
-
-        window.show().map_err(|e| e.to_string())?;
-
-        // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
-        if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
-            fill_monitor(&window, &monitor);
-            eprintln!(
-                "[ReviewPopup] monitor pos: {:?}, size: {:?}, current win pos: {:?}, win size: {:?}",
-                monitor.position(),
-                monitor.size(),
-                window.outer_position().ok(),
-                window.inner_size().ok()
-            );
-        }
-
         let _ = window.set_focus();
-
-        // Broadcast to ALL windows (app.emit instead of window.emit)
-        let _ = app.emit("review-popup-opened", serde_json::json!({
-            "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
-        }));
-        Ok(true)
-    } else {
-        Err("Review popup window not found".to_string())
+        return Ok(true);
     }
+    let _ = window.set_visible_on_all_workspaces(true);
+    let _ = window.set_always_on_top(true);
+    let _ = window.unminimize();
+
+    #[cfg(target_os = "macos")]
+    {
+        macos_app::activate_app_ignoring_other_apps();
+    }
+
+    if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
+        fill_monitor(&window, &monitor);
+    }
+
+    window.show().map_err(|e| e.to_string())?;
+
+    // Re-apply on visible window to guarantee macOS AppKit applies frame to the target screen
+    if let Some(monitor) = get_target_monitor_for_popup(&window, prefer_primary) {
+        fill_monitor(&window, &monitor);
+        eprintln!(
+            "[ReviewPopup] monitor pos: {:?}, size: {:?}, current win pos: {:?}, win size: {:?}",
+            monitor.position(),
+            monitor.size(),
+            window.outer_position().ok(),
+            window.inner_size().ok()
+        );
+    }
+
+    let _ = window.set_focus();
+
+    // Broadcast to ALL windows (app.emit instead of window.emit)
+    let _ = app.emit("review-popup-opened", serde_json::json!({
+        "timestamp": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+    }));
+    Ok(true)
 }
 
 #[tauri::command]
 fn hide_review_popup(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("review-popup") {
-        window.hide().map_err(|e| e.to_string())?;
+    if let Some(window) = app.get_webview_window(REVIEW_POPUP) {
+        hide_and_release(&window);
     }
     Ok(())
 }
@@ -1814,13 +1914,22 @@ fn tray_tooltip(reviews: u32, new_cards: u32, paused_until: Option<&str>) -> Str
 /// to the menu-bar icon on macOS.
 #[tauri::command]
 fn set_tray_due_count(app: AppHandle, reviews: u32, new_cards: u32, paused_until: Option<String>) -> Result<(), String> {
+    // Refreshed every minute, nearly always with the same numbers: skip the status-item relayout then
+    static LAST_TRAY_STATE: std::sync::Mutex<Option<(u32, u32, Option<String>)>> = std::sync::Mutex::new(None);
+    let state = (reviews, new_cards, paused_until);
+    if LAST_TRAY_STATE.lock().map(|last| last.as_ref() == Some(&state)).unwrap_or(false) {
+        return Ok(());
+    }
     let tray = app.tray_by_id(TRAY_ID).ok_or("Tray icon not found")?;
-    tray.set_tooltip(Some(tray_tooltip(reviews, new_cards, paused_until.as_deref())))
+    tray.set_tooltip(Some(tray_tooltip(reviews, new_cards, state.2.as_deref())))
         .map_err(|e| e.to_string())?;
     #[cfg(target_os = "macos")]
     {
         let title = (reviews > 0).then(|| reviews.to_string());
         tray.set_title(title).map_err(|e| e.to_string())?;
+    }
+    if let Ok(mut last) = LAST_TRAY_STATE.lock() {
+        *last = Some(state);
     }
     Ok(())
 }
@@ -2042,20 +2151,19 @@ async fn compute_fsrs_parameters(items: Vec<FsrsItemInput>) -> Result<FsrsOptimi
     if OPTIMIZING.swap(true, Ordering::SeqCst) {
         return Err("Đang tối ưu tham số, vui lòng đợi lượt trước xong".to_string());
     }
-    let result = tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
+    let _guard = AtomicBoolGuard(&OPTIMIZING);
+    tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
         .await
-        .map_err(|e| format!("Task execution failed: {}", e));
-    OPTIMIZING.store(false, Ordering::SeqCst);
-    result?
+        .map_err(|e| format!("Task execution failed: {}", e))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            if let Some(rp) = app.get_webview_window("review-popup") {
+            if let Some(rp) = app.get_webview_window(REVIEW_POPUP) {
                 if rp.is_visible().unwrap_or(false) {
-                    let _ = rp.hide();
+                    hide_and_release(&rp);
                 }
             }
             if let Some(w) = app.get_webview_window("main") {
@@ -2125,9 +2233,9 @@ pub fn run() {
                     })
                     .on_menu_event(|app, event| match event.id().as_ref() {
                         "show" => {
-                            if let Some(rp) = app.get_webview_window("review-popup") {
+                            if let Some(rp) = app.get_webview_window(REVIEW_POPUP) {
                                 if rp.is_visible().unwrap_or(false) {
-                                    let _ = rp.hide();
+                                    hide_and_release(&rp);
                                 }
                             }
                             if let Some(w) = app.get_webview_window("main") {
@@ -2139,9 +2247,13 @@ pub fn run() {
                         "review_now" => {
                             // Same review popup as "Học ngay" on the reminder card, on the monitor
                             // under the cursor (where the tray was just clicked)
-                            if let Err(e) = show_review_popup(app.clone(), None) {
-                                eprintln!("[Tray] Failed to open the review: {}", e);
-                            }
+                            // Off the event handler: the popup window may have to be created first
+                            let app = app.clone();
+                            tauri::async_runtime::spawn(async move {
+                                if let Err(e) = show_review_popup(app, None).await {
+                                    eprintln!("[Tray] Failed to open the review: {}", e);
+                                }
+                            });
                         }
                         "quit" => {
                             app.exit(0);
@@ -2224,26 +2336,29 @@ pub fn run() {
                 ..
             } => {
                 // If an update is in progress, allow the process to die normally.
-                // Otherwise hide to tray so the app keeps running in background. Applies to every
-                // window: they are created once from tauri.conf.json, so a Cmd+W / Alt+F4 that really
-                // closed the review popup would break them until the next launch.
+                // Otherwise hide to tray so the app keeps running in background. The popup and the
+                // reminder card are hidden too and released later (their page may still be saving).
                 if !ALLOW_EXIT.load(Ordering::SeqCst) {
                     api.prevent_close();
                     if let Some(w) = app_handle.get_webview_window(&label) {
-                        #[cfg(target_os = "windows")]
-                        {
-                            if label == "main" {
+                        if label != "main" {
+                            hide_and_release(&w);
+                        } else {
+                            #[cfg(target_os = "windows")]
+                            {
                                 let _ = w.minimize();
-                            } else {
+                            }
+                            #[cfg(not(target_os = "windows"))]
+                            {
                                 let _ = w.hide();
                             }
                         }
-                        #[cfg(not(target_os = "windows"))]
-                        {
-                            let _ = w.hide();
-                        }
                     }
                 }
+            }
+            // A released popup / card is a destroyed window: never let that end the app
+            tauri::RunEvent::ExitRequested { code: None, api, .. } if !ALLOW_EXIT.load(Ordering::SeqCst) => {
+                api.prevent_exit();
             }
             tauri::RunEvent::WindowEvent {
                 label,

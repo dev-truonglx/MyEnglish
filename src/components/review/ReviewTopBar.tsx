@@ -2,6 +2,7 @@ import { ChevronLeft, Layers, FileCode, Keyboard, Sparkles, Headphones } from "l
 import type { ReviewCard } from "@/types/database";
 import type { StudyMode } from "@/hooks/useReviewSession";
 import { isSimpleMode } from "@/services/learnerProfile";
+import { COMBO_EVERY } from "@/services/sound";
 
 interface ReviewTopBarProps {
   onExit: () => void;
@@ -12,6 +13,8 @@ interface ReviewTopBarProps {
   currentWord: ReviewCard;
   practiceMode: boolean;
   consecutiveCorrect?: number;
+  /** Focus session: leaving goes through its own bar (asks first) */
+  hideExit?: boolean;
 }
 
 /** Top Bar with Mode Selector & Progress */
@@ -24,18 +27,23 @@ export default function ReviewTopBar({
   currentWord,
   practiceMode,
   consecutiveCorrect,
+  hideExit = false,
 }: ReviewTopBarProps) {
   // Simple mode: no format selector (the app picks), no combo pill (a run of right answers is not the goal)
   const simple = isSimpleMode();
   return (
     <div className="w-full shrink-0 mb-3 flex items-center justify-between flex-wrap gap-3">
-      <button
-        onClick={onExit}
-        className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
-      >
-        <ChevronLeft className="w-4 h-4" />
-        <span>Thoát</span>
-      </button>
+      {hideExit ? (
+        <span />
+      ) : (
+        <button
+          onClick={onExit}
+          className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+        >
+          <ChevronLeft className="w-4 h-4" />
+          <span>Thoát</span>
+        </button>
+      )}
 
       {/* Study Mode Selector */}
       {!simple && (
@@ -140,6 +148,8 @@ export default function ReviewTopBar({
       <div className="flex items-center gap-3 flex-wrap justify-end">
         {!simple && consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
           <div
+            // A new key at every combo (5, 10…): the pill zooms in again together with the combo sound
+            key={`combo-${Math.floor(consecutiveCorrect / COMBO_EVERY)}`}
             className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shadow-md transition-all duration-300 animate-in fade-in zoom-in-95 ${
               consecutiveCorrect >= 10
                 ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 shadow-amber-500/25 border border-yellow-300"

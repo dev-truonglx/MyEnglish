@@ -5,6 +5,7 @@ import type { WordDetail } from "@/types/database";
 import { pickExample } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
 import { maskTargetInMeaning } from "@/utils/exerciseHints";
+import { playWrongTry } from "@/services/sound";
 
 interface LetterTilesExerciseProps {
   word: WordDetail;
@@ -197,6 +198,7 @@ export default function LetterTilesExercise({
         onComplete(true, wrongAttempts, hint ? Rating.Hard : Rating.Good);
       } else {
         setState("wrong");
+        playWrongTry();
         const tries = wrongAttempts + 1;
         setWrongAttempts(tries);
         if (tries >= 2) setHint(true);

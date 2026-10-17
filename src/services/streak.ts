@@ -29,6 +29,29 @@ export const FREEZE_EVERY_DAYS = 7;
 /** ... up to this many in stock */
 export const MAX_FREEZES = 2;
 
+/** Days a daily-quest chest granted a bonus freeze ("YYYY-MM-DD"), kept apart from the earned ones */
+export const BONUS_FREEZES_KEY = "myenglish_bonus_freezes_v1";
+
+export function readBonusFreezeDates(): string[] {
+  try {
+    const raw: unknown = JSON.parse(localStorage.getItem(BONUS_FREEZES_KEY) || "[]");
+    return Array.isArray(raw) ? raw.filter((d): d is string => typeof d === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Record a bonus freeze granted today (one per day at most) */
+export function addBonusFreeze(day: string): void {
+  try {
+    const dates = readBonusFreezeDates();
+    if (dates.includes(day)) return;
+    localStorage.setItem(BONUS_FREEZES_KEY, JSON.stringify([...dates, day]));
+    persistKeyNow(BONUS_FREEZES_KEY);
+    window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
+  } catch {}
+}
+
 export interface StreakResult {
   current: number;
   longest: number;
@@ -40,9 +63,15 @@ export interface StreakResult {
  * Streak over local dates with activity. Today without activity yet does not break it.
  * Each FREEZE_EVERY_DAYS active days earn a freeze (max MAX_FREEZES) that covers one missed day,
  * so one busy day does not wipe out weeks of habit. Frozen days keep the streak but don't add to it.
+ * A bonus freeze (daily-quest chest) adds one to the stock on its active day, within the same cap.
  */
-export function computeStreak(activeDates: Iterable<string>, today: Date = new Date()): StreakResult {
+export function computeStreak(
+  activeDates: Iterable<string>,
+  today: Date = new Date(),
+  bonusFreezeDates: Iterable<string> = readBonusFreezeDates()
+): StreakResult {
   const active = new Set(activeDates);
+  const bonus = new Set(bonusFreezeDates);
   const todayStr = getLocalDateString(today);
   const sorted = Array.from(active).filter((d) => d <= todayStr).sort();
   const result: StreakResult = { current: 0, longest: 0, freezes: 0, frozenDates: [] };
@@ -66,6 +95,7 @@ export function computeStreak(activeDates: Iterable<string>, today: Date = new D
         result.frozenDates = [];
       }
     }
+    if (bonus.has(s) && (active.has(s) || s === todayStr)) result.freezes = Math.min(MAX_FREEZES, result.freezes + 1);
     result.longest = Math.max(result.longest, result.current);
   }
   return result;
@@ -135,6 +165,7 @@ export function getDailyGoal(): number {
 export function setDailyGoal(goal: number): void {
   try {
     localStorage.setItem(GOAL_STORAGE_KEY, String(Math.max(1, goal)));
+    persistKeyNow(GOAL_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
   } catch (err) {
     console.warn("Failed to save daily goal:", err);
@@ -156,6 +187,7 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
     const logs = getActivityLogs();
     const today = getLocalDateString();
     for (const w of words) {
+      if (w.catalog_id != null && !w.srs?.last_review && !((w.srs?.reps ?? 0) > 0)) continue;
       if (!w.created_at) continue;
       const d = new Date(w.created_at);
       if (isNaN(d.getTime())) continue;
@@ -166,6 +198,8 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
     }
     localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
     localStorage.setItem(CREATED_AT_BACKFILL_KEY, "1");
+    persistKeyNow(REVIEWS_STORAGE_KEY);
+    persistKeyNow(CREATED_AT_BACKFILL_KEY);
   } catch {}
 }
 

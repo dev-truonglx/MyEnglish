@@ -15,8 +15,52 @@ export function setMainSessionActive(active: boolean, now: number = Date.now()):
 }
 
 export function isMainSessionActive(now: number = Date.now()): boolean {
+  if (isFocusActive(now)) return true;
   try {
     const at = Number(localStorage.getItem(MAIN_SESSION_KEY) || 0);
+    return at > 0 && now - at >= 0 && now - at < STALE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Focus session in progress: no reminder of any kind until `until` (its end plus a margin, refreshed while the
+ * clock runs). A focus session closed by quitting the app stops blocking reminders once that time has passed.
+ */
+const FOCUS_UNTIL_KEY = "myenglish_focus_until_v1";
+
+export function setFocusUntil(until: number | null): void {
+  try {
+    if (until) localStorage.setItem(FOCUS_UNTIL_KEY, String(until));
+    else localStorage.removeItem(FOCUS_UNTIL_KEY);
+  } catch {}
+}
+
+export function isFocusActive(now: number = Date.now()): boolean {
+  try {
+    return Number(localStorage.getItem(FOCUS_UNTIL_KEY) || 0) > now;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The review popup is in a session: the reminder worker must not open another reminder on top of it (the card on
+ * screen could be graded twice). Refreshed on every answer; a popup that crashed stops blocking after STALE_MS.
+ */
+const POPUP_SESSION_KEY = "myenglish_popup_session_v1";
+
+export function setPopupSessionActive(active: boolean, now: number = Date.now()): void {
+  try {
+    if (active) localStorage.setItem(POPUP_SESSION_KEY, String(now));
+    else localStorage.removeItem(POPUP_SESSION_KEY);
+  } catch {}
+}
+
+export function isPopupSessionActive(now: number = Date.now()): boolean {
+  try {
+    const at = Number(localStorage.getItem(POPUP_SESSION_KEY) || 0);
     return at > 0 && now - at >= 0 && now - at < STALE_MS;
   } catch {
     return false;

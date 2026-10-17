@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { logLearningEvent } from "@/services/learningEvents";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock, Play, Zap, Flame, Check, X, Sparkles } from "lucide-react";
+import { Clock, Play, Zap, Flame, Check, X, Sparkles, Crosshair } from "lucide-react";
+import { getFocusSettings } from "@/services/focusSettings";
 import {
   buildNudgePayload,
   hideReviewNudge,
@@ -10,6 +11,7 @@ import {
   resetIgnoredNudges,
   snoozeIgnoredNudge,
   snoozeReminder,
+  startFocusFromReminder,
   triggerReviewPopup,
   type ReviewNudgePayload,
 } from "@/services/reminderSettings";
@@ -17,13 +19,15 @@ import {
   evaluateMicroQuizAnswer,
   type MicroQuizEvaluationResult,
 } from "@/services/duoMotivation";
+import { playSound } from "@/services/sound";
 
 interface ReviewNudgeProps {
   /** Browser preview only: called after an action instead of hiding a native window */
   onDone?: () => void;
 }
 
-const TICK_MS = 250;
+// Each tick asks Rust whether the cursor is over the card: twice a second is enough to pause the countdown
+const TICK_MS = 500;
 const QUIZ_COUNTDOWN_SECONDS = 30;
 /** After a wrong quick answer the card stays up to show the right one, then closes by itself (N13) */
 const WRONG_ANSWER_CLOSE_MS = 60 * 1000;
@@ -85,6 +89,10 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     // If algorithm prefers micro-quiz and question exists, switch directly to quiz
     if (next.microQuiz && next.motivation?.isMicroQuizPreferred) {
       setMode("quiz");
+      const duration = Math.max(next.autoOpenSeconds, QUIZ_COUNTDOWN_SECONDS);
+      deadlineRef.current = Date.now() + duration * 1000;
+      setSecondsLeft(duration);
+      setCountdownTotal(duration);
       // Opened by itself: the answer time starts when the learner reaches the card (first hover), not when
       // it appeared while they were busy elsewhere, or a correct answer would be graded slow (Hard)
       quizStartTimeRef.current = 0;
@@ -100,14 +108,15 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   }, [freshBar]);
 
   const finish = useCallback(
-    async (action: "start" | "snooze" | "timeout" | "quiz-done") => {
+    async (action: "start" | "focus" | "snooze" | "timeout" | "quiz-done") => {
       if (actedRef.current) return;
       actedRef.current = true;
       hoverAtRef.current = 0;
       setSecondsLeft(null);
 
       logLearningEvent(
-        action === "timeout" ? "nudge_ignored" : action === "snooze" ? "nudge_snoozed" : action === "quiz-done" ? "nudge_quiz" : "nudge_opened"
+        action === "timeout" ? "nudge_ignored" : action === "snooze" ? "nudge_snoozed" : action === "quiz-done" ? "nudge_quiz" : "nudge_opened",
+        action === "focus" ? { meta: { focus: true } } : {}
       );
       if (action === "timeout") {
         snoozeIgnoredNudge();
@@ -119,6 +128,11 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       } else if (action === "quiz-done") {
         resetIgnoredNudges();
         await hideReviewNudge();
+      } else if (action === "focus") {
+        // A focus session in the main window (not the popup): the whole window, the clock, no reminders
+        resetIgnoredNudges();
+        await hideReviewNudge();
+        await startFocusFromReminder(getFocusSettings().minutes);
       } else {
         resetIgnoredNudges();
         await triggerReviewPopup();
@@ -130,6 +144,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
 
   // Switch to quiz mode manually
   const switchToQuiz = () => {
+    if (actedRef.current) return;
     if (payload.microQuiz) {
       setMode("quiz");
       quizStartTimeRef.current = Date.now();
@@ -148,6 +163,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     setSecondsLeft(null);
     const responseTime = Date.now() - (quizStartTimeRef.current || Date.now());
     const shownSeq = beginSeqRef.current;
+    // The answer tone plays at the click (a single question: no combo)
+    playSound(payload.microQuiz.options.find((o) => o.id === optionId)?.isCorrect ? "correct" : "wrong");
 
     try {
       const res = await evaluateMicroQuizAnswer({
@@ -206,6 +223,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       } else if (mode === "nudge") {
         if (e.key === "Enter") {
           finish("start");
+        } else if (e.key.toLowerCase() === "f") {
+          finish("focus");
         } else if (e.key === "Escape") {
           finish("snooze");
         }
@@ -339,34 +358,47 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
               </div>
             </div>
 
+            {/* One main action; the quick question next to it when there is one; the rest as small links */}
             <div className="flex items-center gap-2 pt-0.5" role="group" aria-label="Nhắc ôn tập">
               <button
                 onClick={() => finish("start")}
                 aria-label="Học ngay"
-                className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 !text-white text-[11px] font-semibold shadow-sm transition-all active:scale-95"
+                title="Học ngay (Enter)"
+                className="flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 !text-white text-[12px] font-bold shadow-sm whitespace-nowrap transition-all active:scale-[0.98]"
               >
-                <Play className="w-3 h-3 fill-white" />
+                <Play className="w-3.5 h-3.5 fill-white shrink-0" />
                 Học ngay
               </button>
-
               {payload.microQuiz ? (
                 <button
                   onClick={switchToQuiz}
                   aria-label="Trả lời 1 câu nhanh"
-                  className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 text-[11px] font-semibold transition-all active:scale-95"
+                  title="Trả lời 1 câu ngay tại đây, không mở app"
+                  className="shrink-0 inline-flex items-center gap-1 px-3 py-2 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800/60 text-[12px] font-semibold whitespace-nowrap transition-all active:scale-[0.98]"
                 >
-                  <Zap className="w-3 h-3 text-indigo-500 fill-indigo-500" />
-                  1 câu nhanh
+                  <Zap className="w-3.5 h-3.5 text-indigo-500 fill-indigo-500 shrink-0" />
+                  1 câu
                 </button>
               ) : null}
-
+            </div>
+            <div className="flex items-center justify-between gap-2 -mt-0.5 text-[11px] whitespace-nowrap">
+              <button
+                onClick={() => finish("focus")}
+                aria-label={`Phiên tập trung ${getFocusSettings().minutes} phút`}
+                title="Mở app và học trọn vài phút, tắt nhắc nhở (phím F)"
+                className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-violet-600 dark:text-violet-400 hover:text-violet-800 dark:hover:text-violet-300 hover:underline font-medium"
+              >
+                <Crosshair className="w-3 h-3" />
+                Tập trung {getFocusSettings().minutes} phút
+              </button>
               <button
                 onClick={() => finish("snooze")}
                 aria-label={`Hoãn nhắc ôn tập ${payload.snoozeMinutes} phút`}
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800 text-[11px] font-semibold transition-colors ml-auto active:scale-95"
+                title="Hoãn (Esc)"
+                className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:underline font-medium"
               >
-                <Clock className="w-3 h-3 text-amber-500" />
-                Hoãn {payload.snoozeMinutes}p
+                <Clock className="w-3 h-3" />
+                Hoãn {payload.snoozeMinutes} phút
               </button>
             </div>
           </div>

@@ -21,6 +21,9 @@ export function applyRawInputAttributes(el: Element | null | undefined | any): v
   if (!el || typeof el.setAttribute !== "function") return;
   const tag = (el.tagName || "").toUpperCase();
 
+  // Already done (each React render of a screen re-adds its inputs to the observed tree)
+  if (tag !== "FORM" && el.getAttribute?.("data-form-type") === "other") return;
+
   if (tag === "INPUT") {
     const type = (el.type || (typeof el.getAttribute === "function" ? el.getAttribute("type") : null) || "text").toLowerCase();
     if (!["checkbox", "radio", "range", "color", "file", "button", "submit", "reset"].includes(type)) {

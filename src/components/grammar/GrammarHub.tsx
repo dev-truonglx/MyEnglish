@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { BookOpen, ChevronDown, Clock, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
+import { ArrowRight, BookOpen, Check, ChevronDown, Clock, CircleAlert, Eye, GraduationCap, Layers, Loader2, RefreshCw, RotateCcw, Sparkles, Trash2, Upload, Wrench } from "lucide-react";
 import type { GrammarBookFile } from "@/types/grammarBook";
 import {
   ensureGrammarBookSeeded,
@@ -261,14 +261,12 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
   }
 
   const hasBook = chapters.length > 0;
-  const total = stats?.totalLessons ?? 0;
-  const studiedPercent = total > 0 ? Math.round(((stats?.studiedCount ?? 0) / total) * 100) : 0;
 
   return (
     <div className={PAGE_CONTAINER}>
-      <div className="mx-auto max-w-4xl space-y-5 pb-6">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="space-y-1">
+      <div className="mx-auto max-w-5xl space-y-5 pb-6">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div className="space-y-1 min-w-0">
             <h1 className="flex items-center gap-2.5 text-xl font-bold text-slate-900 dark:text-white sm:text-2xl">
               <GraduationCap className="h-6 w-6 shrink-0 text-cyan-600 dark:text-cyan-400" />
               <span>Ngữ pháp</span>
@@ -278,12 +276,13 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
             </p>
           </div>
 
+          {/* Importing exercises is occasional: a quiet button, the learning actions stay the loud ones */}
           <button
             type="button"
             onClick={() => setExerciseImportOpen(true)}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 px-3.5 py-2 text-xs font-bold !text-white shadow-sm transition-all shrink-0 cursor-pointer"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-300 hover:text-cyan-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-cyan-800 dark:hover:text-cyan-300 shrink-0"
           >
-            <Sparkles className="h-4 w-4" />
+            <Sparkles className="h-3.5 w-3.5" />
             <span>Nhập bài tập AI & Lịch sử</span>
           </button>
         </div>
@@ -338,74 +337,14 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
           </div>
         ) : (
           <>
-            <section className="space-y-3" aria-label="Hôm nay">
-              <h2 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Hôm nay</h2>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <TodayCard icon={<Clock className="h-3.5 w-3.5" />} label="Ôn lại" highlight={(stats?.dueCount ?? 0) > 0}>
-                  {stats && stats.dueCount > 0 ? (
-                    <button
-                      type="button"
-                      onClick={startReview}
-                      disabled={starting}
-                      className="w-full rounded-lg bg-cyan-600 px-3 py-2 text-left text-sm font-semibold !text-white transition hover:bg-cyan-500 disabled:opacity-50"
-                    >
-                      Ôn tập ({stats.dueCount} bài đến hạn)
-                    </button>
-                  ) : (
-                    <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Không có bài đến hạn ✓</p>
-                  )}
-                </TodayCard>
-
-                <TodayCard icon={<Sparkles className="h-3.5 w-3.5" />} label="Bài mới">
-                  {plan?.relearn ? (
-                    <LessonButton
-                      primary
-                      text={`Học lại: ${plan.relearn.titleVn || plan.relearn.title}`}
-                      hint="Lần kiểm tra nhanh trước chưa đạt"
-                      onClick={() => openLesson(plan.relearn!.id)}
-                    />
-                  ) : plan?.nextLesson && !plan.newLessonDoneToday ? (
-                    <LessonButton
-                      primary
-                      text={`Bài mới: ${plan.nextLesson.titleVn || plan.nextLesson.title}`}
-                      onClick={() => openLesson(plan.nextLesson!.id)}
-                    />
-                  ) : plan?.nextLesson ? (
-                    <div className="space-y-1.5">
-                      <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Đã học bài mới hôm nay ✓</p>
-                      <button
-                        type="button"
-                        onClick={() => openLesson(plan.nextLesson!.id)}
-                        className="text-xs font-semibold text-cyan-700 hover:underline dark:text-cyan-400"
-                      >
-                        Học tiếp bài sau
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-sm font-semibold text-slate-700 dark:text-zinc-200">Đã đi hết lộ trình ✓</p>
-                  )}
-                </TodayCard>
-
-                <TodayCard icon={<Layers className="h-3.5 w-3.5" />} label="Luyện tập">
-                  <LessonButton text="Luyện theo thì" hint="Chọn thì muốn luyện, làm các câu chỉ dùng thì đó" onClick={openPractice} />
-                </TodayCard>
-              </div>
-
-              <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3.5 dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-xs text-slate-600 dark:text-zinc-400">
-                  <span>
-                    <strong className="font-mono text-sm text-slate-900 dark:text-white">
-                      {stats?.studiedCount ?? 0}/{total}
-                    </strong>{" "}
-                    bài đã học
-                  </span>
-                  <span>{stats?.masteredCount ?? 0} bài thuộc</span>
-                </div>
-                <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-zinc-800">
-                  <div className="h-full rounded-full bg-cyan-500 transition-all duration-300" style={{ width: `${studiedPercent}%` }} />
-                </div>
-              </div>
-            </section>
+            <TodayPanel
+              stats={stats}
+              plan={plan}
+              starting={starting}
+              onReview={startReview}
+              onOpenLesson={openLesson}
+              onPractice={openPractice}
+            />
 
             <div ref={pickerRef} className="scroll-mt-2">
               <PathPicker
@@ -417,19 +356,11 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
               />
             </div>
 
-            <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-slate-200 pt-4 text-xs dark:border-zinc-800">
-              <button
-                type="button"
-                onClick={() => setExerciseImportOpen(true)}
-                className="inline-flex items-center gap-1.5 font-bold text-cyan-600 transition hover:text-cyan-700 dark:text-cyan-400 dark:hover:text-cyan-300"
-              >
-                <Sparkles className="h-3.5 w-3.5" />
-                Nhập bài tập AI & Lịch sử
-              </button>
+            <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t border-slate-200 pt-4 text-xs dark:border-zinc-800">
               <button
                 type="button"
                 onClick={() => setImportOpen(true)}
-                className="inline-flex items-center gap-1.5 text-slate-400 transition hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-400 ml-auto"
+                className="inline-flex items-center gap-1.5 text-slate-400 transition hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-400"
                 title="Nhập dữ liệu gốc từ sách PDF"
               >
                 <Upload className="h-3 w-3" />
@@ -535,39 +466,195 @@ function ManagedItemsPanel({
   );
 }
 
-function TodayCard({ icon, label, highlight = false, children }: { icon: ReactNode; label: string; highlight?: boolean; children: ReactNode }) {
-  return (
-    <div
-      className={`space-y-2 rounded-xl border p-3.5 shadow-sm ${
-        highlight
-          ? "border-cyan-200 bg-cyan-50/50 dark:border-cyan-900/60 dark:bg-cyan-950/20"
-          : "border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
-      }`}
-    >
-      <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-700 dark:text-cyan-300">
-        {icon}
-        <span>{label}</span>
-      </div>
-      {children}
-    </div>
-  );
-}
+type TodayStep = {
+  key: "review" | "lesson" | "practice";
+  icon: ReactNode;
+  label: string;
+  /** What it is today ("2 bài đến hạn", the lesson's name) */
+  detail: string;
+  done: boolean;
+  /** null: nothing to do (done, or the path is finished) */
+  action: (() => void) | null;
+  actionText: string;
+};
 
-function LessonButton({ text, hint, primary = false, onClick }: { text: string; hint?: string; primary?: boolean; onClick: () => void }) {
+/**
+ * Today's grammar in one card: the one thing to do next, big, with the day's three steps beside it (review,
+ * new lesson, practice) and the progress of the whole path underneath.
+ */
+function TodayPanel({
+  stats,
+  plan,
+  starting,
+  onReview,
+  onOpenLesson,
+  onPractice,
+}: {
+  stats: Stats | null;
+  plan: TodayGrammarPlan | null;
+  starting: boolean;
+  onReview: () => void;
+  onOpenLesson: (lessonId: string) => void;
+  onPractice: () => void;
+}) {
+  const due = stats?.dueCount ?? 0;
+  const total = stats?.totalLessons ?? 0;
+  const mastered = stats?.masteredCount ?? 0;
+  const learning = stats?.learningCount ?? 0;
+  const pct = (n: number) => `${total > 0 ? Math.min(100, (n * 100) / total) : 0}%`;
+  const lessonName = (l: { titleVn?: string; title: string }) => l.titleVn || l.title;
+
+  const lessonStep: TodayStep = plan?.relearn
+    ? {
+        key: "lesson",
+        icon: <RotateCcw className="h-4 w-4" />,
+        label: "Học lại",
+        detail: lessonName(plan.relearn),
+        done: false,
+        action: () => onOpenLesson(plan.relearn!.id),
+        actionText: "Học lại bài này",
+      }
+    : plan?.nextLesson && !plan.newLessonDoneToday
+      ? {
+          key: "lesson",
+          icon: <Sparkles className="h-4 w-4" />,
+          label: "Bài mới",
+          detail: lessonName(plan.nextLesson),
+          done: false,
+          action: () => onOpenLesson(plan.nextLesson!.id),
+          actionText: "Học bài mới",
+        }
+      : {
+          key: "lesson",
+          icon: <Sparkles className="h-4 w-4" />,
+          label: "Bài mới",
+          detail: plan?.nextLesson ? "Đã học bài mới hôm nay" : "Đã đi hết lộ trình",
+          done: true,
+          // Wanting more is fine: the next lesson stays one click away
+          action: plan?.nextLesson ? () => onOpenLesson(plan.nextLesson!.id) : null,
+          actionText: plan?.nextLesson ? `Học tiếp: ${lessonName(plan.nextLesson)}` : "",
+        };
+  const steps: TodayStep[] = [
+    {
+      key: "review",
+      icon: <Clock className="h-4 w-4" />,
+      label: "Ôn lại",
+      detail: due > 0 ? `${due} bài đến hạn` : "Không có bài đến hạn",
+      done: due === 0,
+      action: due > 0 ? onReview : null,
+      actionText: `Ôn tập ${due} bài`,
+    },
+    lessonStep,
+    {
+      key: "practice",
+      icon: <Layers className="h-4 w-4" />,
+      label: "Luyện theo thì",
+      detail: "Chọn thì muốn luyện, làm các câu chỉ dùng thì đó",
+      done: false,
+      action: onPractice,
+      actionText: "Chọn thì để luyện",
+    },
+  ];
+  // The next thing: due reviews first (they are about to be forgotten), then the lesson, then practice
+  const primary = steps.find((s) => s.key !== "practice" && !s.done && s.action) ?? steps[2];
+  const allDone = steps[0].done && lessonStep.done;
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={`w-full space-y-0.5 rounded-lg border px-3 py-2 text-left transition ${
-        primary
-          ? "border-cyan-600 bg-cyan-600 hover:bg-cyan-500"
-          : "border-slate-200 hover:border-cyan-400 hover:bg-cyan-50/40 dark:border-zinc-700 dark:hover:border-cyan-700 dark:hover:bg-cyan-950/20"
-      }`}
-    >
-      <span className={`block break-words text-sm font-semibold ${primary ? "!text-white" : "text-slate-900 dark:text-white"}`}>{text}</span>
-      {hint && (
-        <span className={`block text-xs ${primary ? "text-cyan-100" : "text-slate-500 dark:text-zinc-400"}`}>{hint}</span>
-      )}
-    </button>
+    <section aria-label="Hôm nay" className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+      {/* The one thing to do next */}
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-cyan-300 bg-gradient-to-br from-cyan-50 to-white p-5 shadow-md shadow-cyan-500/5 dark:border-cyan-800/70 dark:from-cyan-950/30 dark:to-zinc-900">
+        <div className="space-y-1.5">
+          <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
+            {primary.icon}
+            {allDone ? "Hôm nay đã xong · muốn luyện thêm?" : `Tiếp theo · ${primary.label}`}
+          </span>
+          <p className="break-words text-lg font-bold leading-snug text-slate-900 dark:text-white">
+            {primary.key === "practice" ? "Luyện các thì bạn muốn chắc hơn" : primary.detail}
+          </p>
+          {primary.key === "lesson" && plan?.relearn && (
+            <p className="text-xs text-slate-600 dark:text-zinc-400">Lần kiểm tra nhanh trước chưa đạt: xem lại bài rồi làm lại phần kiểm tra.</p>
+          )}
+          {primary.key === "review" && (
+            <p className="text-xs text-slate-600 dark:text-zinc-400">Các bài này sắp quên: ôn trước rồi mới học bài mới.</p>
+          )}
+        </div>
+        <div className="space-y-3">
+          <button
+            type="button"
+            onClick={primary.action ?? undefined}
+            disabled={starting && primary.key === "review"}
+            className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-bold !text-white shadow-sm shadow-cyan-600/30 transition hover:bg-cyan-500 disabled:opacity-60"
+          >
+            {starting && primary.key === "review" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            {primary.actionText}
+            <ArrowRight className="h-4 w-4" />
+          </button>
+          {/* The whole path: remembered (green) and still learning (blue) */}
+          <div className="space-y-1">
+            <div className="flex h-2 overflow-hidden rounded-full bg-slate-200/70 dark:bg-zinc-800">
+              <div className="h-full bg-emerald-500 transition-all duration-300" style={{ width: pct(mastered) }} />
+              <div className="h-full bg-cyan-500 transition-all duration-300" style={{ width: pct(learning) }} />
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-600 dark:text-zinc-400">
+              <span>
+                <b className="font-mono text-slate-900 dark:text-white">{mastered + learning}/{total}</b> bài đã học
+              </span>
+              <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />{mastered} đã thuộc</span>
+              <span className="inline-flex items-center gap-1"><span className="h-1.5 w-1.5 rounded-full bg-cyan-500" />{learning} đang học</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* The day's steps */}
+      <ol className="grid grid-cols-1 gap-2 sm:grid-cols-3 lg:grid-cols-1">
+        {steps.map((step) => {
+          const isPrimary = step === primary;
+          const clickable = !!step.action && !isPrimary;
+          const body = (
+            <>
+              <span
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                  step.done
+                    ? "bg-emerald-100 text-emerald-600 dark:bg-emerald-950/60 dark:text-emerald-400"
+                    : isPrimary
+                      ? "bg-cyan-600 text-white"
+                      : "bg-slate-100 text-slate-500 dark:bg-zinc-800 dark:text-zinc-400"
+                }`}
+              >
+                {step.done ? <Check className="h-4 w-4" /> : step.icon}
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-semibold text-slate-900 dark:text-white">{step.label}</span>
+                <span className="block truncate text-xs text-slate-500 dark:text-zinc-400" title={step.detail}>
+                  {step.done && step.action ? step.actionText : step.detail}
+                </span>
+              </span>
+              {isPrimary ? (
+                <span className="shrink-0 rounded-full bg-cyan-100 px-2 py-0.5 text-[10px] font-bold text-cyan-700 dark:bg-cyan-950/60 dark:text-cyan-300">Tiếp theo</span>
+              ) : clickable ? (
+                <ArrowRight className="h-4 w-4 shrink-0 text-slate-400" />
+              ) : null}
+            </>
+          );
+          const cls = `flex w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition ${
+            isPrimary
+              ? "border-cyan-200 bg-cyan-50/60 dark:border-cyan-900/60 dark:bg-cyan-950/20"
+              : "border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"
+          } ${clickable ? "hover:border-cyan-300 hover:bg-cyan-50/40 dark:hover:border-cyan-800 dark:hover:bg-cyan-950/20" : ""}`;
+          return (
+            <li key={step.key} className="min-w-0">
+              {clickable ? (
+                <button type="button" onClick={step.action!} className={`${cls} h-full`}>
+                  {body}
+                </button>
+              ) : (
+                <div className={`${cls} h-full`}>{body}</div>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }

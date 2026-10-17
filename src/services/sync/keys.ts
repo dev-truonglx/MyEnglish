@@ -24,6 +24,7 @@ export const EPOCH = "1970-01-01T00:00:00.000Z";
 
 export type KvStrategy =
   | "lww" // newest change wins
+  | "counter" // numeric string: the larger number wins
   | "maxMap" // { key: number }: the larger number per key
   | "unionObj" // { key: value }: keys of both, the local value wins a clash
   | "arrayUnion" // [string]: both lists
@@ -56,11 +57,16 @@ export const SYNCED_KV: Record<string, KvStrategy> = {
   // Progress kept outside SQLite
   myenglish_study_logs_v1: "maxMap",
   myenglish_achievements_v1: "unionObj",
+  myenglish_first_try_total_v1: "counter",
   myenglish_pronunciation_v1: "pronunciation",
   myenglish_grammar_introduced_v1: "arrayUnion",
   myenglish_grammar_intro_dates_v1: "unionObj",
   myenglish_grammar_item_levels_v1: "maxMap",
   myenglish_grammar_set_scores_v1: "newestAt",
+  // Today's quests and whether the chest was opened: another machine must not open it a second time
+  myenglish_daily_quests_v1: "lww",
+  myenglish_weekly_challenges_v1: "lww",
+  myenglish_bonus_freezes_v1: "arrayUnion",
 };
 
 export function isSyncedKvKey(key: string): boolean {
@@ -97,6 +103,13 @@ export function mergeKv(strategy: KvStrategy, local: string | null, remote: stri
   switch (strategy) {
     case "lww":
       return remoteNewer ? remote : null;
+    case "counter": {
+      const x = Number(local);
+      const y = Number(remote);
+      if (!Number.isFinite(y)) return null;
+      if (!Number.isFinite(x)) return String(y);
+      return y > x ? String(y) : null;
+    }
     case "maxMap": {
       const a = parseObject(local);
       const b = parseObject(remote);

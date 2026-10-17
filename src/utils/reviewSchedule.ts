@@ -3,7 +3,8 @@ import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
 import type { GrammarProgress } from "@/types/grammar";
 import { getNextReviewDate } from "@/services/cards";
 
-export type ReviewTimeBucket = "all" | "due" | "today" | "1-3d" | "4-7d" | "future" | "new";
+/** "waiting": a recall card waiting for room in the daily new-card budget (see services/librarySchedule) */
+export type ReviewTimeBucket = "all" | "due" | "today" | "1-3d" | "4-7d" | "future" | "waiting" | "new";
 
 export interface ReviewTimeRelativeInfo {
   label: string;
@@ -33,8 +34,8 @@ export interface ReviewStepProjection {
  * 3. Never-studied new words (newest created first)
  */
 export function compareNextReview(a: WordDetail, b: WordDetail, _now: Date = new Date()): number {
-  const isNewA = (!a.srs.reps && !a.srs.repetitions) || a.srs.repetitions === 0;
-  const isNewB = (!b.srs.reps && !b.srs.repetitions) || b.srs.repetitions === 0;
+  const isNewA = (a.srs.reps ?? a.srs.repetitions ?? 0) === 0;
+  const isNewB = (b.srs.reps ?? b.srs.repetitions ?? 0) === 0;
 
   // If both are new: sort by created_at DESC (newest created first)
   if (isNewA && isNewB) {
@@ -193,7 +194,7 @@ export function predictFutureWordReviews(
   now: Date = new Date()
 ): ReviewStepProjection[] {
   const steps: ReviewStepProjection[] = [];
-  const isNew = (!word.srs.reps && !word.srs.repetitions) || word.srs.repetitions === 0;
+  const isNew = (word.srs.reps ?? word.srs.repetitions ?? 0) === 0;
   // The next review comes from the earlier of the two cards (getNextReviewDate): simulate that same card
   const prod = word.srsProduction;
   const srs =
@@ -281,14 +282,22 @@ export function predictFutureGrammarReviews(
 
   try {
     const scheduler = getGrammarScheduler();
+    const lastReviewStr = progress?.lastReview || progress?.lastAttemptDate || null;
+    const nextReviewStr = progress?.nextReviewDate || now.toISOString();
+    const scheduledDays =
+      !isUnattempted && lastReviewStr && progress?.nextReviewDate
+        ? Math.max(0, Math.round((new Date(progress.nextReviewDate).getTime() - new Date(lastReviewStr).getTime()) / 86400000))
+        : 0;
     const rowLike: Partial<SRSReview> = {
-      next_review_date: progress?.nextReviewDate || now.toISOString(),
+      word_id: progress?.lessonId,
+      next_review_date: nextReviewStr,
       stability: progress?.stability || 0,
       difficulty: progress?.difficulty || 0,
+      scheduled_days: scheduledDays,
       reps: progress?.reps || 0,
       lapses: progress?.lapses || 0,
       state: (progress?.fsrsState ?? (isUnattempted ? State.New : State.Review)) as FSRSState,
-      last_review: progress?.lastReview || progress?.lastAttemptDate || null,
+      last_review: lastReviewStr,
     };
 
     let currentCard = srsRowToCard(rowLike);

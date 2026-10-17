@@ -1,10 +1,12 @@
 import DisplaySettings from "./dashboard/DisplaySettings";
+import SettingsSection from "./dashboard/SettingsSection";
+import { FOCUS_DURATIONS, getFocusSettings, saveFocusSettings } from "@/services/focusSettings";
 import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
 import ResetAppDataModal from "./dashboard/ResetAppDataModal";
 import Jargon from "./Jargon";
 import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
 import { ANCHOR_TIMES, getQuietHours, type ReminderAnchor } from "@/services/reminderMoments";
-import { getActivityLogs, getDailyGoal, getLocalDateString } from "@/services/streak";
+import { getActivityLogs, getDailyGoal, getLocalDateString, setDailyGoal } from "@/services/streak";
 import { isMainSessionActive } from "@/services/activeSession";
 import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
@@ -30,6 +32,13 @@ import {
   Power,
   RotateCcw,
   AlertTriangle,
+  GraduationCap,
+  Palette,
+  Bot,
+  Brain,
+  Database,
+  Target,
+  Timer,
 } from "lucide-react";
 import {
   getSavedAutostartPreference,
@@ -94,6 +103,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [fsrsSettings, setFsrsSettings] = useState(() => getFSRSSettings());
   const [studyLimits, setStudyLimits] = useState(() => getStudyLimits());
   const [pretestOn, setPretestOn] = useState(isPretestEnabled);
+  const [dailyGoal, setDailyGoalState] = useState(getDailyGoal);
+  const [focusMinutes, setFocusMinutes] = useState(() => getFocusSettings().minutes);
   const [testingNotif, setTestingNotif] = useState(false);
   const [testingDueWord, setTestingDueWord] = useState(false);
   const [testingPopup, setTestingPopup] = useState(false);
@@ -133,7 +144,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       const storedPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
       const pathParam = pathToTest !== undefined ? (pathToTest.trim() || undefined) : storedPath;
       const res = await invoke<CliStatus>("check_cli_status", { customPath: pathParam });
-      setCliStatus(res);
+      setCliStatus(res ?? null);
     } catch (err) {
       setCliStatus({
         installed: false,
@@ -324,10 +335,33 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Cài đặt</h2>
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Chỉnh cách học, lịch nhắc và kết nối AI. Mỗi thay đổi được lưu ngay.
+            Phần quan trọng cho việc học ở trên cùng; giao diện, AI và phần nâng cao được thu gọn, cần thì mở ra. Mỗi thay
+            đổi được lưu ngay.
           </p>
         </div>
       </div>
+
+      {/* Jump to a section */}
+      <nav className="-mt-4 flex flex-wrap gap-1.5" aria-label="Các mục cài đặt">
+        {(
+          [
+            ["study", "Học mỗi ngày"],
+            ["reminders", "Nhắc học"],
+            ["display", "Giao diện & âm thanh"],
+            ["ai", "AI"],
+            ["algorithm", "Thuật toán lịch ôn"],
+            ["data", "Dữ liệu"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            onClick={() => document.getElementById(`settings-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            className="px-2.5 py-1 rounded-lg text-[11px] font-medium text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700"
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {/* Feedback alert message */}
       {notifFeedback && (
@@ -347,14 +381,82 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
           )}
         </div>
       )}
-      {/* 1. HỌC: cách học hằng ngày */}
-      <section className="space-y-3">
-        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Học</h3>
-        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-          <DisplaySettings />
+      {/* 1. HỌC MỖI NGÀY: what shapes the learning, first and highlighted */}
+      <SettingsSection
+        id="study"
+        tone="primary"
+        icon={<GraduationCap className="w-5 h-5" />}
+        title="Học mỗi ngày"
+        description="Bạn học bao nhiêu mỗi ngày: mục tiêu, số từ mới, độ dài một phiên."
+        summary={`${dailyGoal} câu/ngày · ${studyLimits.newCardsPerDay} thẻ mới`}
+      >
+          <div className="grid gap-3 md:grid-cols-2">
+            {/* Daily goal: the answers that count a day as done (streak, Today) */}
+            <div className="p-4 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Target className="w-3.5 h-3.5 text-emerald-500" /> Mục tiêu mỗi ngày
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">Số câu trả lời để tính là đã học xong hôm nay (giữ chuỗi ngày học).</p>
+                </div>
+                <span className="text-sm font-bold font-mono text-emerald-600 dark:text-emerald-400">{dailyGoal}</span>
+              </div>
+              <div className="grid grid-cols-5 gap-1.5">
+                {[10, 15, 30, 45, 60].map((g) => (
+                  <button
+                    key={g}
+                    onClick={() => {
+                      setDailyGoal(g);
+                      setDailyGoalState(g);
+                      setNotifFeedback(`Đã đặt mục tiêu mỗi ngày: ${g} câu.`);
+                    }}
+                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                      dailyGoal === g
+                        ? "bg-emerald-600 text-white shadow-sm font-bold"
+                        : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
+                    }`}
+                  >
+                    {g}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Focus session length: what "Tập trung" starts everywhere */}
+            <div className="p-4 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
+                    <Timer className="w-3.5 h-3.5 text-violet-500" /> Độ dài phiên tập trung
+                  </div>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400">Bấm "Tập trung" ở bất kỳ đâu sẽ học trọn chừng này phút, tắt nhắc nhở.</p>
+                </div>
+                <span className="text-sm font-bold font-mono text-violet-600 dark:text-violet-400">{focusMinutes}′</span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {FOCUS_DURATIONS.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => {
+                      saveFocusSettings({ minutes: m });
+                      setFocusMinutes(m);
+                    }}
+                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                      focusMinutes === m
+                        ? "bg-violet-600 text-white shadow-sm font-bold"
+                        : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
+                    }`}
+                  >
+                    {m} phút
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
 
           {/* Daily study limits */}
-          <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
+          <div className="p-4 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
             {([
               {
                 key: "newCardsPerDay" as const,
@@ -418,12 +520,16 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               />
             </label>
           </div>
-        </div>
-      </section>
+      </SettingsSection>
 
       {/* 2. NHẮC HỌC: khi nào app nhắc bạn */}
-      <section className="space-y-3">
-        <h3 className="px-1 text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">Nhắc học</h3>
+      <SettingsSection
+        id="reminders"
+        icon={<Bell className="w-5 h-5" />}
+        title="Nhắc học"
+        description="Khi nào app nhắc bạn ôn: mỗi bao lâu, vào giờ nào, giờ yên tĩnh."
+        summary={reminderSettings.enabled ? (reminderSettings.intervalMinutes > 0 ? `Bật · mỗi ${reminderSettings.intervalMinutes} phút` : "Bật · theo giờ học") : "Đang tắt"}
+      >
         <div className="space-y-6">
           {/* SECTION 0: AUTOSTART SYSTEM SETTING */}
           <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
@@ -944,16 +1050,29 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </div>
           </div>
         </div>
-      </section>
+      </SettingsSection>
 
-      {/* 3. AI & NÂNG CAO: không bắt buộc để học */}
-      <section className="space-y-3">
-        <div className="px-1 space-y-1">
-          <h3 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-zinc-400">AI & nâng cao</h3>
-          <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Không bắt buộc để học. AI CLI chỉ cần cho các tính năng AI như Viết và sửa lỗi.
-          </p>
-        </div>
+      {/* 3. GIAO DIỆN: chế độ, cỡ chữ, âm thanh, giọng đọc */}
+      <SettingsSection
+        id="display"
+        icon={<Palette className="w-5 h-5" />}
+        title="Giao diện, âm thanh & giọng đọc"
+        description="Chế độ đơn giản, chế độ mất gốc, cỡ chữ, âm thanh phản hồi, giọng đọc tiếng Anh."
+        defaultOpen={false}
+      >
+        <DisplaySettings />
+      </SettingsSection>
+
+      {/* 4. AI: không bắt buộc để học, thu gọn */}
+      <SettingsSection
+        id="ai"
+        tone="muted"
+        icon={<Bot className="w-5 h-5" />}
+        title="AI (không bắt buộc)"
+        description="Chỉ cần cho các tính năng AI như Viết và sửa lỗi. Không có AI bạn vẫn học bình thường."
+        summary={!cliStatus ? "Đang kiểm tra…" : cliStatus.installed ? "● Đã kết nối" : "○ Chưa kết nối"}
+        defaultOpen={false}
+      >
         <div className="space-y-6">
           {/* AI CLI status: information only. Without it the app still works; only the AI features are off */}
           <div className="p-4 md:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -1454,7 +1573,20 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </p>
           </div>
 
-          {/* Thuật toán lịch ôn: nâng cao, đã có sẵn cấu hình mặc định */}
+        </div>
+      </SettingsSection>
+
+      {/* 5. THUẬT TOÁN LỊCH ÔN: nâng cao, đã có sẵn cấu hình mặc định */}
+      <SettingsSection
+        id="algorithm"
+        tone="muted"
+        icon={<Brain className="w-5 h-5" />}
+        title="Thuật toán lịch ôn (nâng cao)"
+        description="Mục tiêu ghi nhớ, từ khó, tối ưu tham số FSRS. Mặc định đã tốt, ít khi cần đổi."
+        summary={`Mục tiêu ghi nhớ ${Math.round(fsrsSettings.requestRetention * 100)}%`}
+        defaultOpen={false}
+      >
+        <div className="space-y-6">
           <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
             <div className="flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 text-indigo-700 dark:text-indigo-400 font-bold text-xs uppercase tracking-wider font-mono">
@@ -1530,21 +1662,18 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </div>
           </div>
         </div>
-      </section>
+      </SettingsSection>
 
-      {/* 4. QUẢN LÝ DỮ LIỆU & ĐẶT LẠI */}
-      <section className="space-y-3">
-        <div className="flex items-center gap-2">
-          <RotateCcw className="w-5 h-5 text-rose-600 dark:text-rose-400" />
-          <h2 className="text-base font-bold text-slate-900 dark:text-white">
-            4. Quản lý dữ liệu & Đặt lại ứng dụng
-          </h2>
-        </div>
-        <p className="text-xs text-slate-500 dark:text-zinc-400">
-          Xóa toàn bộ quá trình học để bắt đầu lại từ đầu như một bản cài đặt mới, hoặc nạp lại dữ liệu gốc.
-        </p>
-
-        <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+      {/* 6. DỮ LIỆU & ĐẶT LẠI */}
+      <SettingsSection
+        id="data"
+        tone="muted"
+        icon={<Database className="w-5 h-5" />}
+        title="Dữ liệu & đặt lại"
+        description="Xoá toàn bộ quá trình học để bắt đầu lại như bản cài mới."
+        defaultOpen={false}
+      >
+        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1 max-w-xl">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -1565,9 +1694,9 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </button>
           </div>
         </div>
-      </section>
+      </SettingsSection>
 
-      {/* 5. CÔNG CỤ CHO NHÀ PHÁT TRIỂN: thu gọn, người học không cần dùng */}
+      {/* 7. CÔNG CỤ CHO NHÀ PHÁT TRIỂN: thu gọn, người học không cần dùng */}
       <details className="rounded-2xl border border-dashed border-slate-300 dark:border-zinc-700 bg-slate-50/60 dark:bg-zinc-950/40 p-4">
         <summary className="cursor-pointer select-none text-xs font-bold text-slate-600 dark:text-zinc-400">
           Công cụ cho nhà phát triển (kiểm thử thông báo, tạo từ đến hạn)

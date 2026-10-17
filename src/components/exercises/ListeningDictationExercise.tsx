@@ -4,6 +4,7 @@ import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { generateMultipleChoiceQuestion, type MultipleChoiceOption } from "@/services/smartReview";
 import { samePronunciation } from "@/utils/exerciseHints";
+import { playWrongTry } from "@/services/sound";
 
 interface ListeningDictationExerciseProps {
   word: WordDetail;
@@ -35,9 +36,11 @@ export default function ListeningDictationExercise({
   const [isPlaying, setIsPlaying] = useState(false);
 
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const playingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (playingTimerRef.current) clearTimeout(playingTimerRef.current);
     };
   }, []);
 
@@ -45,7 +48,11 @@ export default function ListeningDictationExercise({
     (rate: number = 0.9) => {
       setIsPlaying(true);
       onSpeak(word.word, rate);
-      setTimeout(() => setIsPlaying(false), 900);
+      if (playingTimerRef.current) clearTimeout(playingTimerRef.current);
+      playingTimerRef.current = setTimeout(() => {
+        playingTimerRef.current = null;
+        setIsPlaying(false);
+      }, 900);
     },
     [onSpeak, word.word]
   );
@@ -67,6 +74,7 @@ export default function ListeningDictationExercise({
         if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
         onComplete(attempts === 0, attempts, Rating.Good);
       } else {
+        playWrongTry();
         setWrongIds((prev) => new Set(prev).add(option.id));
       }
     },
@@ -75,7 +83,7 @@ export default function ListeningDictationExercise({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAnswered) return;
+      if (isAnswered || e.metaKey || e.ctrlKey || e.altKey) return;
       const idx = ["1", "2", "3", "4"].indexOf(e.key);
       if (idx >= 0 && question.options[idx]) handleSelect(question.options[idx]);
       if (e.key === "r" || e.key === "R") playAudio(0.9);

@@ -4,17 +4,18 @@ import { AI_VOCAB_ENABLED } from "@/services/features";
 export type DashboardTab =
   | "today"
   | "library"
+  | "known"
   | "capture"
   | "reading"
   | "writing"
   | "review"
+  | "forgotten"
   | "analytics"
   | "guide"
   | "grammar"
   | "pronunciation"
   | "leaderboard"
   | "account";
-export type FilterMode = "all" | "due" | "mastered" | "leech";
 export type ViewMode = "gallery" | "table";
 
 /**
@@ -41,7 +42,7 @@ export interface LibraryStats {
  * while one of its tabs is shown the header has a small bar to switch between them. Tab ids are unchanged
  * (other screens call setActiveTab("…")); every tab belongs to exactly one entry.
  */
-export type NavGroupId = "today" | "vocab" | "grammar" | "practice" | "settings" | "account";
+export type NavGroupId = "today" | "vocab" | "grammar" | "practice" | "quick" | "settings" | "account";
 export interface NavGroup {
   id: NavGroupId;
   label: string;
@@ -54,7 +55,6 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
     tabs: [
       { tab: "today", label: "Hôm nay" },
       { tab: "analytics", label: "Tiến độ" },
-      { tab: "leaderboard", label: "Xếp hạng" },
     ],
   },
   {
@@ -63,6 +63,7 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
     tabs: [
       { tab: "review", label: "Ôn tập" },
       { tab: "library", label: "Từ đã học" },
+      { tab: "known", label: "Đã biết" },
       { tab: "capture", label: AI_VOCAB_ENABLED ? "Thêm từ bằng AI" : "Lộ trình từ vựng" },
     ],
   },
@@ -74,6 +75,15 @@ export const SIMPLE_NAV_GROUPS: NavGroup[] = [
       { tab: "pronunciation", label: "Phát âm" },
       { tab: "reading", label: "Đọc" },
       { tab: "writing", label: "Viết" },
+    ],
+  },
+  // Not in the list of entries either: the sidebar shows its tabs one by one in "Truy cập nhanh", under the list
+  {
+    id: "quick",
+    label: "Truy cập nhanh",
+    tabs: [
+      { tab: "forgotten", label: "Từ hay quên" },
+      { tab: "leaderboard", label: "Xếp hạng" },
     ],
   },
   { id: "settings", label: "Cài đặt", tabs: [{ tab: "guide", label: "Cài đặt" }] },

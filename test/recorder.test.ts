@@ -155,7 +155,10 @@ describe("migrations", () => {
     const wordCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(words);`)).map((c) => c.name);
     expect(wordCols).toContain("suspended");
     const [{ user_version }] = await conn.select<{ user_version: number }[]>(`PRAGMA user_version;`);
-    expect(user_version).toBe(16);
+    expect(user_version).toBe(17);
+    // v17: the mistakes' normalized key
+    const mistakeCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(mistakes);`)).map((c) => c.name);
+    expect(mistakeCols).toContain("norm_key");
     const tables = (await conn.select<{ name: string }[]>(`SELECT name FROM sqlite_master WHERE type = 'table';`)).map((t) => t.name);
     expect(tables).toContain("learning_events");
     expect(tables).toContain("mistakes");

@@ -6,8 +6,9 @@ import { pipeline, requeuePendingWords, type PipelineItem } from "@/services/pip
 import { srsWorker, getStudyLimits } from "@/services/srs";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import { isPlaceholderMeaning } from "@/services/db";
-import { getDueCards, isWordDue, practiceCards, getNextReviewDate, toCard } from "@/services/cards";
-import { formatNextReviewRelative, type ReviewTimeBucket } from "@/utils/reviewSchedule";
+import { getDueCards, isWordDue, practiceCards, toCard } from "@/services/cards";
+import { type ReviewTimeBucket } from "@/utils/reviewSchedule";
+import { librarySchedule } from "@/services/librarySchedule";
 import { calculateStreakAndGoal } from "@/services/streak";
 import { applyComebackToWork, resolveComeback } from "@/services/comeback";
 import { shouldShowOnboarding } from "@/services/onboarding";
@@ -15,14 +16,12 @@ import { AI_VOCAB_ENABLED } from "@/services/features";
 import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, topUpNewWords, syncWordsWithCatalog } from "@/services/vocabFeed";
 import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
 import { ensureGrammarBookSeeded } from "@/services/grammarBook";
-import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
 import { hasChosenInitialTenses } from "@/services/grammarPath";
 import { needsVocabMigration } from "@/services/vocabReset";
 import { isSimpleMode } from "@/services/learnerProfile";
-import { countWordStatus, isRememberedLong } from "@/services/wordStatus";
+import { countWordStatus } from "@/services/wordStatus";
 import {
   getRetrievabilityInfo,
-  isLeech,
   getLeechWords,
   smartSortReviewQueue,
   buildReviewSession,
@@ -45,6 +44,8 @@ const GrammarHub = lazy(() => import("./grammar/GrammarHub"));
 const OnboardingFlow = lazy(() => import("./OnboardingFlow"));
 const ReadingTab = lazy(() => import("./dashboard/ReadingTab"));
 const WritingTab = lazy(() => import("./dashboard/WritingTab"));
+const ForgottenTab = lazy(() => import("./dashboard/ForgottenTab"));
+const KnownTab = lazy(() => import("./dashboard/KnownTab"));
 const PronunciationTab = lazy(() => import("./dashboard/PronunciationTab"));
 const TodayTab = lazy(() => import("./dashboard/TodayTab"));
 const LeaderboardTab = lazy(() => import("./dashboard/LeaderboardTab"));
@@ -77,11 +78,14 @@ import ReviewTab from "./dashboard/ReviewTab";
 import WordInspector from "./dashboard/WordInspector";
 import DeleteWordModal from "./dashboard/DeleteWordModal";
 import type { WordCardMeta } from "./dashboard/WordCard";
-import type { WordsChangedDetail } from "@/services/reviewRecorder";
+import { WORDS_CHANGED_WHILE_HIDDEN_EVENT, type WordsChangedDetail } from "@/services/reviewRecorder";
+import { getFocusSettings, newFocusPlan, saveFocusSettings, type FocusPlan } from "@/services/focusSession";
+import { START_FOCUS_EVENT } from "@/services/reminderSettings";
+import { loadForgottenWords } from "@/services/forgottenWords";
+import { checkKnownNow } from "@/services/knownWords";
 import {
   GALLERY_PAGE_SIZE,
   type DashboardTab,
-  type FilterMode,
   type LibraryStats,
   type ViewMode,
 } from "./dashboard/shared";
@@ -94,6 +98,7 @@ const EMPTY_BUCKET_COUNTS: Record<ReviewTimeBucket, number> = {
   "1-3d": 0,
   "4-7d": 0,
   future: 0,
+  waiting: 0,
   new: 0,
 };
 const EMPTY_CARD_META = new Map<string, WordCardMeta>();
@@ -118,7 +123,6 @@ export default function MainDashboard({
   const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterMode, setFilterMode] = useState<FilterMode>("all");
   const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
@@ -147,6 +151,9 @@ export default function MainDashboard({
   // New key per session so FlashcardReview never reuses the previous queue
   const [sessionId, setSessionId] = useState(0);
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
+  // Focus session of the review on screen (null: a normal session)
+  const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
+  const focusing = !!focusPlan && isReviewing;
 
   const handleSelectTab = useCallback((tab: DashboardTab) => {
     setActiveTab((prev) => {
@@ -191,11 +198,19 @@ export default function MainDashboard({
   const [copiedSnippet, setCopiedSnippet] = useState(false);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Ticks every minute so "due" computations don't freeze at the last words change
+  // Ticks every minute so "due" computations don't freeze at the last words change. Not while the window is
+  // hidden in the tray (each tick re-renders the dashboard): it catches up when shown again
   const [nowTick, setNowTick] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNowTick(Date.now()), 60_000);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (document.visibilityState === "visible") setNowTick(Date.now());
+    };
+    const id = setInterval(tick, 60_000);
+    document.addEventListener("visibilitychange", tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", tick);
+    };
   }, []);
 
   const currentProficiency = useMemo(() => {
@@ -245,14 +260,6 @@ export default function MainDashboard({
   };
 
   useEffect(() => {
-    ensureReleaseMigrationV27()
-      .then((wiped) => {
-        if (wiped) {
-          refreshWords();
-          setActivityVersion((v) => v + 1);
-        }
-      })
-      .catch(() => {});
     // Not awaited here: the catalog readers below wait for the same (shared) seeding themselves
     ensureCatalogSeeded()
       .then(() => syncWordsWithCatalog().catch(() => {}))
@@ -345,6 +352,8 @@ export default function MainDashboard({
 
   // Auto-start requested by "open-review-tab"; consumed once words are loaded
   const [pendingAutoStart, setPendingAutoStart] = useState(false);
+  // A focus session asked for from a reminder, started once the latest words are loaded (minutes)
+  const [pendingFocus, setPendingFocus] = useState<number | null>(null);
 
   // First run (no words yet): goal -> level -> minutes per day, then the first session
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -459,6 +468,26 @@ export default function MainDashboard({
     let unlistenReviewFn: (() => void) | null = null;
     let unlistenNotifFn: (() => void) | null = null;
 
+    // "Tập trung" on a reminder: a focus session here, with fresh words
+    let unlistenFocusFn: (() => void) | null = null;
+    listen<{ minutes?: number }>(START_FOCUS_EVENT, (event) => {
+      if (isCancelled) return;
+      setGlobalToast(null);
+      if (isReviewingRef.current) {
+        setActiveTab("review");
+        return;
+      }
+      const minutes = event.payload?.minutes ?? getFocusSettings().minutes;
+      refreshWords().finally(() => {
+        if (!isCancelled) setPendingFocus(minutes);
+      });
+    })
+      .then((fn) => {
+        if (isCancelled) fn();
+        else unlistenFocusFn = fn;
+      })
+      .catch(() => {});
+
     listen<{ auto_start?: boolean }>("open-review-tab", (event) => {
       if (isCancelled) return;
       const autoStart = event.payload?.auto_start ?? false;
@@ -509,16 +538,37 @@ export default function MainDashboard({
     };
     window.addEventListener("words-changed", handleWordsChanged);
     const ownLabel = getInitialWindowLabel();
+    // Changes from another window while this one is hidden (answers in the popup): merged and dispatched once
+    // when it is shown again, instead of reloading the list and every card after each answer.
+    // undefined = none pending, null = reload everything
+    let hiddenChanges: Set<string> | null | undefined;
+    const dispatchWordsChanged = (wordIds?: string[]) =>
+      window.dispatchEvent(new CustomEvent<WordsChangedDetail>("words-changed", { detail: { wordIds } }));
+    const handleVisible = () => {
+      if (document.visibilityState !== "visible" || hiddenChanges === undefined) return;
+      const ids = hiddenChanges;
+      hiddenChanges = undefined;
+      dispatchWordsChanged(ids ? [...ids] : undefined);
+    };
+    document.addEventListener("visibilitychange", handleVisible);
     listen<WordsChangedDetail | null>("words-changed", (event) => {
       if (isCancelled) return;
       // A change from another window (the popup): re-dispatch the DOM event, so the cards listening to it
       // (Today roadmap, vocabulary tab, insights) reload too, and this window's list with them (the DOM
       // listener above). This window's own changes already dispatched it.
-      if (event.payload?.source !== ownLabel) {
-        window.dispatchEvent(
-          new CustomEvent<WordsChangedDetail>("words-changed", { detail: { wordIds: event.payload?.wordIds } })
-        );
+      if (event.payload?.source === ownLabel) return;
+      const wordIds = event.payload?.wordIds;
+      if (document.visibilityState === "hidden") {
+        if (!wordIds) hiddenChanges = null;
+        else if (hiddenChanges !== null) {
+          hiddenChanges ??= new Set();
+          for (const id of wordIds) hiddenChanges.add(id);
+        }
+        // The cloud sync still pushes them soon
+        window.dispatchEvent(new CustomEvent(WORDS_CHANGED_WHILE_HIDDEN_EVENT));
+        return;
       }
+      dispatchWordsChanged(wordIds);
     })
       .then((fn) => {
         if (isCancelled) fn();
@@ -546,30 +596,85 @@ export default function MainDashboard({
       window.removeEventListener("open-review-popup-preview", handleOpenPreview);
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
       window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleVisible);
       if (unlistenWordsChangedFn) unlistenWordsChangedFn();
       if (unlistenReviewFn) unlistenReviewFn();
+      if (unlistenFocusFn) unlistenFocusFn();
       if (unlistenNotifFn) unlistenNotifFn();
     };
   }, []);
 
   // A start is being prepared (several awaits before the session exists): a second click must not build another
   const startingRef = useRef(false);
-  /** `maxCards`: a short session ("Chỉ 1 phút" on Today: 3 cards to keep the streak) */
-  const handleStartReview = async (onlyDue: boolean = true, topicFilter?: string, maxCards?: number) => {
+  /**
+   * `maxCards`: a short session ("Chỉ 1 phút" on Today: 3 cards to keep the streak). `focus`: a timed focus
+   * session over the same queue. Returns whether a new session started.
+   */
+  const handleStartReview = async (
+    onlyDue: boolean = true,
+    topicFilter?: string,
+    maxCards?: number,
+    focus?: FocusPlan
+  ): Promise<boolean> => {
     // A session is in progress (maybe kept behind another tab): show it instead of restarting from card 0
     if (isReviewingRef.current) {
       setActiveTab("review");
-      return;
+      if (focus) setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi bắt đầu phiên tập trung nhé." });
+      return false;
     }
-    if (startingRef.current) return;
+    if (startingRef.current) return false;
     startingRef.current = true;
     try {
-      await prepareAndStartReview(onlyDue, topicFilter, maxCards);
+      return await prepareAndStartReview(onlyDue, topicFilter, maxCards, focus);
     } finally {
       startingRef.current = false;
     }
   };
-  const prepareAndStartReview = async (onlyDue: boolean, topicFilter?: string, maxCards?: number) => {
+  /**
+   * A session over chosen words ("Từ hay quên", one word from Tiến độ): a due card is graded as usual, a word
+   * not due is practice (schedulingDecision records it without touching FSRS). Due words first.
+   */
+  const startWordListSession = (list: WordDetail[], focus?: FocusPlan) => {
+    if (isReviewingRef.current) {
+      setActiveTab("review");
+      setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi ôn nhóm từ này nhé." });
+      return false;
+    }
+    const now = new Date();
+    // The latest schedule of each word (the list may come from an older render)
+    const byId = new Map(useWordsStore.getState().words.map((w) => [w.id, w]));
+    const due: ReviewCard[] = [];
+    const practice: ReviewCard[] = [];
+    for (const item of list) {
+      const w = byId.get(item.id) ?? item;
+      const [dueCard] = getDueCards(w, now);
+      if (dueCard) due.push(dueCard);
+      else practice.push(practiceCards([w])[0]);
+    }
+    const session = [...due, ...practice];
+    if (session.length === 0) return false;
+    // Not a practice session as a whole: each card decides (a card not due is never graded)
+    setIsPracticeSession(false);
+    setFocusPlan(focus ?? null);
+    setReviewSet(session);
+    setSessionId((id) => id + 1);
+    isReviewingRef.current = true;
+    setIsReviewing(true);
+    setActiveTab("review");
+    return true;
+  };
+
+  /** Focus session: the usual queue (due cards first, then today's new words), timed */
+  const handleStartFocus = (minutes: number) => {
+    saveFocusSettings({ minutes });
+    return handleStartReview(true, undefined, undefined, newFocusPlan(minutes));
+  };
+  const prepareAndStartReview = async (
+    onlyDue: boolean,
+    topicFilter?: string,
+    maxCards?: number,
+    focus?: FocusPlan
+  ): Promise<boolean> => {
     const now = new Date();
     const matchesTopic = (w: WordDetail) =>
       !topicFilter ||
@@ -589,7 +694,7 @@ export default function MainDashboard({
           ? `Mở "${capturePlace}" để thêm vài từ đầu tiên.`
           : `Mở "${capturePlace}" và chọn cấp độ (ví dụ A1): app sẽ lấy từ trong bộ Oxford cho bạn.`,
       });
-      return;
+      return false;
     }
 
     let session: ReviewCard[] = [];
@@ -663,16 +768,26 @@ export default function MainDashboard({
         title: `Chưa có từ nào để ôn lúc này${levelText}`,
         body: `Không còn từ mới đang chờ và chưa có từ nào đã học để luyện. Mở "${capturePlace}" để chọn thêm cấp độ hoặc chọn từ muốn học.`,
       });
-      return;
+      return false;
     }
 
+    setFocusPlan(focus ?? null);
     setReviewSet(session);
     setSessionId((id) => id + 1);
     // Set now, not at the next render: a click right after this must find the session
     isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
+    return true;
   };
+
+  // Consume a focus session asked for from a reminder once the latest words are available
+  useEffect(() => {
+    if (pendingFocus === null || loading) return;
+    const minutes = pendingFocus;
+    setPendingFocus(null);
+    handleStartFocus(minutes);
+  }, [pendingFocus, loading]);
 
   // Consume a pending auto-start once the latest words are available
   useEffect(() => {
@@ -733,17 +848,20 @@ export default function MainDashboard({
   // Typing stays responsive: the list follows the query a moment later
   const deferredSearch = useDeferredValue(searchQuery);
 
-  // Sort keys of the library list, once per words change (not per comparison): same order as
-  // reviewSchedule.compareNextReview (scheduled words by due time, then never-studied words newest first)
+  // Sort keys of the library list, once per words change (not per comparison): words by when they really come
+  // back (services/librarySchedule: due, then back tomorrow, then waiting for the new-card budget, then later),
+  // then never-studied words newest first
   const sortKeys = useMemo(() => {
     const keys = new Map<string, { isNew: boolean; created: number; next: number }>();
     if (!isLibraryTab) return keys;
+    const now = new Date(nowTick);
     for (const w of libraryWords) {
-      const isNew = (!w.srs.reps && !w.srs.repetitions) || w.srs.repetitions === 0;
-      keys.set(w.id, { isNew, created: new Date(w.created_at).getTime(), next: getNextReviewDate(w).getTime() });
+      // When the word really comes back (the session's rules: a card waiting or buried is not "due")
+      const s = librarySchedule(w, now);
+      keys.set(w.id, { isNew: s.kind === "new", created: new Date(w.created_at).getTime(), next: s.sortAt ?? Infinity });
     }
     return keys;
-  }, [libraryWords, isLibraryTab]);
+  }, [libraryWords, isLibraryTab, nowTick]);
 
   // Filter & Search Logic
   const filteredWords = useMemo(() => {
@@ -769,25 +887,9 @@ export default function MainDashboard({
         }
       }
 
-      // Filter pills
-      if (filterMode === "due") {
-        return isWordDue(item, now);
-      }
-      if (filterMode === "mastered") {
-        return isRememberedLong(item);
-      }
-      if (filterMode === "leech") {
-        return isLeech(item.srs);
-      }
-
       // Review schedule time bucket filter
-      if (reviewTimeFilter !== "all") {
-        const isNew = (!item.srs.reps && !item.srs.repetitions) || item.srs.repetitions === 0;
-        const nextDate = getNextReviewDate(item);
-        const info = formatNextReviewRelative(nextDate, isNew, now);
-        if (info.bucket !== reviewTimeFilter) {
-          return false;
-        }
+      if (reviewTimeFilter !== "all" && librarySchedule(item, now).info.bucket !== reviewTimeFilter) {
+        return false;
       }
 
       return true;
@@ -803,7 +905,7 @@ export default function MainDashboard({
       if (ka.next !== kb.next) return ka.next - kb.next;
       return a.word.localeCompare(b.word);
     });
-  }, [isLibraryTab, libraryWords, sortKeys, deferredSearch, filterMode, reviewTimeFilter, selectedTopic, nowTick]);
+  }, [isLibraryTab, libraryWords, sortKeys, deferredSearch, reviewTimeFilter, selectedTopic, nowTick]);
 
   // Counts for each review schedule bucket
   const reviewBucketCounts = useMemo<Record<ReviewTimeBucket, number>>(() => {
@@ -816,14 +918,10 @@ export default function MainDashboard({
       "1-3d": 0,
       "4-7d": 0,
       future: 0,
+      waiting: 0,
       new: 0,
     };
-    for (const w of libraryWords) {
-      const isNew = (!w.srs.reps && !w.srs.repetitions) || w.srs.repetitions === 0;
-      const nextDate = getNextReviewDate(w);
-      const info = formatNextReviewRelative(nextDate, isNew, now);
-      counts[info.bucket]++;
-    }
+    for (const w of libraryWords) counts[librarySchedule(w, now).info.bucket]++;
     return counts;
   }, [libraryWords, nowTick, isLibraryTab]);
 
@@ -834,7 +932,8 @@ export default function MainDashboard({
     const dueWords: WordDetail[] = [];
     const perTopic: Record<string, { total: number; due: number }> = {};
     for (const w of libraryWords) {
-      const isDue = isWordDue(w, now);
+      // Due as a session would ask it: not a card waiting for the new-card budget, nor one buried until tomorrow
+      const isDue = librarySchedule(w, now).isDue;
       if (isDue) dueWords.push(w);
       const key = (w.topic || "General Tech").trim().toLowerCase();
       const entry = perTopic[key] || (perTopic[key] = { total: 0, due: 0 });
@@ -847,6 +946,28 @@ export default function MainDashboard({
 
   // What a review session will actually contain today: due reviews + new words within the daily budget
   const dueCount = todayWork.total;
+
+  // "Từ hay quên": how many, and how many due now (sidebar and tab labels, Today hint). Reads the last 30 days of
+  // answers: not on every answer of a session, a moment after the words settle.
+  const [forgottenCount, setForgottenCount] = useState(0);
+  const [forgottenDue, setForgottenDue] = useState(0);
+  useEffect(() => {
+    if (isReviewing) return;
+    let stale = false;
+    const timer = setTimeout(() => {
+      loadForgottenWords(words)
+        .then((d) => {
+          if (stale) return;
+          setForgottenCount(d.active.length);
+          setForgottenDue(d.active.filter((e) => e.dueNow).length);
+        })
+        .catch(() => {});
+    }, 1500);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+    };
+  }, [words, isReviewing]);
 
   // Per-card derived data (parsed synonyms + FSRS retrievability), computed once per words change
   const cardMeta = useMemo(() => {
@@ -868,7 +989,7 @@ export default function MainDashboard({
   const [visibleCount, setVisibleCount] = useState(GALLERY_PAGE_SIZE);
   useEffect(() => {
     setVisibleCount(GALLERY_PAGE_SIZE);
-  }, [searchQuery, filterMode, reviewTimeFilter, selectedTopic]);
+  }, [searchQuery, reviewTimeFilter, selectedTopic]);
   const visibleWords = useMemo(() => filteredWords.slice(0, visibleCount), [filteredWords, visibleCount]);
 
   // Keyboard-first Navigation
@@ -908,6 +1029,13 @@ export default function MainDashboard({
       }
 
       if (isTyping) return;
+
+      // 'f' on Today: focus session with the last chosen length
+      if (e.key.toLowerCase() === "f" && activeTab === "today" && !isReviewing) {
+        e.preventDefault();
+        handleStartFocus(getFocusSettings().minutes);
+        return;
+      }
 
       // 'r' to start due reviews
       if (e.key.toLowerCase() === "r" && activeTab === "library") {
@@ -1006,7 +1134,8 @@ export default function MainDashboard({
         />
       )}
 
-      {/* LEFT SIDEBAR */}
+      {/* LEFT SIDEBAR (hidden in a focus session: only the card is on screen) */}
+      {!focusing && (
       <Sidebar
         activeTab={activeTab}
         setActiveTab={handleSelectTab}
@@ -1015,11 +1144,15 @@ export default function MainDashboard({
         streakStats={streakStats}
         libraryStats={libraryStats}
         simpleMode={simpleMode}
+        forgottenCount={forgottenCount}
+        forgottenDue={forgottenDue}
       />
+      )}
 
       {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-zinc-950">
         {/* Top App Bar */}
+        {!focusing && (
         <DashboardHeader
           searchInputRef={searchInputRef}
           searchQuery={searchQuery}
@@ -1028,18 +1161,19 @@ export default function MainDashboard({
           setActiveTab={handleSelectTab}
           viewMode={viewMode}
           setViewMode={setViewMode}
-          filterMode={filterMode}
-          setFilterMode={setFilterMode}
           streakStats={streakStats}
           dueCount={dueCount}
           todayWork={todayWork}
-          libraryStats={libraryStats}
           effectiveLevel={effectiveLevel}
           setGlobalToast={setGlobalToast}
           onStartReview={() => handleStartReview(true)}
+          onStartFocus={() => handleStartFocus(getFocusSettings().minutes)}
+          forgottenCount={forgottenCount}
+          forgottenDue={forgottenDue}
           isReviewing={isReviewing}
           simpleMode={simpleMode}
         />
+        )}
 
         {/* TODAY: the opening screen, one main action */}
         {activeTab === "today" && (
@@ -1051,6 +1185,8 @@ export default function MainDashboard({
               streakStats={streakStats}
               onStart={() => handleStartReview(true)}
               onQuickStart={() => handleStartReview(true, undefined, 3)}
+              onStartFocus={handleStartFocus}
+              forgottenDue={forgottenDue}
               setActiveTab={handleSelectTab}
               loading={loading}
               simpleMode={simpleMode}
@@ -1069,7 +1205,6 @@ export default function MainDashboard({
             cardMeta={cardMeta}
             viewMode={viewMode}
             searchQuery={searchQuery}
-            filterMode={filterMode}
             selectedTopic={selectedTopic}
             setSelectedTopic={setSelectedTopic}
             availableTopics={availableTopics}
@@ -1129,7 +1264,34 @@ export default function MainDashboard({
             libraryStats={libraryStats}
             availableTopics={availableTopics}
             handleStartReview={handleStartReview}
+            onStartFocus={handleStartFocus}
+            onOpenDueWords={() => {
+              setReviewTimeFilter("due");
+              handleSelectTab("library");
+            }}
             setMessage={setMessage}
+          />
+        )}
+
+        {/* WORDS MARKED "ĐÃ BIẾT": waiting for their check, or checked with the result */}
+        {activeTab === "known" && (
+          <KnownTab
+            onCheckNow={(list) => {
+              // The checks become due now, then the words are reviewed for real (graded, not practice)
+              checkKnownNow(list.map((w) => w.id))
+                .then(() => refreshWords())
+                .then(() => startWordListSession(list))
+                .catch((err) => setMessage(`Không bắt đầu được phần kiểm tra: ${err}`));
+            }}
+          />
+        )}
+
+        {/* WORDS OFTEN FORGOTTEN: the list, why, and one button to review them */}
+        {activeTab === "forgotten" && (
+          <ForgottenTab
+            onStartSession={(list) => startWordListSession(list)}
+            onStartFocus={(list, minutes) => startWordListSession(list, newFocusPlan(minutes))}
+            onRefreshWords={refreshWords}
           />
         )}
 
@@ -1138,16 +1300,12 @@ export default function MainDashboard({
           <AnalyticsView
             words={words}
             dueRemaining={todayWork.total}
-            onStartReviewWord={(w) => {
-              // Scheduled review only if one of the word's cards is due; otherwise practice (no FSRS change)
-              const [dueCard] = getDueCards(w);
-              setIsPracticeSession(!dueCard);
-              setReviewSet([dueCard ?? practiceCards([w])[0]]);
-              setSessionId((id) => id + 1);
-              setIsReviewing(true);
-              setActiveTab("review");
-            }}
+            onOpenForgotten={() => handleSelectTab("forgotten")}
             onRefreshWords={refreshWords}
+            onOpenGrammarLesson={(id) => {
+              setGrammarLessonToOpen(id);
+              setActiveTab("grammar");
+            }}
           />
         )}
 
@@ -1186,9 +1344,31 @@ export default function MainDashboard({
                 distractorPool={distractorPool}
                 practiceMode={isPracticeSession}
                 active={activeTab === "review"}
+                focus={focusPlan}
+                onStartFocus={(minutes) => {
+                  // Five more minutes, or a first try after a normal session: a new queue (what is due now)
+                  refreshDirtyRef.current = false;
+                  isReviewingRef.current = false;
+                  setIsReviewing(false);
+                  setFocusPlan(null);
+                  refreshWords().finally(() =>
+                    // Not saved as the usual length: "5 more minutes" is a one-off
+                    handleStartReview(true, undefined, undefined, newFocusPlan(minutes)).then((started) => {
+                      if (!started) setActiveTab("today");
+                    })
+                  );
+                }}
+                onNavigate={(tab) => {
+                  refreshDirtyRef.current = false;
+                  setIsReviewing(false);
+                  setFocusPlan(null);
+                  handleSelectTab(tab);
+                  topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                }}
                 onFinish={() => {
                   refreshDirtyRef.current = false; // reloaded just below
                   setIsReviewing(false);
+                  setFocusPlan(null);
                   // Close the loop on the day: back to "Hôm nay" (what is left, the streak, the goal)
                   setActiveTab("today");
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
@@ -1196,6 +1376,7 @@ export default function MainDashboard({
                 onExit={() => {
                   refreshDirtyRef.current = false;
                   setIsReviewing(false);
+                  setFocusPlan(null);
                   setActiveTab("today");
                   // Reviews answered before exiting were already persisted
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());

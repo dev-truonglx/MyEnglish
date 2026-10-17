@@ -287,6 +287,7 @@ async function availableByLevel(levels: readonly StudyLevel[]): Promise<Partial<
     `SELECT cefr, COUNT(*) AS n FROM vocab_catalog c
      WHERE cefr IN (${levels.map((_, i) => `$${i + 1}`).join(", ")})
        AND NOT EXISTS (SELECT 1 FROM words w WHERE w.catalog_id = c.id)
+       AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)
      GROUP BY cefr`,
     [...levels]
   );
@@ -310,6 +311,7 @@ async function nextIdsOfLevel(level: StudyLevel, limit: number): Promise<string[
   const rows = await db.select<Array<{ id: string }>>(
     `SELECT id FROM vocab_catalog c
      WHERE cefr = $1 AND NOT EXISTS (SELECT 1 FROM words w WHERE w.catalog_id = c.id)
+       AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)
      ORDER BY it DESC, study_order LIMIT $2`,
     [level, limit]
   );

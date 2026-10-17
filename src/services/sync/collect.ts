@@ -74,6 +74,22 @@ async function* collectWords(db: Db, since: string): AsyncGenerator<SyncRow[]> {
     since,
   });
   for await (const page of pages) {
+    const freeWordIds = page.filter((r) => isFreeWordKey(keyOf(r))).map((r) => String(r.id));
+    const examplesByWord = new Map<string, Array<Record<string, unknown>>>();
+    if (freeWordIds.length > 0) {
+      const exRows = await db.select<Array<Record<string, unknown>>>(
+        `SELECT word_id, id, sentence_en, sentence_vn, grammar_analysis, source, focus, sense_index
+         FROM examples WHERE word_id IN (${freeWordIds.map((_, i) => `$${i + 1}`).join(", ")})`,
+        freeWordIds
+      );
+      for (const ex of exRows) {
+        const wid = String(ex.word_id);
+        const { word_id: _, ...rest } = ex;
+        const list = examplesByWord.get(wid);
+        if (list) list.push(rest);
+        else examplesByWord.set(wid, [rest]);
+      }
+    }
     const out: SyncRow[] = [];
     for (const r of page) {
       const key = keyOf(r);
@@ -87,10 +103,7 @@ async function* collectWords(db: Db, since: string): AsyncGenerator<SyncRow[]> {
         for (const c of ["phonetic", "part_of_speech", "meaning_vn", "synonyms", "antonyms", "collocations", "code_snippet", "topic", "cefr_level", "variants", "forms"]) {
           data[c] = r[c] ?? null;
         }
-        data.examples = await db.select(
-          `SELECT id, sentence_en, sentence_vn, grammar_analysis, source, focus, sense_index FROM examples WHERE word_id = $1`,
-          [r.id]
-        );
+        data.examples = examplesByWord.get(String(r.id)) ?? [];
       }
       out.push({ kind: "word", key, data, ts: toIso(r.own_ts as string) ?? EPOCH });
     }

@@ -4,8 +4,8 @@
  */
 import type { CardDirection, WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
+import { isKnownOnly } from "./smartReview";
 import { getFSRSSettings, getStudyLimits } from "./srs";
-import { awardXP } from "./smartReview";
 
 /** A word counts as "nhớ chắc" (known for the long run) from this stability, in days */
 export const MASTERED_STABILITY_DAYS = 21;
@@ -16,9 +16,10 @@ export const MIN_RETENTION_SAMPLE = 20;
 /**
  * The word had at least one real answer: a word only marked "Đã biết" (its single log is 'known', which
  * `stats` leaves out) is not counted as studied in levels, coverage or statistics. Words without `stats`
- * (built in memory) count as reviewed.
+ * (built in memory) count as reviewed if they have FSRS review evidence and are not marked known-only.
  */
 export function hasRealReview(w: WordDetail): boolean {
+  if (isKnownOnly(w.srs)) return false;
   return (w.stats?.totalAttempts ?? 1) > 0;
 }
 
@@ -331,26 +332,9 @@ export async function loadWeeklySummary(words: WordDetail[], now: Date = new Dat
   return summarizeWeek(logs, words, getFSRSSettings().requestRetention);
 }
 
-// ─── Weekly topic challenge ──────────────────────────────────────────────────
+// ─── Weekly challenges: the level of the level challenge (see services/weeklyChallenges) ───────────────────
 
-const CHALLENGE_KEY = "myenglish_topic_challenge_v1";
-export const CHALLENGE_XP = 50;
 const CHALLENGE_MIN_WORDS = 3;
-
-export interface TopicChallenge {
-  week: string;
-  topic: string;
-  target: number; // correct answers on words of the topic this week
-  progress: number;
-  completed: boolean;
-  rewarded: boolean;
-}
-
-interface StoredChallenge {
-  week: string;
-  topic: string;
-  rewarded: boolean;
-}
 
 function topicName(w: WordDetail): string {
   return (w.topic || "General Tech").trim();
@@ -369,54 +353,6 @@ export function pickChallengeTopic(words: WordDetail[]): string | null {
     .filter(([t, n]) => n > 0 && (total.get(t) ?? 0) >= CHALLENGE_MIN_WORDS)
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
   return candidates[0]?.[0] ?? null;
-}
-
-/** About two correct answers per word of the topic, between 10 and 30 */
-export function challengeTarget(topicWordCount: number): number {
-  return Math.max(10, Math.min(30, topicWordCount * 2));
-}
-
-/**
- * This week's challenge: "answer N questions right on topic X". The topic is chosen once per week
- * (kept in localStorage) so it does not change while the learner works on it.
- */
-export function getTopicChallenge(words: WordDetail[], weekLogs: ProgressLog[], now: Date = new Date()): TopicChallenge | null {
-  const week = weekKey(now);
-  let stored: StoredChallenge | null = null;
-  try {
-    const raw = JSON.parse(localStorage.getItem(CHALLENGE_KEY) || "null");
-    if (raw && raw.week === week && typeof raw.topic === "string") stored = raw;
-  } catch {}
-
-  const topicWords = (t: string) => words.filter((w) => topicName(w) === t);
-  if (!stored || topicWords(stored.topic).length === 0) {
-    const topic = pickChallengeTopic(words);
-    if (!topic) return null;
-    stored = { week, topic, rewarded: false };
-    try {
-      localStorage.setItem(CHALLENGE_KEY, JSON.stringify(stored));
-    } catch {}
-  }
-
-  const ids = new Set(topicWords(stored.topic).map((w) => w.id));
-  const target = challengeTarget(ids.size);
-  // Scheduled answers only: practice can't be crammed into the challenge in one sitting
-  const progress = weekLogs.filter((l) => l.isScheduled && ids.has(l.wordId) && l.rating > 1).length;
-  return { week, topic: stored.topic, target, progress: Math.min(progress, target), completed: progress >= target, rewarded: stored.rewarded };
-}
-
-/** Award the challenge XP once per week. Returns true when it was awarded by this call. */
-export function claimTopicChallengeReward(challenge: TopicChallenge): boolean {
-  if (!challenge.completed || challenge.rewarded) return false;
-  try {
-    const raw = JSON.parse(localStorage.getItem(CHALLENGE_KEY) || "null");
-    if (!raw || raw.week !== challenge.week || raw.rewarded) return false;
-    localStorage.setItem(CHALLENGE_KEY, JSON.stringify({ ...raw, rewarded: true }));
-  } catch {
-    return false;
-  }
-  awardXP(CHALLENGE_XP);
-  return true;
 }
 
 // ─── Popup session summary ───────────────────────────────────────────────────

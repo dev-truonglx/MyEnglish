@@ -11,15 +11,17 @@ import {
   type UiScale,
 } from "@/services/learnerProfile";
 import { englishVoices, getTtsSettings, handleSpeak, saveTtsSettings } from "../review/speech";
+import { getSoundSettings, playSound, saveSoundSettings } from "@/services/sound";
 
 const SCALE_LABEL: Record<UiScale, string> = { 1: "Vừa", 1.1: "Lớn", 1.25: "Rất lớn" };
 
-/** Settings for beginners: simple mode, foundation mode, text size, voice and speaking speed */
+/** Settings for beginners: simple mode, foundation mode, text size, answer sounds, voice and speaking speed */
 export default function DisplaySettings() {
   const [simple, setSimple] = useState(isSimpleMode);
   const [foundation, setFoundation] = useState(isFoundationMode);
   const [scale, setScale] = useState<UiScale>(getUiScale);
   const [tts, setTts] = useState(getTtsSettings);
+  const [sound, setSound] = useState(getSoundSettings);
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>(englishVoices);
 
   useEffect(() => {
@@ -44,7 +46,7 @@ export default function DisplaySettings() {
 
   return (
     <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 space-y-3">
-      <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Giao diện & giọng đọc</div>
+      <div className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-zinc-400">Giao diện, âm thanh & giọng đọc</div>
       {toggle(
         "Chế độ đơn giản",
         "Ẩn thuật ngữ kỹ thuật của thuật toán (FSRS, độ bền S/D…), nút chấm bằng tiếng Việt, ít lựa chọn hơn trên màn hình.",
@@ -82,6 +84,41 @@ export default function DisplaySettings() {
             </button>
           ))}
         </div>
+      </div>
+      <div className="space-y-1.5 pt-2 border-t border-slate-200 dark:border-zinc-800">
+        {toggle(
+          "Âm thanh phản hồi",
+          "Tiếng \"ting\" khi trả lời đúng, tiếng nhẹ khi sai, âm đặc biệt mỗi 5 câu đúng liên tiếp và khi xong phiên.",
+          sound.enabled,
+          (v) => {
+            setSound(saveSoundSettings({ enabled: v }));
+            if (v) playSound("correct");
+          }
+        )}
+        {sound.enabled && (
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-zinc-400">
+              Âm lượng
+              <input
+                type="range"
+                min={0.1}
+                max={1}
+                step={0.1}
+                value={sound.volume}
+                onChange={(e) => setSound(saveSoundSettings({ volume: Number(e.target.value) }))}
+                onPointerUp={() => playSound("correct")}
+                className="accent-cyan-600"
+              />
+              <span className="font-mono w-8">{Math.round(sound.volume * 100)}%</span>
+            </label>
+            <button
+              onClick={() => playSound("combo")}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs"
+            >
+              <Volume2 className="w-3.5 h-3.5" /> Nghe thử
+            </button>
+          </div>
+        )}
       </div>
       <div className="space-y-1.5 pt-2 border-t border-slate-200 dark:border-zinc-800">
         <div className="text-xs font-bold text-slate-900 dark:text-white">Giọng đọc tiếng Anh</div>

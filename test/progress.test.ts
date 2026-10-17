@@ -1,10 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { computeStreak, calculateStreakAndGoal, getLocalDateString, recordDailyActivity, setDailyGoal } from "@/services/streak";
 import {
-  challengeTarget,
-  claimTopicChallengeReward,
   formatAgain,
-  getTopicChallenge,
   pickChallengeTopic,
   startOfWeek,
   summarizeSession,
@@ -113,46 +110,14 @@ describe("#10 week in numbers", () => {
   });
 });
 
-describe("#11 weekly topic challenge", () => {
+describe("#11 level of the weekly level challenge", () => {
   const devops = ["deploy", "release", "rollback", "pipeline"].map((id) => makeWord(id, { topic: "DevOps" }));
   const food = ["apple", "banana", "kiwi"].map((id) => makeWord(id, { topic: "Food", srs: reviewSrs(40, 1) }));
   const words = [...devops, ...food, makeWord("solo", { topic: "Tiny" })];
-  const correct = (wordId: string): ProgressLog => ({ wordId, rating: 3, isScheduled: true, timestamp: new Date().toISOString() });
-
   it("picks the topic with most words still to master (min 3 words)", () => {
     expect(pickChallengeTopic(words)).toBe("DevOps");
     expect(pickChallengeTopic(food)).toBeNull(); // all mastered
     expect(pickChallengeTopic([makeWord("x")])).toBeNull();
-  });
-
-  it("targets about 2 correct answers per word, 10..30", () => {
-    expect(challengeTarget(2)).toBe(10);
-    expect(challengeTarget(8)).toBe(16);
-    expect(challengeTarget(40)).toBe(30);
-  });
-
-  it("keeps the topic for the week, counts correct answers on it and rewards once", () => {
-    const now = new Date();
-    const logs = [...Array(9)].map(() => correct("deploy"));
-    logs.push(correct("apple"), { ...correct("release"), rating: 1 });
-    let c = getTopicChallenge(words, logs, now)!;
-    expect(c).toMatchObject({ topic: "DevOps", target: 10, progress: 9, completed: false });
-    expect(claimTopicChallengeReward(c)).toBe(false);
-
-    // Topic stays even if another topic now has more open words
-    const more = [...words, ...["a1", "a2", "a3", "a4", "a5"].map((id) => makeWord(id, { topic: "Algorithms" }))];
-    logs.push(correct("pipeline"));
-    c = getTopicChallenge(more, logs, now)!;
-    expect(c).toMatchObject({ topic: "DevOps", progress: 10, completed: true, rewarded: false });
-
-    const xpBefore = getXPState().totalXP;
-    expect(claimTopicChallengeReward(c)).toBe(true);
-    expect(getXPState().totalXP).toBe(xpBefore + 50);
-    expect(claimTopicChallengeReward(getTopicChallenge(more, logs, now)!)).toBe(false);
-
-    // Next week: a new challenge
-    const next = getTopicChallenge(more, [], new Date(now.getTime() + 7 * DAY))!;
-    expect(next).toMatchObject({ topic: "Algorithms", progress: 0, rewarded: false });
   });
 });
 

@@ -23,36 +23,6 @@
         "center": true,
         "decorations": true,
         "resizable": true
-      },
-      {
-        "label": "review-popup",
-        "title": "MyEnglish Focus Review",
-        "width": 1920,
-        "height": 1080,
-        "visible": false,
-        "center": true,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "resizable": true,
-        "shadow": false,
-        "skipTaskbar": true
-      },
-      {
-        "label": "review-nudge",
-        "title": "MyEnglish Reminder",
-        "width": 400,
-        "height": 230,
-        "visible": false,
-        "decorations": false,
-        "transparent": true,
-        "alwaysOnTop": true,
-        "resizable": false,
-        "shadow": false,
-        "skipTaskbar": true,
-        "focus": false,
-        "focusable": false,
-        "acceptFirstMouse": true
       }
     ],
     "security": {

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Award, CalendarCheck, RotateCcw, Sparkles, Zap } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { AlarmClock, Award, CalendarCheck, Check, RotateCcw, Sparkles, Zap } from "lucide-react";
 import type { FSRSResult } from "@/services/srs";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import type { XPState } from "@/services/smartReview";
@@ -7,6 +7,7 @@ import type { SessionStats } from "@/hooks/useReviewSession";
 import { loadWorkloadForecast } from "@/services/progress";
 import { minutesFor } from "@/services/comeback";
 import { isSimpleMode } from "@/services/learnerProfile";
+import { dayCloseStatus, nextReviewText, type NextReview } from "@/services/dayClose";
 import { RankDelta } from "../dashboard/RankWidgets";
 
 interface SessionSummaryProps {
@@ -16,11 +17,18 @@ interface SessionSummaryProps {
   xpState: XPState;
   lastResult: FSRSResult | null;
   onFinish: () => void;
+  /** Shown under the title (the focus session's own results) */
+  header?: ReactNode;
+  /** XP earned outside the answers (focus session bonus), added to the total shown */
+  bonusXp?: number;
+  /** When the next card comes due (undefined: the header already says it, e.g. a focus session) */
+  nextReview?: NextReview | null;
 }
 
 /**
  * End of a session. Starts with what went well (remembered, new words met, words now in long-term
- * memory), presents the words to revisit as normal ("they come back soon"), and closes the day with
+ * memory), presents the words to revisit as normal ("they come back soon"), and closes the day: a loud
+ * "Hôm nay xong ✓" once the daily goal is reached (the learner knows they may stop), the next review and
  * tomorrow's workload. No red error counts.
  */
 export default function SessionSummary({
@@ -30,6 +38,9 @@ export default function SessionSummary({
   xpState,
   lastResult,
   onFinish,
+  header,
+  bonusXp = 0,
+  nextReview,
 }: SessionSummaryProps) {
   const simple = isSimpleMode();
   const [tomorrow, setTomorrow] = useState<number | null>(null);
@@ -39,6 +50,8 @@ export default function SessionSummary({
       .catch(() => setTomorrow(null));
   }, []);
 
+  const day = sessionStats.day;
+  const close = day ? dayCloseStatus({ goalReached: day.goalReached, todayCount: day.todayCount, dailyGoal: day.dailyGoal, dueNow: day.dueLeft }) : null;
   const remembered = sessionStats.firstTryCorrect + sessionStats.retryCorrect;
   const newWords = wordsToReview.filter((w) => (w.srs?.reps ?? 0) === 0).length;
   const comingBack = sessionStats.revealedCount + sessionStats.skippedCount;
@@ -76,6 +89,29 @@ export default function SessionSummary({
           </p>
         )}
       </div>
+
+      {close?.done && (
+        // Loud on purpose: the learner must know for sure they can stop for today
+        <div className="w-full rounded-2xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 text-left space-y-2.5 shadow-lg shadow-emerald-600/20" data-testid="day-done">
+          <div className="flex items-center gap-3">
+            <div className="w-11 h-11 rounded-full bg-white/20 ring-4 ring-white/30 flex items-center justify-center shrink-0">
+              <Check className="w-6 h-6" strokeWidth={3} />
+            </div>
+            <div className="min-w-0">
+              <p className="text-xl font-extrabold tracking-tight">{close.title}</p>
+              <p className="text-sm text-emerald-50">{close.note}</p>
+            </div>
+          </div>
+          {nextReview !== undefined && (
+            <p className="flex items-center gap-2 rounded-xl bg-white/15 px-3 py-2 text-sm font-semibold">
+              <AlarmClock className="w-4 h-4 shrink-0" />
+              {nextReviewText(nextReview)}
+            </p>
+          )}
+        </div>
+      )}
+
+      {header}
 
       {/* What went well, first */}
       <div className="w-full p-4 rounded-2xl border border-emerald-200 dark:border-emerald-800/60 bg-emerald-50 dark:bg-emerald-950/30 text-left space-y-2">
@@ -115,12 +151,16 @@ export default function SessionSummary({
       {/* Close the day */}
       <div className="w-full p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left flex items-start gap-3">
         <CalendarCheck className="w-5 h-5 text-cyan-600 dark:text-cyan-400 shrink-0 mt-0.5" />
-        <div className="text-sm text-slate-700 dark:text-zinc-300">
+        <div className="text-sm text-slate-700 dark:text-zinc-300 space-y-1">
+          {close && !close.done && <p className="font-semibold text-slate-900 dark:text-white">{close.note}</p>}
+          {!close?.done && nextReview !== undefined && <p className="font-semibold">{nextReviewText(nextReview)}</p>}
+          <p>
           {tomorrow === null
             ? "Hẹn gặp lại lần ôn tới."
             : tomorrow > 0
               ? `Hẹn mai: ${tomorrow} thẻ, khoảng ${minutesFor(tomorrow)} phút. App sẽ nhắc đúng lúc.`
               : "Mai chưa có thẻ nào đến hạn. Học thêm từ mới nếu bạn muốn."}
+          </p>
         </div>
       </div>
 
@@ -130,7 +170,7 @@ export default function SessionSummary({
           <span className="text-xs font-bold flex items-center gap-1.5 text-amber-800 dark:text-amber-300">
             <Zap className="w-4 h-4" /> Điểm kinh nghiệm
           </span>
-          <span className="text-lg font-extrabold font-mono text-amber-600 dark:text-amber-400">+{sessionStats.totalXPEarned} XP</span>
+          <span className="text-lg font-extrabold font-mono text-amber-600 dark:text-amber-400">+{sessionStats.totalXPEarned + bonusXp} XP</span>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300">

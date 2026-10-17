@@ -3,6 +3,7 @@ import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle, Eye } from "lu
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { normalizeTypedText, prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
+import { playWrongTry } from "@/services/sound";
 
 interface SentenceBuilderExerciseProps {
   word: WordDetail;
@@ -140,6 +141,7 @@ export default function SentenceBuilderExercise({
       onCompleteRef.current(true, attempts, rating);
     } else {
       setIsCorrect(false);
+      playWrongTry();
       setWrongAttempts((prev) => {
         const next = prev + 1;
         wrongAttemptsRef.current = next;

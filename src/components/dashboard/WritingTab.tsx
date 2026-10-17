@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { BookMarked, Loader2, NotebookPen, Play, Sparkles, Trash2 } from "lucide-react";
 import { useWordsStore } from "@/stores/wordsStore";
@@ -94,12 +94,19 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
   }, [summary]);
 
   // A few words being learned, to try using them in today's update (output practice)
-  const suggestions = useMemo(
-    () =>
-      shuffle(words.filter((w) => bankStatus(w) === "learning" && !/\s/.test(w.word))).slice(0, 4),
-    // Picked once per visit, not on every word refresh
-    []
-  );
+  const pickedSuggestionsRef = useRef<typeof words | null>(null);
+  const hasWords = words.length > 0;
+  const suggestions = useMemo(() => {
+    if (pickedSuggestionsRef.current && pickedSuggestionsRef.current.length > 0) {
+      return pickedSuggestionsRef.current;
+    }
+    if (!hasWords) return [];
+    const picked = shuffle(words.filter((w) => bankStatus(w) === "learning" && !/\s/.test(w.word))).slice(0, 4);
+    pickedSuggestionsRef.current = picked;
+    return picked;
+    // Picked once when words become available, not reshuffled on every word refresh
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasWords]);
 
   const updateText = (v: string) => {
     setText(v);

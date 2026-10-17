@@ -1,9 +1,10 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { cleanMeaningForOption, generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
 import { pickSenseForExample, sharesSense } from "@/utils/exerciseHints";
+import { playWrongTry } from "@/services/sound";
 
 interface ReverseClozeExerciseProps {
   word: WordDetail;
@@ -57,36 +58,62 @@ export default function ReverseClozeExercise({
 
   // Pending completion timer, cleared on unmount so a stale card is never graded
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     };
   }, []);
 
+  const handleSelect = useCallback(
+    (opt: { id: string; text: string; isCorrect: boolean }, idx: number) => {
+      if (isAnswered) return;
+      setSelectedId(opt.id);
+
+      if (opt.isCorrect) {
+        setIsAnswered(true);
+        onSpeak(word.word);
+
+        let rating: Rating = Rating.Easy;
+        if (wrongAttempts === 0) rating = Rating.Easy;
+        else if (wrongAttempts === 1) rating = Rating.Good;
+        else rating = Rating.Hard;
+
+        if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+        // Reported at once: the session keeps this card on screen until the learner continues
+        onComplete(true, wrongAttempts, rating);
+      } else {
+        setWrongAttempts((prev) => prev + 1);
+        playWrongTry();
+        setShakeIdx(idx);
+        if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+        shakeTimerRef.current = setTimeout(() => {
+          shakeTimerRef.current = null;
+          setShakeIdx(null);
+        }, 400);
+      }
+    },
+    [isAnswered, onSpeak, word.word, wrongAttempts, onComplete]
+  );
+
+  // Keyboard shortcuts 1, 2, 3, 4
+  useEffect(() => {
+    if (!example || !example.sentence_en) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isAnswered || e.metaKey || e.ctrlKey || e.altKey) return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      const idx = ["1", "2", "3", "4"].indexOf(e.key);
+      if (idx >= 0 && options[idx]) {
+        handleSelect(options[idx], idx);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [example, isAnswered, options, handleSelect]);
+
   if (!example || !example.sentence_en) return null;
-
-  const handleSelect = (opt: { id: string; text: string; isCorrect: boolean }, idx: number) => {
-    if (isAnswered) return;
-    setSelectedId(opt.id);
-
-    if (opt.isCorrect) {
-      setIsAnswered(true);
-      onSpeak(word.word);
-
-      let rating: Rating = Rating.Easy;
-      if (wrongAttempts === 0) rating = Rating.Easy;
-      else if (wrongAttempts === 1) rating = Rating.Good;
-      else rating = Rating.Hard;
-
-      if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
-      // Reported at once: the session keeps this card on screen until the learner continues
-      onComplete(true, wrongAttempts, rating);
-    } else {
-      setWrongAttempts((prev) => prev + 1);
-      setShakeIdx(idx);
-      setTimeout(() => setShakeIdx(null), 400);
-    }
-  };
 
   // Highlight target word in sentence
   const renderSentenceWithHighlight = () => {

@@ -15,7 +15,7 @@ import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
 import { getCardRetrievability, getStudyLimits } from "./srs";
 import { shuffle } from "@/lib/utils";
-import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs } from "./cards";
+import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs, nextLocalDayStart, toCard } from "./cards";
 import { persistKeyNow } from "./storageBackup";
 import { recordXpEarned, XP_DAILY_LOG_KEY, XP_TOTAL_KEY } from "./sync/xpLedger";
 import { COMMON_WORDS } from "@/data/commonWords";
@@ -195,6 +195,7 @@ export function saveLeechSettings(settings: Partial<LeechSettings>): void {
   try {
     const current = getLeechSettings();
     localStorage.setItem(LEECH_SETTINGS_KEY, JSON.stringify({ ...current, ...settings }));
+    persistKeyNow(LEECH_SETTINGS_KEY);
   } catch {}
 }
 
@@ -279,7 +280,7 @@ export function calculateUrgencyScore(word: WordDetail, now: Date = new Date()):
 
   let score: number;
   if (isNew) score = 0;
-  else if (shortTerm) score = 200 + Math.min(50, (now.getTime() - new Date(srs.next_review_date).getTime()) / 60000);
+  else if (shortTerm) score = 200 + Math.max(0, Math.min(50, (now.getTime() - new Date(srs.next_review_date).getTime()) / 60000));
   else score = 100 * dailyLoss;
   if (!isDue) score *= 0.01;
 
@@ -545,6 +546,86 @@ export function summarizeTodayWork(
   return todayWorkFrom(reviews, waiting, introduced, limits.newCardsPerDay, limits.maxSessionSize);
 }
 
+export interface SessionForecast {
+  /** Reviews a session would ask each day, today first (date: local YYYY-MM-DD) */
+  days: Array<{ date: string; reviews: number }>;
+  /** Learning cards whose next step comes later today (not in a session started now) */
+  laterToday: number;
+}
+
+/**
+ * Reviews per day for the next `horizonDays` days, counted the way sessions pick cards:
+ *  - today: exactly the reviews of summarizeTodayWork (askable now, one review card per word, learning cards apart)
+ *  - a review card waits a day when the other card of its word is asked that day (bury siblings), so a word
+ *    gives at most one review card a day; learning / relearning cards (minute steps) are never moved
+ *  - new cards are not reviews (they come with the new-card budget); suspended words and words without a
+ *    meaning yet are left out
+ * Future days only hold what is already scheduled: today's answers add more.
+ */
+export function forecastSessionLoad(words: readonly WordDetail[], horizonDays: number, now: Date = new Date()): SessionForecast {
+  const dayStart = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+  const days = Array.from({ length: horizonDays }, (_, i) => {
+    const d = dayStart(i);
+    return { date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, reviews: 0 };
+  });
+  const tomorrow = nextLocalDayStart(now);
+  /** Index of the local day of `t` (0 = today) */
+  const dayIndex = (t: number) => {
+    let i = 1;
+    while (i < horizonDays + 1 && t >= dayStart(i + 1).getTime()) i++;
+    return i;
+  };
+  let laterToday = 0;
+  const add = (i: number) => {
+    if (i >= 0 && i < horizonDays) days[i].reviews++;
+  };
+
+  for (const w of words) {
+    if (isPlaceholderMeaning(w.meaning_vn) || isSuspended(w)) continue;
+    const cards = [toCard(w, "recognition"), ...(w.srsProduction ? [toCard(w, "production")] : [])].filter((c) => !isNewCard(c));
+    if (cards.length === 0) continue;
+    // Today, as summarizeTodayWork counts it
+    const askable = askableCards(w, now).filter((c) => !isNewCard(c));
+    const reviewDays: number[] = [];
+    if (askable.length > 0) {
+      const first = pickSessionCard(askable, now);
+      add(0);
+      for (const other of askable) {
+        if (other === first) continue;
+        if ((other.srs.state ?? 0) !== 2) add(0);
+        else reviewDays.push(1); // asked after its sibling: tomorrow
+      }
+      // The sibling asked today puts this word's other review card due tomorrow one day later at least
+      reviewDays.push(-1);
+    }
+    for (const c of cards) {
+      // askableCards builds its own card objects: match by direction
+      if (askable.some((x) => x.direction === c.direction)) continue;
+      const due = new Date(c.srs.next_review_date).getTime();
+      if (!Number.isFinite(due)) continue;
+      const review = (c.srs.state ?? 0) === 2;
+      if (isDueSrs(c.srs, now)) {
+        // Due but not askable now: buried by its sibling reviewed today
+        if (review) reviewDays.push(1);
+        else add(1);
+      } else if (due < tomorrow) {
+        if (review) reviewDays.push(1);
+        else laterToday++;
+      } else if (review) reviewDays.push(dayIndex(due));
+      else add(dayIndex(due));
+    }
+    // One review card of a word a day: a second one on the same day moves to the next free day
+    const taken = new Set<number>(reviewDays.includes(-1) ? [0] : []);
+    for (const d of reviewDays.filter((d) => d >= 0).sort((a, b) => a - b)) {
+      let day = d;
+      while (taken.has(day)) day++;
+      taken.add(day);
+      add(day);
+    }
+  }
+  return { days, laterToday };
+}
+
 /** Leeches allowed in one session: more of them makes a session discouraging and slow */
 export const MAX_LEECHES_PER_SESSION = 4;
 
@@ -748,6 +829,7 @@ export function freeWritingUsedToday(): number {
 export function recordFreeWritingUse(): void {
   try {
     localStorage.setItem(FREE_WRITING_KEY, JSON.stringify({ date: new Date().toDateString(), count: freeWritingUsedToday() + 1 }));
+    persistKeyNow(FREE_WRITING_KEY);
   } catch {}
 }
 
@@ -1318,10 +1400,13 @@ export function getWordStatsSummary(words: WordDetail[]): WordStatsSummary {
   let criticalCount = 0;
 
   const now = new Date();
+  const activeWords = words.filter(
+    (w) => !(isNewCard(w) && w.catalog_id != null) && !isSuspended(w) && !isPlaceholderMeaning(w.meaning_vn)
+  );
 
-  for (const w of words) {
+  for (const w of activeWords) {
     const state = w.srs.state ?? 0;
-    if (state === 0 && (!w.srs.reps || w.srs.reps === 0)) {
+    if (isNewCard(w)) {
       newCount++;
     } else if (state === 1 || state === 3) {
       learningCount++;
@@ -1332,22 +1417,22 @@ export function getWordStatsSummary(words: WordDetail[]): WordStatsSummary {
       }
     }
 
-    if (isLeech(w.srs, leechSettings)) {
+    // Either card, as the badges, the library filter and the sidebar count
+    if (isLeechWord(w, leechSettings)) {
       leechCount++;
     }
 
-    const R = calculateRetrievability(w.srs, now);
-    if (R > 0) {
+    // Without stability R is unknown (calculateRetrievability returns 0), not "forgotten": left out of both
+    if (!isNewCard(w) && (w.srs.stability ?? 0) > 0) {
+      const R = calculateRetrievability(w.srs, now);
       totalR += R;
       rCount++;
-    }
-    if (R > 0 && R < 0.7) {
-      criticalCount++;
+      if (R < 0.7) criticalCount++;
     }
   }
 
   return {
-    totalWords: words.length,
+    totalWords: activeWords.length,
     newCount,
     learningCount,
     reviewCount,
@@ -1511,6 +1596,18 @@ function syllables(text: string): Set<string> {
   return new Set(text.split(" ").filter(Boolean));
 }
 
+const synonymsCache = new Map<string, Set<string>>();
+
+function getSynonymSet(synonymsRaw: string | undefined | null): Set<string> {
+  const key = synonymsRaw || "";
+  let cached = synonymsCache.get(key);
+  if (!cached) {
+    cached = new Set(parseTerms(key).map((t) => t.word.trim().toLowerCase()));
+    synonymsCache.set(key, cached);
+  }
+  return cached;
+}
+
 /**
  * Whether two words are too close in meaning to be told apart from the meaning alone: listed as
  * synonyms of each other, or sharing a sense ("nhanh" / "nhanh chóng"), any sense of either word
@@ -1521,8 +1618,7 @@ export function areConfusable(a: WordDetail, b: WordDetail): boolean {
   const aw = a.word.trim().toLowerCase();
   const bw = b.word.trim().toLowerCase();
   if (aw === bw) return true;
-  const synonymsOf = (w: WordDetail) => new Set(parseTerms(w.synonyms).map((t) => t.word.trim().toLowerCase()));
-  if (synonymsOf(a).has(bw) || synonymsOf(b).has(aw)) return true;
+  if (getSynonymSet(a.synonyms).has(bw) || getSynonymSet(b.synonyms).has(aw)) return true;
 
   const sa = meaningSenses(a.meaning_vn);
   const sb = meaningSenses(b.meaning_vn);
@@ -1544,7 +1640,7 @@ export function areConfusable(a: WordDetail, b: WordDetail): boolean {
 
 /**
  * Generate 4 options for multiple choice quiz:
- * Prioritizes distractors from the same topic and similar difficulty, never synonyms of the target.
+ * Prioritizes distractors from the same POS, CEFR, topic and similar length, never synonyms of the target.
  */
 export function generateMultipleChoiceQuestion(
   targetWord: WordDetail,
@@ -1552,16 +1648,22 @@ export function generateMultipleChoiceQuestion(
   promptType: "en_to_vn" | "vn_to_en" = "en_to_vn"
 ): MultipleChoiceQuestion {
   const otherWords = allWords.filter(
-    (w) => w.id !== targetWord.id && !isPlaceholderMeaning(w.meaning_vn) && !areConfusable(targetWord, w)
+    (w) => w.id !== targetWord.id && !isPlaceholderMeaning(w.meaning_vn)
   );
 
-  // Plausible distractors are harder to rule out: same topic first, then same part of speech.
+  // Plausible distractors are harder to rule out: same POS, same CEFR, same topic, and similar length.
   // Shuffled before the (stable) sort so equally similar words are picked at random.
   const targetTopic = (targetWord.topic || "").toLowerCase();
   const targetPos = (targetWord.part_of_speech || "").toLowerCase();
-  const similarity = (w: WordDetail) =>
-    ((w.topic || "").toLowerCase() === targetTopic ? 2 : 0) +
-    (targetPos && (w.part_of_speech || "").toLowerCase() === targetPos ? 1 : 0);
+  const targetCefr = (targetWord.cefr_level || "").toLowerCase();
+  const targetLen = targetWord.word.length;
+  const similarity = (w: WordDetail) => {
+    const sameTopic = Boolean(targetTopic && (w.topic || "").toLowerCase() === targetTopic);
+    const samePOS = Boolean(targetPos && (w.part_of_speech || "").toLowerCase() === targetPos);
+    const sameCefr = Boolean(targetCefr && (w.cefr_level || "").toLowerCase() === targetCefr);
+    const similarLen = Math.abs(w.word.length - targetLen) <= 3;
+    return (sameTopic ? 4 : 0) + (samePOS ? 2 : 0) + (sameCefr ? 2 : 0) + (similarLen ? 1 : 0);
+  };
   // Vietnamese -> English: words the learner has studied come first, otherwise the answer is the one
   // familiar word among words never seen (M7); deck words not studied yet only fill what is missing
   const studied = (w: WordDetail) => (promptType === "vn_to_en" && (w.srs?.reps ?? 0) > 0 ? 1 : 0);
@@ -1578,6 +1680,7 @@ export function generateMultipleChoiceQuestion(
     if (selectedDistractors.length >= 3) break;
     const key = displayKey(next);
     if (!key || usedTexts.has(key)) continue;
+    if (areConfusable(targetWord, next)) continue;
     usedTexts.add(key);
     selectedDistractors.push(next);
   }
@@ -1835,14 +1938,31 @@ export function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+const wordPatternCache = new Map<string, { pattern: string; singleRe: RegExp; globalRe: RegExp }>();
+
+function getWordPatternEntry(word: string): { pattern: string; singleRe: RegExp; globalRe: RegExp } {
+  const key = word.trim().toLowerCase();
+  let entry = wordPatternCache.get(key);
+  if (!entry) {
+    // Longest first so "stopped" wins over "stop"
+    const alts = wordForms(word).map(escapeRegExp).sort((a, b) => b.length - a.length).join("|");
+    const pattern = `(?<![\\w])(?:${alts})(?![\\w])`;
+    entry = {
+      pattern,
+      singleRe: new RegExp(pattern, "i"),
+      globalRe: new RegExp(pattern, "gi"),
+    };
+    wordPatternCache.set(key, entry);
+  }
+  return entry;
+}
+
 /**
  * Whole-word regex source for `word` plus common inflections.
  * Uses \w lookarounds instead of \b so words like "c++", "c#" or ".net" still match.
  */
 export function wordFormsPattern(word: string): string {
-  // Longest first so "stopped" wins over "stop"
-  const alts = wordForms(word).map(escapeRegExp).sort((a, b) => b.length - a.length).join("|");
-  return `(?<![\\w])(?:${alts})(?![\\w])`;
+  return getWordPatternEntry(word).pattern;
 }
 
 /**
@@ -1902,6 +2022,7 @@ export function registerWordForms(word: string, forms: string[], variants: strin
   const clean = (list: string[]) =>
     [...new Set(list.map((f) => f.trim()).filter((f) => f && f.toLowerCase() !== key && f.length <= 40))];
   deckForms.set(key, { forms: clean(forms), variants: clean(variants) });
+  wordPatternCache.delete(key);
 }
 
 function ruleForms(w: string): string[] {
@@ -1937,20 +2058,22 @@ export function wordForms(word: string): string[] {
 /** The form of `word` that a sentence actually uses ("deployed" in "We deployed it"); null when absent */
 export function formInSentence(sentence: string | null | undefined, word: string): string | null {
   if (!sentence || !word.trim()) return null;
-  return new RegExp(wordFormsPattern(word), "i").exec(sentence)?.[0] ?? null;
+  return getWordPatternEntry(word).singleRe.exec(sentence)?.[0] ?? null;
 }
 
 /** Blank every occurrence of `word` and its inflections; null when the sentence does not contain it. */
 export function maskAllWordForms(sentence: string, word: string, blank = "______"): string | null {
   if (!word.trim()) return null;
-  const re = new RegExp(wordFormsPattern(word), "gi");
-  return re.test(sentence) ? sentence.replace(re, blank) : null;
+  const { singleRe, globalRe } = getWordPatternEntry(word);
+  if (!singleRe.test(sentence)) return null;
+  globalRe.lastIndex = 0;
+  return sentence.replace(globalRe, blank);
 }
 
 /** Replace the first occurrence of `word` (or an inflection) with a blank; null when not found. */
 export function maskWordInSentence(sentence: string, word: string, blank = "______"): string | null {
   if (!word.trim()) return null;
-  const match = new RegExp(wordFormsPattern(word), "i").exec(sentence);
+  const match = getWordPatternEntry(word).singleRe.exec(sentence);
   if (!match) return null;
   return sentence.slice(0, match.index) + blank + sentence.slice(match.index + match[0].length);
 }
@@ -2027,14 +2150,30 @@ interface GradableExercise {
  */
 export function answerReadings(text: string): string[] {
   const t = text.toLowerCase().replace(/[‘’ʼ´`]/g, "'");
-  const sForms = /'s\b/.test(t) ? [" is", " has", "qpossq"] : [null];
+  const sMatches = t.match(/'s\b/g);
+  const sCount = sMatches ? sMatches.length : 0;
+  let sExpanded: string[];
+  if (sCount === 0) {
+    sExpanded = [t];
+  } else if (sCount <= 3) {
+    sExpanded = [t];
+    for (let i = 0; i < sCount; i++) {
+      const next: string[] = [];
+      for (const cur of sExpanded) {
+        for (const rep of [" is", " has", "qpossq"]) {
+          next.push(cur.replace(/'s\b/, rep));
+        }
+      }
+      sExpanded = next;
+    }
+  } else {
+    sExpanded = [" is", " has", "qpossq"].map((sf) => t.replace(/'s\b/g, sf));
+  }
   const dForms = /'d\b/.test(t) ? [" would", " had"] : [null];
   const out = new Set<string>();
-  for (const sf of sForms) {
+  for (const sv of sExpanded) {
     for (const df of dForms) {
-      let v = t;
-      if (sf) v = v.replace(/'s\b/g, sf);
-      if (df) v = v.replace(/'d\b/g, df);
+      const v = df ? sv.replace(/'d\b/g, df) : sv;
       for (const r of hyphenReadings(v)) out.add(r.replace(/qpossq/g, "'s"));
     }
   }
@@ -2050,7 +2189,9 @@ export function isGrammarAnswerCorrect(input: string, ex: GradableExercise): boo
   const user = answerReadings(input).filter(Boolean);
   if (user.length === 0) return false;
   const answers = (Array.isArray(ex.correctAnswer) ? ex.correctAnswer : [ex.correctAnswer]).filter(Boolean);
-  if (ex.errorWord) answers.push(ex.errorWord);
+  // Error spotting is answered by picking the wrong word; exercises saved before correctAnswer held it
+  // (it held the fix) must still accept that pick. Other types never accept the error word.
+  if (ex.type === "error_spotting" && ex.errorWord) answers.push(ex.errorWord);
   const targets = new Set(answers.flatMap(answerReadings));
   // In error spotting the brackets mark clickable words, not a blank to fill
   if (ex.type !== "error_spotting") {

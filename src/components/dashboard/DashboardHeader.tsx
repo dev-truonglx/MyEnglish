@@ -1,13 +1,15 @@
 import { useState, type RefObject } from "react";
-import { Sparkles, Search, RefreshCw, Plus, X, Flame, LayoutGrid, List, Target, Loader2, Zap } from "lucide-react";
+import { Sparkles, Search, RefreshCw, Plus, X, Flame, LayoutGrid, List, Target, Loader2, Zap, Crosshair, BellOff } from "lucide-react";
 import type { calculateStreakAndGoal } from "@/services/streak";
 import { triggerAutoReplenish } from "@/services/autoReplenish";
 import { useWordsStore } from "@/stores/wordsStore";
 import type { GlobalToastData } from "./DashboardBanners";
-import { navGroupOf, type DashboardTab, type FilterMode, type LibraryStats, type ViewMode } from "./shared";
+import { navGroupOf, type DashboardTab, type ViewMode } from "./shared";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 import type { TodayWork } from "@/services/smartReview";
 import { vocabDetail } from "./todayPlan";
+import { useReminderSnooze } from "@/hooks/useReminderSnooze";
+import { snoozeEndText } from "@/services/reminderSettings";
 
 interface DashboardHeaderProps {
   searchInputRef: RefObject<HTMLInputElement>;
@@ -17,12 +19,9 @@ interface DashboardHeaderProps {
   setActiveTab: (tab: DashboardTab) => void;
   viewMode: ViewMode;
   setViewMode: (mode: ViewMode) => void;
-  filterMode: FilterMode;
-  setFilterMode: (mode: FilterMode) => void;
   streakStats: ReturnType<typeof calculateStreakAndGoal>;
   dueCount: number;
   todayWork?: TodayWork;
-  libraryStats: LibraryStats;
   effectiveLevel: string;
   setGlobalToast: (toast: GlobalToastData | null) => void;
   onStartReview?: () => void;
@@ -30,9 +29,14 @@ interface DashboardHeaderProps {
   isReviewing?: boolean;
   /** Simple mode: a small bar under the header switches between the tabs of the current sidebar entry */
   simpleMode?: boolean;
+  /** Start a focus session (the last chosen length), from any tab */
+  onStartFocus?: () => void;
+  /** "Từ hay quên": how many words, and how many of them are due (count on its tab in simple mode) */
+  forgottenCount?: number;
+  forgottenDue?: number;
 }
 
-/** Top App Bar: search, streak indicator, view/filter toggles, refresh, auto-replenish, add word */
+/** Top App Bar: search, reminder snooze chip, streak indicator, view toggle, refresh, auto-replenish, focus, review, add word */
 export default function DashboardHeader({
   searchInputRef,
   searchQuery,
@@ -41,21 +45,22 @@ export default function DashboardHeader({
   setActiveTab,
   viewMode,
   setViewMode,
-  filterMode,
-  setFilterMode,
   streakStats,
   dueCount,
   todayWork,
-  libraryStats,
   effectiveLevel,
   setGlobalToast,
   onStartReview,
   isReviewing = false,
   simpleMode = false,
+  onStartFocus,
+  forgottenCount = 0,
+  forgottenDue = 0,
 }: DashboardHeaderProps) {
   const loading = useWordsStore((s) => s.loading);
   const refreshWords = useWordsStore((s) => s.refreshWords);
   const [isQuickReplenishing, setIsQuickReplenishing] = useState(false);
+  const snooze = useReminderSnooze();
 
   const handleQuickReplenish = async () => {
     if (isQuickReplenishing) return;
@@ -83,6 +88,32 @@ export default function DashboardHeader({
   // Simple mode groups several tabs under one sidebar entry: their bar is hidden during a session on screen
   const group = simpleMode ? navGroupOf(activeTab) : null;
   const subTabs = group && group.tabs.length > 1 && !(isReviewing && activeTab === "review") ? group.tabs : null;
+
+  // Word library: cards or table
+  const viewToggle = (
+    <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
+      <button
+        onClick={() => setViewMode("gallery")}
+        title="Dạng thẻ" aria-label="Xem dạng thẻ"
+        className={`p-1.5 rounded-md transition-colors ${viewMode === "gallery"
+          ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
+          : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
+          }`}
+      >
+        <LayoutGrid className="w-3.5 h-3.5" />
+      </button>
+      <button
+        onClick={() => setViewMode("table")}
+        title="Dạng bảng" aria-label="Xem dạng bảng"
+        className={`p-1.5 rounded-md transition-colors ${viewMode === "table"
+          ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
+          : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
+          }`}
+      >
+        <List className="w-3.5 h-3.5" />
+      </button>
+    </div>
+  );
 
   return (
     <>
@@ -127,6 +158,31 @@ export default function DashboardHeader({
 
       {/* Right Header Controls: wrap onto a second row in a narrow window instead of being cut off */}
       <div className="min-w-0 flex flex-wrap items-center justify-end gap-2">
+        {/* Reminders snoozed (corner reminder, popup or tray): until when, and undo in one click */}
+        {snooze.snoozedUntil && (
+          <div
+            role="status"
+            title={`Nhắc học đang hoãn đến ${snoozeEndText(snooze.snoozedUntil)} (còn ${Math.max(1, Math.ceil((snooze.snoozedUntil - Date.now()) / 60_000))} phút)`}
+            className="inline-flex items-center rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-300 shadow-sm"
+          >
+            <span className="inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1">
+              <BellOff className="w-3.5 h-3.5 shrink-0" />
+              <span className={activeTab === "library" ? "hidden 2xl:inline" : "hidden lg:inline"}>Hoãn nhắc đến</span>
+              <span className="font-mono font-semibold">{snoozeEndText(snooze.snoozedUntil)}</span>
+            </span>
+            <button
+              type="button"
+              onClick={snooze.cancel}
+              title="Hủy hoãn: nhắc học lại như bình thường"
+              aria-label="Hủy hoãn nhắc học"
+              className="self-stretch inline-flex items-center gap-1 px-2 border-l border-amber-200 dark:border-amber-800/60 rounded-r-lg font-semibold hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+            >
+              <X className="w-3 h-3" />
+              <span className={activeTab === "library" ? "hidden 2xl:inline" : "hidden md:inline"}>Hủy hoãn</span>
+            </button>
+          </div>
+        )}
+
         {/* Streak & Daily Goal Quick Indicator (the word library needs the room; the sidebar shows both too) */}
         {activeTab !== "library" && (
         <button
@@ -145,92 +201,26 @@ export default function DashboardHeader({
               {streakStats.todayCount}/{streakStats.dailyGoal}
             </span>
             {streakStats.goalReached && (
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              // Static: a pulse under the header's backdrop blur re-composited the blur on every frame
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
             )}
           </div>
         </button>
         )}
-        {/* View Mode Toggle (Gallery vs Data Grid Table) */}
-        {activeTab === "library" && (
-          <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
-            <button
-              onClick={() => setViewMode("gallery")}
-              title="Card Gallery View"
-              className={`p-1.5 rounded-md transition-colors ${viewMode === "gallery"
-                ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
-                : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={() => setViewMode("table")}
-              title="Data Grid Table View"
-              className={`p-1.5 rounded-md transition-colors ${viewMode === "table"
-                ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
-                : "text-slate-500 dark:text-zinc-500 hover:text-slate-800 dark:hover:text-zinc-200"
-                }`}
-            >
-              <List className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        )}
+        {/* View mode of the word library: here only when there is no tab bar below (it sits on that bar otherwise) */}
+        {activeTab === "library" && !subTabs && viewToggle}
 
-        {/* Filter Pills (word library only) */}
+        {/* Refresh: only over the word list (words refresh on their own; it gives its room up in a narrow window) */}
         {activeTab === "library" && (
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-300 dark:border-zinc-800">
-          <button
-            onClick={() => setFilterMode("all")}
-            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "all"
-              ? "bg-white dark:bg-zinc-800 text-slate-900 dark:text-white shadow-sm border border-slate-200 dark:border-transparent font-medium"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            Tất cả
-          </button>
-          <button
-            onClick={() => setFilterMode("due")}
-            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "due"
-              ? "bg-white dark:bg-zinc-800 text-orange-600 dark:text-orange-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            Đến hạn
-            {dueCount > 0 && (
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-            )}
-          </button>
-          <button
-            onClick={() => setFilterMode("mastered")}
-            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors ${filterMode === "mastered"
-              ? "bg-white dark:bg-zinc-800 text-emerald-600 dark:text-emerald-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            Nhớ lâu
-          </button>
-          <button
-            onClick={() => setFilterMode("leech")}
-            className={`px-2 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1 ${filterMode === "leech"
-              ? "bg-white dark:bg-zinc-800 text-rose-600 dark:text-rose-400 shadow-sm border border-slate-200 dark:border-transparent font-medium"
-              : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
-              }`}
-          >
-            Hay quên
-            {libraryStats.leechCount > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />}
-          </button>
-        </div>
-        )}
-
-        {/* Refresh (words also refresh on their own: in the word library it gives its room up in a narrow window) */}
         <button
           onClick={() => refreshWords({ showLoading: true })}
           disabled={loading}
           title="Tải lại danh sách từ"
-          className={`${activeTab === "library" ? "hidden xl:inline-flex" : "inline-flex"} p-1.5 rounded-lg border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors shadow-sm`}
+          className={`hidden xl:inline-flex p-1.5 rounded-lg border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors shadow-sm`}
         >
           <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-cyan-600 dark:text-cyan-400" : ""}`} />
         </button>
+        )}
 
         {/* Quick Auto-Replenish Button (needs the AI CLI: word library and capture only) */}
         {AI_VOCAB_ENABLED && (activeTab === "library" || activeTab === "capture") && (
@@ -252,6 +242,18 @@ export default function DashboardHeader({
             </>
           )}
         </button>
+        )}
+
+        {/* Focus session from any tab (the Today screen has its own focus card) */}
+        {onStartFocus && !isReviewing && activeTab !== "today" && (
+          <button
+            onClick={onStartFocus}
+            title="Phiên tập trung: học trọn vài phút, ẩn mọi thứ khác và tắt nhắc nhở"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm shadow-violet-600/30 transition-all active:scale-95"
+          >
+            <Crosshair className="w-3.5 h-3.5" />
+            <span>Tập trung</span>
+          </button>
         )}
 
         {/* Quick Review Button (the Today screen has its own, single main button). During a session it only
@@ -324,10 +326,22 @@ export default function DashboardHeader({
                     {dueCount}
                   </span>
                 )}
+                {t.tab === "forgotten" && forgottenCount > 0 && (
+                  <span
+                    className={`text-[10px] font-mono font-semibold px-1.5 rounded-full ${
+                      forgottenDue > 0
+                        ? "bg-rose-100 dark:bg-rose-950 text-rose-700 dark:text-rose-400"
+                        : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
+                    }`}
+                  >
+                    {forgottenCount}
+                  </span>
+                )}
               </button>
             );
           })}
         </div>
+        {activeTab === "library" && <div className="ml-auto">{viewToggle}</div>}
       </div>
     )}
     </>

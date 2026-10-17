@@ -3,10 +3,10 @@ import type { Word, WordExample, SRSReview, CreateWordInput, WordDetail } from "
 import { initReviewLogsTable, registerWordForms } from "./smartReview";
 import { logTerminal } from "./logger";
 import { INTRO_READY_MS, nextLocalDayStart } from "./cards";
-import { WORD_KEY_SQL } from "./sync/keys";
+import { WORD_KEY_SQL, wordKey } from "./sync/keys";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 16;
+const SCHEMA_VERSION = 17;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -91,6 +91,7 @@ export async function getDatabase(): Promise<Database> {
  * Creates required tables and indexes if they don't exist.
  */
 export async function initSchema(db: Database): Promise<void> {
+  await db.execute(`PRAGMA foreign_keys = ON;`).catch(() => {});
   // Check current schema version
   const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
   const currentVersion = versionRows[0]?.user_version ?? 0;
@@ -691,6 +692,17 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_sync_tombstones_at ON sync_tombstones(at);`);
   }
 
+  await checkpoint(16);
+  if (version < 17) {
+    // Schema v17: the mistakes' normalized key (also added on demand by mistakes.ensureKeyColumn) and the
+    // indexes behind the word list order and the sync's change collection
+    await tryExec(`ALTER TABLE mistakes ADD COLUMN norm_key TEXT;`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_norm_key ON mistakes(norm_key);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_created_at ON words(created_at DESC);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_updated_at ON words(updated_at);`);
+    await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_sync ON mistakes(last_review, created_at);`);
+  }
+
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed
   // steps are retried on the next launch (later blocks still run, so new columns always exist)
   if (version < SCHEMA_VERSION) {
@@ -762,17 +774,19 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     const now = new Date().toISOString();
     const topic = input.topic?.trim() || "General Tech";
 
-  // 1. Check if word already exists in SQLite
+  // 1. Check if word already exists in SQLite (prefer free words over catalog words)
   const existingList = await db.select<Word[]>(
-    `SELECT ${WORD_COLUMNS} FROM words WHERE LOWER(TRIM(word)) = $1 LIMIT 1;`,
+    `SELECT ${WORD_COLUMNS} FROM words WHERE LOWER(TRIM(word)) = $1 ORDER BY CASE WHEN catalog_id IS NULL THEN 0 ELSE 1 END LIMIT 1;`,
     [cleanWord]
   );
 
   let wordId: string;
+  const existing = existingList[0];
 
-  if (existingList.length > 0) {
+  if (existing) {
     // Word exists: UPDATE instead of creating a duplicate row
-    wordId = existingList[0].id;
+    wordId = existing.id;
+    const nextTopic = existing.catalog_id != null ? existing.topic : (input.topic || null);
     try {
       await db.execute(
         `UPDATE words 
@@ -793,7 +807,7 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
           JSON.stringify(input.antonyms || []),
           input.collocations ? JSON.stringify(input.collocations) : null,
           input.code_snippet || null,
-          input.topic || null,
+          nextTopic,
           wordId,
         ]
       );
@@ -809,7 +823,7 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
           input.meaning_vn,
           JSON.stringify(input.synonyms || []),
           JSON.stringify(input.antonyms || []),
-          input.topic || null,
+          nextTopic,
           wordId,
         ]
       );
@@ -863,8 +877,13 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
     );
   }
 
-  // Marks the word as changed for the cloud sync
+  // Marks the word as changed for the cloud sync and removes any stale tombstone
   await db.execute(`UPDATE words SET updated_at = $1 WHERE id = $2;`, [now, wordId]).catch(() => {});
+  await db
+    .execute(`DELETE FROM sync_tombstones WHERE kind = 'word' AND key = $1;`, [
+      wordKey({ catalog_id: existing?.catalog_id ?? null, word: existing?.word ?? cleanWord }),
+    ])
+    .catch(() => {});
 
   // CEFR level of the term (kept when a re-enrichment doesn't report one)
   if (input.cefr_level) {
@@ -888,8 +907,8 @@ export async function insertEnrichedWord(input: CreateWordInput): Promise<string
       params
     );
   }
-  if (existingList.length > 0) {
-    // Re-enrichment replaces AI examples; the learner's own sentences are always kept
+  if (existing && existing.catalog_id == null) {
+    // Re-enrichment replaces AI examples; the learner's own sentences and catalog examples are always kept
     const keepPlaceholders = exampleIds.map((_, i) => `$${i + 2}`).join(", ");
     await db.execute(
       exampleIds.length > 0
@@ -1121,6 +1140,22 @@ export async function insertCatalogWordsReport(
   for (let start = 0; start < items.length; start += CATALOG_INSERT_BATCH) {
     const batch = items.slice(start, start + CATALOG_INSERT_BATCH);
     const ids = batch.map((i) => i.catalogId);
+    const tombstoned = new Set(
+      (
+        await db
+          .select<Array<{ key: string }>>(
+            `SELECT key FROM sync_tombstones WHERE kind = 'word' AND key IN (${placeholders(ids.length)})`,
+            ids
+          )
+          .catch(() => [])
+      ).map((r) => r.key)
+    );
+    if (tombstoned.size > 0) {
+      const keys = [...tombstoned];
+      await db
+        .execute(`DELETE FROM sync_tombstones WHERE kind = 'word' AND key IN (${placeholders(keys.length)})`, keys)
+        .catch(() => {});
+    }
     const existing = await db.select<Array<{ id: string; catalog_id: string }>>(
       `SELECT id, catalog_id FROM words WHERE catalog_id IN (${placeholders(ids.length)})`,
       ids
@@ -1168,6 +1203,16 @@ export async function insertCatalogWordsReport(
       srsRows.push(real, item.createdAt);
       for (const ex of item.examples) {
         exampleRows.push(crypto.randomUUID(), real, ex.en, ex.vi, "", "catalog", JSON.stringify(ex.focus), ex.senseIndex ?? 0);
+      }
+    }
+    if (tombstoned.size > 0) {
+      const revivedIds = [...tombstoned].map((cid) => result.get(cid)).filter((id): id is string => Boolean(id));
+      if (revivedIds.length > 0) {
+        const now = new Date().toISOString();
+        const revPlaceholders = revivedIds.map((_, i) => `$${i + 2}`).join(", ");
+        await db
+          .execute(`UPDATE words SET updated_at = $1 WHERE id IN (${revPlaceholders})`, [now, ...revivedIds])
+          .catch(() => {});
       }
     }
     if (srsRows.length > 0) {
@@ -1275,6 +1320,7 @@ export async function addUserContextExample(
     `INSERT INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source) VALUES ($1, $2, $3, $4, '', $5)`,
     [crypto.randomUUID(), wordId, clean, sentenceVn ?? null, source]
   );
+  await db.execute(`UPDATE words SET updated_at = $1 WHERE id = $2;`, [new Date().toISOString(), wordId]).catch(() => {});
   return true;
 }
 

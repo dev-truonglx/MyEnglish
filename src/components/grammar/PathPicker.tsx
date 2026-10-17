@@ -483,9 +483,35 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
   return (
     <section className="space-y-4">
       <div className="space-y-1 px-1">
-        <h2 className="text-sm font-bold text-slate-900 dark:text-white">
-          {isPractice ? "Luyện theo thì" : "Lộ trình theo sách"}
-        </h2>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-bold text-slate-900 dark:text-white">
+            {isPractice ? "Luyện theo thì" : "Lộ trình theo sách"}
+          </h2>
+          {/* Same lessons, two uses: the daily path, or picking tenses to practise */}
+          <div role="tablist" aria-label="Chế độ" className="inline-flex items-center gap-0.5 rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-zinc-800 dark:bg-zinc-900">
+            {(
+              [
+                ["path", "Lộ trình"],
+                ["practice", "Luyện theo thì"],
+              ] as const
+            ).map(([m, label]) => (
+              <button
+                key={m}
+                type="button"
+                role="tab"
+                aria-selected={mode === m}
+                onClick={() => changeMode(m)}
+                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                  mode === m
+                    ? "bg-white text-cyan-700 shadow-sm dark:bg-zinc-800 dark:text-cyan-300"
+                    : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
         <p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">
           {isPractice
             ? "Chọn 1 thì, 2 thì hoặc nhiều thì: app lấy các câu chỉ dùng những thì này."

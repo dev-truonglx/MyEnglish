@@ -1,9 +1,9 @@
 import { useState, useMemo, useEffect } from "react";
-import { getNextReviewDate, isWordDue } from "@/services/cards";
+import { librarySchedule } from "@/services/librarySchedule";
 import { handleSpeak } from "./review/speech";
 import { Volume2, Trash2, ArrowUpDown, ChevronRight, Tag, Sparkles, Clock } from "lucide-react";
 import type { WordDetail } from "@/types/database";
-import { formatNextReviewRelative, compareNextReview, type ReviewTimeRelativeInfo } from "@/utils/reviewSchedule";
+import type { ReviewTimeRelativeInfo } from "@/utils/reviewSchedule";
 import ReviewTrajectoryModal from "./review/ReviewTrajectoryModal";
 import Jargon from "./Jargon";
 
@@ -52,6 +52,12 @@ export default function WordTableView({
     }
   };
 
+  // Each word's schedule as a session sees it, computed once per words change
+  const scheduleOf = useMemo(() => {
+    const now = new Date();
+    return new Map(words.map((w) => [w.id, librarySchedule(w, now)]));
+  }, [words]);
+
   const sortedWords = useMemo(() => {
     return [...words].sort((a, b) => {
       let cmp = 0;
@@ -62,7 +68,14 @@ export default function WordTableView({
       } else if (sortField === "created_at") {
         cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
       } else if (sortField === "next_review") {
-        cmp = compareNextReview(a, b);
+        // When the word really comes back (see librarySchedule); never-studied words last, newest first
+        const sa = scheduleOf.get(a.id);
+        const sb = scheduleOf.get(b.id);
+        const ka = sa?.sortAt ?? null;
+        const kb = sb?.sortAt ?? null;
+        if (ka == null && kb == null) cmp = new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        else if (ka == null || kb == null) cmp = ka == null ? 1 : -1;
+        else cmp = ka - kb || a.word.localeCompare(b.word);
       } else if (sortField === "ease_factor") {
         cmp = (a.srs.stability || a.srs.interval) - (b.srs.stability || b.srs.interval);
       } else if (sortField === "repetitions") {
@@ -76,25 +89,21 @@ export default function WordTableView({
       }
       return sortOrder === "asc" ? cmp : -cmp;
     });
-  }, [words, sortField, sortOrder]);
-
-  // Per-row derived data (due flag + relative review schedule info)
-  const rowMeta = useMemo(() => {
-    const now = new Date();
-    const meta = new Map<string, { isDue: boolean; relative: ReviewTimeRelativeInfo }>();
-    for (const item of sortedWords) {
-      const isNew = (!item.srs.reps && !item.srs.repetitions) || item.srs.repetitions === 0;
-      const next = getNextReviewDate(item);
-      meta.set(item.id, {
-        isDue: isWordDue(item, now),
-        relative: formatNextReviewRelative(next, isNew, now),
-      });
-    }
-    return meta;
-  }, [sortedWords]);
+  }, [words, sortField, sortOrder, scheduleOf]);
 
   const visibleWords = useMemo(() => sortedWords.slice(0, visibleCount), [sortedWords, visibleCount]);
   const remaining = sortedWords.length - visibleWords.length;
+
+  // Per-row derived data (due flag + relative review schedule info) computed only for visible rows
+  const rowMeta = useMemo(() => {
+    const now = new Date();
+    const meta = new Map<string, { isDue: boolean; relative: ReviewTimeRelativeInfo }>();
+    for (const item of visibleWords) {
+      const s = scheduleOf.get(item.id) ?? librarySchedule(item, now);
+      meta.set(item.id, { isDue: s.isDue, relative: s.info });
+    }
+    return meta;
+  }, [visibleWords, scheduleOf]);
 
   if (words.length === 0) {
     return null;

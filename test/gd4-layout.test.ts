@@ -51,11 +51,11 @@ describe("one definition of 'đã thuộc': Đang học / Nhớ lâu (U9)", () =
 
 describe("simple mode's five sidebar entries (U15)", () => {
   const ALL_TABS: DashboardTab[] = [
-    "today", "library", "capture", "reading", "writing", "review", "analytics", "guide", "grammar", "pronunciation", "leaderboard", "account",
+    "today", "library", "known", "capture", "reading", "writing", "review", "forgotten", "analytics", "guide", "grammar", "pronunciation", "leaderboard", "account",
   ];
 
   it("has five entries in order, and every tab belongs to exactly one", () => {
-    expect(SIMPLE_NAV_GROUPS.map((g) => g.label)).toEqual(["Hôm nay", "Từ vựng", "Ngữ pháp", "Luyện thêm", "Cài đặt", "Tài khoản"]);
+    expect(SIMPLE_NAV_GROUPS.map((g) => g.label)).toEqual(["Hôm nay", "Từ vựng", "Ngữ pháp", "Luyện thêm", "Truy cập nhanh", "Cài đặt", "Tài khoản"]);
     const tabs = SIMPLE_NAV_GROUPS.flatMap((g) => g.tabs.map((t) => t.tab));
     expect([...tabs].sort()).toEqual([...ALL_TABS].sort());
   });
@@ -63,6 +63,9 @@ describe("simple mode's five sidebar entries (U15)", () => {
   it("Từ vựng opens Ôn tập first and holds the library and the vocabulary path; Luyện thêm opens Phát âm", () => {
     expect(navGroupOf("library").id).toBe("vocab");
     expect(navGroupOf("capture").id).toBe("vocab");
+    // Quick access: both tabs one click away, and a bar to switch between them
+    expect(navGroupOf("forgotten").id).toBe("quick");
+    expect(navGroupOf("leaderboard").tabs.map((t) => t.tab)).toEqual(["forgotten", "leaderboard"]);
     expect(navGroupOf("review").tabs[0].tab).toBe("review");
     expect(navGroupOf("writing").tabs.map((t) => t.tab)).toEqual(["pronunciation", "reading", "writing"]);
     expect(navGroupOf("analytics").id).toBe("today");

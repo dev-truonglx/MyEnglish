@@ -316,8 +316,21 @@ export async function buildReviewSession(size = 12, now: Date = new Date(), rand
     .map((it) => ({ it, score: itemPriority(history[it.key], t) + (random() - 0.5) * 6 }))
     .sort((a, b) => b.score - a.score);
 
-  const dueAt = (id: string) => new Date(getLessonProgress(id).nextReviewDate).getTime() || 0;
-  const available = (id: string) => candidates.filter((c) => c.it.lessonIds.includes(id)).length;
+  const dueAtMap = new Map<string, number>();
+  const availableMap = new Map<string, number>();
+  for (const id of due) {
+    dueAtMap.set(id, new Date(getLessonProgress(id).nextReviewDate).getTime() || 0);
+    availableMap.set(id, 0);
+  }
+  for (const c of candidates) {
+    for (const id of c.it.lessonIds) {
+      if (availableMap.has(id)) {
+        availableMap.set(id, (availableMap.get(id) ?? 0) + 1);
+      }
+    }
+  }
+  const dueAt = (id: string) => dueAtMap.get(id) ?? 0;
+  const available = (id: string) => availableMap.get(id) ?? 0;
   const ordered = [...due].sort((a, b) => dueAt(a) - dueAt(b));
   // Lessons with enough questions to be graded come first; one with only 1–2 questions still gets reviewed
   const gradable = ordered.filter((id) => available(id) >= MIN_LESSON_ANSWERS);
@@ -644,7 +657,6 @@ export async function getPopupGrammarItems(count: number, now: Date = new Date()
   }
 
   for (const list of byLesson.values()) {
-    if (result.length + list.length > count && result.length > 0) continue;
     for (const it of list) if (result.length < count) push(it);
     if (result.length >= count) break;
   }

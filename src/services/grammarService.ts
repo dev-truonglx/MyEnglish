@@ -387,7 +387,7 @@ export function isLessonMastered(progress: Pick<GrammarProgress, "mastery" | "re
 }
 
 function lessonToCard(progress: GrammarProgress, now: Date): Card {
-  const empty = createEmptyCard(now);
+  const empty = { ...createEmptyCard(now), card_id: progress.lessonId } as Card;
   if (progress.stability && progress.stability > 0) {
     return {
       ...empty,
@@ -519,6 +519,7 @@ export async function recordPracticeResult(
     diagnosticStatus: current.diagnosticStatus,
     score: scorePercent,
     mastery: movingMastery(current, scorePercent, SINGLE_QUESTION_MASTERY_CAP),
+    streak: !passed ? 0 : schedule ? current.streak + 1 : current.streak,
     lastAttemptDate: nowDate.toISOString(),
   };
 

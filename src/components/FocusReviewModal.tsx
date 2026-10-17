@@ -32,7 +32,7 @@ import { checkTask } from "@/services/grammarItems";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import { isWordDue, practiceCards } from "@/services/cards";
 import { shuffle } from "@/lib/utils";
-import { clearBookCache } from "@/services/grammarBook";
+import { BOOK_REVISION_KEY, clearBookCache } from "@/services/grammarBook";
 import {
   getRecentIntros,
   postponeNewCard,
@@ -41,6 +41,7 @@ import {
   markWordKnown,
   schedulingDecision,
 } from "@/services/reviewRecorder";
+import { setPopupSessionActive } from "@/services/activeSession";
 import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
 import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors, loadCatalogMeanings } from "@/services/vocabCatalog";
@@ -80,6 +81,7 @@ import {
 } from "@/services/smartReview";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
 import { Rating } from "ts-fsrs";
+import { playAnswerSound, playSound, resetSoundSession } from "@/services/sound";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 
 interface FocusReviewModalProps {
@@ -207,6 +209,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
+  // Answer tones (sound.ts): every answer (choice, tiles, typing, "Không nhớ", skip) turns isAnswered on once,
+  // together with isCorrect
+  useEffect(() => {
+    if (isAnswered) playAnswerSound(isCorrect);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnswered]);
 
   // Typing mode state
   const [typedInput, setTypedInput] = useState("");
@@ -230,6 +238,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const pendingSaveRef = useRef<Promise<unknown>>(Promise.resolve());
   const trackSave = <T,>(save: Promise<T>): Promise<T> => {
     pendingSaveRef.current = Promise.allSettled([pendingSaveRef.current, save]);
+    // Still answering: keeps the reminder worker away (the flag goes stale without answers)
+    if (!isPreview) setPopupSessionActive(true);
     return save;
   };
   // Feedback of an answer saved after a delay is shown only while that item (not a later one, nor its retry
@@ -296,6 +306,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (summary) {
       summaryShownRef.current = true;
       sessionOpenRef.current = false;
+      if (!isPreview) setPopupSessionActive(false);
+      playSound("complete");
     }
   }, [summary]);
   // Words of the deck, to explain which word a wrong option was
@@ -483,11 +495,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   );
 
   // The reading time of the intro starts when it appears (after the guess, if any)
+  const markingKnownRef = useRef(false);
   useEffect(() => {
     if (showIntro && !pretest) introShownAtRef.current = Date.now();
   }, [showIntro, introKey, !!pretest]);
   const finishIntro = useCallback(() => {
-    if (!currentWord) return;
+    if (!currentWord || markingKnownRef.current) return;
     setIntroduced((prev) => new Set(prev).add(introKey));
     introducedAtRef.current.set(introKey, Date.now());
     recordIntro(currentWord).catch(() => {});
@@ -520,6 +533,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       clearTimeout(snoozeTimerRef.current);
       snoozeTimerRef.current = null;
     }
+    markingKnownRef.current = false;
     closingRef.current = false;
     loadSeqRef.current++;
     sessionLoadedRef.current = false;
@@ -554,6 +568,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       clearTimeout(snoozeTimerRef.current);
       snoozeTimerRef.current = null;
     }
+    window.speechSynthesis?.cancel?.();
     // The answer given last may still be saving: the badges and the streak should count it
     await pendingSaveRef.current;
     // Closed before the end of the session (the summary was not reached)
@@ -563,10 +578,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       checkBadges(false);
     }
     sessionOpenRef.current = false;
+    if (!isPreview) setPopupSessionActive(false);
     if (onClose) onClose();
     if (!isPreview) {
       await hideReviewPopup();
-      // The window stays alive hidden (the in-app preview unmounts instead)
+      // Rust keeps the hidden window a little while before releasing it, so a reminder soon after reuses it
+      // (the in-app preview unmounts instead)
       resetSession();
     }
   }, [onClose, isPreview]);
@@ -575,6 +592,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     // Already snoozing: a second press must not log or schedule again
     if (closingRef.current) return;
     closingRef.current = true;
+    window.speechSynthesis?.cancel?.();
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -633,10 +651,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   /** A brand-new word the learner already knows: scheduled as Easy without a quiz, outside the daily budget */
   const markIntroKnown = useCallback(async () => {
-    if (!currentWord) return;
-    setIntroduced((prev) => new Set(prev).add(introKey));
-    await markWordKnown(currentWord.id).catch(() => false);
-    advanceNextItem();
+    if (!currentWord || markingKnownRef.current) return;
+    markingKnownRef.current = true;
+    try {
+      setIntroduced((prev) => new Set(prev).add(introKey));
+      await markWordKnown(currentWord.id).catch(() => false);
+      advanceNextItem();
+    } finally {
+      markingKnownRef.current = false;
+    }
   }, [currentWord, introKey, advanceNextItem]);
 
   // Load review queue: song song từ vựng và ngữ pháp theo thuật toán Spaced Repetition & Interleaving
@@ -777,6 +800,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setIntroduced(new Set());
       advancedFromRef.current = -1;
       sessionResultsRef.current = new Map();
+      resetSoundSession();
       // Wrong options: the learner's words read for this session plus unseen deck words of their levels
       const pool = new Map<string, WordDetail>();
       for (const w of [...selectedWords, ...dueWords, ...studiedWords, ...catalogDistractors]) {
@@ -789,6 +813,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setCurrentIndex(0);
       summaryShownRef.current = false;
       sessionOpenRef.current = finalQueue.length > 0;
+      if (!isPreview) setPopupSessionActive(finalQueue.length > 0);
       if (finalQueue.length > 0) logLearningEvent("popup_shown", { meta: { items: finalQueue.length } });
       setIsAnswered(false);
       setSelectedChoiceId(null);
@@ -805,9 +830,10 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   };
 
   /**
-   * The popup is really on screen: count the display and load a new session (N2). The review-popup window is
-   * created hidden at launch, so mounting is not an opening; Rust emits review-popup-opened each time it
-   * shows the hidden window.
+   * The popup is really on screen: count the display and load a new session (N2). Rust creates the review-popup
+   * window when a reminder first needs it and releases it a while after it hides; a window it reuses was hidden,
+   * so mounting is not an opening: Rust emits review-popup-opened each time it shows the window, and a window
+   * created for this opening finds itself visible once its listener is ready.
    */
   const openSession = (source: "event" | "visible" | "mount") => {
     // The visibility check and the event of the same opening both arrive: load once
@@ -830,10 +856,23 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (!nativeWindow) openSession("mount");
 
     // Lắng nghe sự kiện mở popup từ Tauri backend
+    const readBookRevision = () => {
+      try {
+        return localStorage.getItem(BOOK_REVISION_KEY);
+      } catch {
+        return null;
+      }
+    };
+    let bookRevision = readBookRevision();
     listen("review-popup-opened", () => {
       if (isCancelled) return;
-      // The window lives on hidden: a grammar book imported meanwhile in the main window must be re-read
-      clearBookCache();
+      // A reused window was hidden: a grammar book imported meanwhile in the main window must be re-read.
+      // Only then: re-reading the whole book on every reminder cost a reload of all its tables
+      const revision = readBookRevision();
+      if (revision !== bookRevision) {
+        bookRevision = revision;
+        clearBookCache();
+      }
       openSession("event");
     })
       .then((fn) => {
@@ -863,6 +902,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     return () => {
       isCancelled = true;
+      window.speechSynthesis?.cancel?.();
+      if (!isPreview) setPopupSessionActive(false);
       if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
       if (snoozeTimerRef.current) clearTimeout(snoozeTimerRef.current);
       if (unlistenFn) unlistenFn();
@@ -1201,9 +1242,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         if (e.key !== "s" && e.key !== "S") return;
       }
 
+      const targetTag = (e.target as HTMLElement | null)?.tagName;
+      const inTextInput = targetTag === "INPUT" || targetTag === "TEXTAREA";
+
       if (
         (e.key === "s" || e.key === "S") &&
-        activeMode === "multiple_choice" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !inTextInput &&
+        (showIntro || activeMode !== "typing") &&
         !isAnswered
       ) {
         e.preventDefault();

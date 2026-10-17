@@ -9,6 +9,7 @@ import {
   type MultipleChoiceOption,
 } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
+import { playWrongTry } from "@/services/sound";
 
 interface MultipleChoiceExerciseProps {
   word: WordDetail;
@@ -31,9 +32,11 @@ export default function MultipleChoiceExercise({
 
   // Pending completion timer, cleared on unmount so a stale card is never graded
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
     };
   }, []);
 
@@ -79,8 +82,13 @@ export default function MultipleChoiceExercise({
         onComplete(true, wrongAttempts, rating);
       } else {
         setWrongAttempts((prev) => prev + 1);
+        playWrongTry();
         setShakeIdx(index);
-        setTimeout(() => setShakeIdx(null), 400);
+        if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+        shakeTimerRef.current = setTimeout(() => {
+          shakeTimerRef.current = null;
+          setShakeIdx(null);
+        }, 400);
         // Say what the picked option really is: a wrong choice still teaches something
         const other = allWords.find((w) => w.id === option.id);
         setWrongNote(
@@ -98,7 +106,7 @@ export default function MultipleChoiceExercise({
   // Keyboard shortcuts 1, 2, 3, 4
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (isAnswered) return;
+      if (isAnswered || e.metaKey || e.ctrlKey || e.altKey) return;
       const key = e.key;
       if (["1", "2", "3", "4"].includes(key)) {
         const idx = parseInt(key, 10) - 1;

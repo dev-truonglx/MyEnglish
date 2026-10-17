@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { emit } from "@tauri-apps/api/event";
 
 export type ReminderInterval = 0 | 15 | 30 | 45 | 60 | 120; // 0 = disabled, others in minutes
 export type ReminderTrigger = "due_only" | "due_then_random" | "all_words";
@@ -31,7 +32,9 @@ export interface ReminderSettings {
   anchors: ReminderAnchor[]; // study times chosen by the learner ("after lunch"), see reminderMoments
 }
 
-const SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
+/** Storage key of the reminder settings (shared by the windows: a write in one fires `storage` in the others) */
+export const REMINDER_SETTINGS_STORAGE_KEY = "myenglish_reminder_settings_v1";
+const SETTINGS_STORAGE_KEY = REMINDER_SETTINGS_STORAGE_KEY;
 
 export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   enabled: true,
@@ -319,6 +322,21 @@ export function snoozedUntilLabel(now: number = Date.now()): string | null {
   return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
+/** When an active pause ends, for the header: "14:35", "07:00 mai", or "20/10 07:00" further away */
+export function snoozeEndText(until: number, now: number = Date.now()): string {
+  const d = new Date(until);
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  const today = new Date(now);
+  const dayDiff = Math.round(
+    (new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() -
+      new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime()) /
+      86_400_000
+  );
+  if (dayDiff <= 0) return time;
+  if (dayDiff === 1) return `${time} mai`;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")} ${time}`;
+}
+
 /**
  * Check if reminder is currently snoozed
  */
@@ -466,6 +484,23 @@ export async function triggerReviewNudge(
   } catch (err) {
     console.warn("invoke show_review_nudge failed, opening the review directly:", err);
     return triggerReviewPopup();
+  }
+}
+
+/** Event to the main window: start a focus session of `minutes` */
+export const START_FOCUS_EVENT = "start-focus-session";
+
+/** From a reminder: bring the main window forward and start a focus session there */
+export async function startFocusFromReminder(minutes: number): Promise<void> {
+  try {
+    await invoke("show_main_window");
+  } catch (err) {
+    console.warn("invoke show_main_window failed:", err);
+  }
+  try {
+    await emit(START_FOCUS_EVENT, { minutes });
+  } catch (err) {
+    console.warn("start focus event not sent:", err);
   }
 }
 

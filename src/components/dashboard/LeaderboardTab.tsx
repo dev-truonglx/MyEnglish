@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Copy, Loader2, LogIn, Plus, RefreshCw, Trophy, Users, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Copy, Loader2, LogIn, Plus, RefreshCw, Trophy, Users, WifiOff, X } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { effectiveScope, useStandingStore } from "@/stores/standingStore";
 import { accountErrorMessage } from "@/services/accountErrors";
@@ -15,6 +15,48 @@ import {
 import { cn } from "@/lib/utils";
 import { PAGE_CONTAINER } from "./shared";
 import Avatar from "../Avatar";
+
+/** After this long the loading note says the network is slow */
+const SLOW_MS = 4000;
+/** After this long the request is given up (the learner can retry) */
+const TIMEOUT_MS = 20000;
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout")), ms);
+    p.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      }
+    );
+  });
+}
+
+/** Placeholder rows while a board loads for the first time */
+function SkeletonRows({ count = 6 }: { count?: number }) {
+  return (
+    <div aria-hidden className="animate-pulse motion-reduce:animate-none">
+      {Array.from({ length: count }, (_, i) => (
+        <div key={i} className="flex items-center gap-3 px-4 py-3 border-b last:border-b-0 border-slate-100 dark:border-zinc-800/70">
+          <div className="w-8 flex justify-center">
+            <div className="w-5 h-4 rounded bg-slate-200 dark:bg-zinc-800" />
+          </div>
+          <div className="w-7 h-7 rounded-full bg-slate-200 dark:bg-zinc-800" />
+          <div className="flex-1 space-y-1.5">
+            <div className="h-3 rounded bg-slate-200 dark:bg-zinc-800" style={{ width: `${55 - i * 5}%` }} />
+            <div className="h-2.5 w-16 rounded bg-slate-100 dark:bg-zinc-800/70" />
+          </div>
+          <div className="h-3.5 w-16 rounded bg-slate-200 dark:bg-zinc-800" />
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const BOARDS: Array<{ kind: BoardKind; label: string }> = [
   { kind: "week", label: "Tuần này" },
@@ -45,23 +87,46 @@ export default function LeaderboardTab({ onOpenSettings }: { onOpenSettings?: ()
   const setScope = useStandingStore((s) => s.setScope);
   const groupId = effectiveScope(scopePref, groups);
   const setGroupId = setScope;
+  const boardKey = `${kind}|${groupId ?? "all"}`;
+  // Boards already loaded this visit: switching back shows them at once while they refresh
+  const cacheRef = useRef(new Map<string, LeaderRow[]>());
   const [rows, setRows] = useState<LeaderRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [slow, setSlow] = useState(false);
   const [showGroups, setShowGroups] = useState(false);
+  // Only the latest request may set the board (a slow answer for a board left meanwhile is dropped)
+  const requestRef = useRef(0);
 
   const load = useCallback(async () => {
     if (!user) return;
+    const id = ++requestRef.current;
+    const key = boardKey;
+    setRows(cacheRef.current.get(key) ?? null);
     setLoading(true);
+    setSlow(false);
     setError(null);
+    const slowTimer = setTimeout(() => requestRef.current === id && setSlow(true), SLOW_MS);
     try {
-      setRows(await fetchLeaderboard(kind, groupId));
+      const next = await withTimeout(fetchLeaderboard(kind, groupId), TIMEOUT_MS);
+      if (requestRef.current !== id) return;
+      cacheRef.current.set(key, next);
+      setRows(next);
     } catch (err) {
-      setError(accountErrorMessage(err));
+      if (requestRef.current !== id) return;
+      setError(
+        err instanceof Error && err.message === "timeout"
+          ? "Máy chủ phản hồi quá chậm nên chưa tải được bảng xếp hạng. Kiểm tra mạng rồi thử lại."
+          : accountErrorMessage(err)
+      );
     } finally {
-      setLoading(false);
+      clearTimeout(slowTimer);
+      if (requestRef.current === id) {
+        setLoading(false);
+        setSlow(false);
+      }
     }
-  }, [user, kind, groupId]);
+  }, [user, kind, groupId, boardKey]);
 
   const loadGroups = useCallback(async () => {
     if (!user) return;
@@ -190,22 +255,47 @@ export default function LeaderboardTab({ onOpenSettings }: { onOpenSettings?: ()
         )}
 
         {error && (
-          <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/20 text-xs text-rose-700 dark:text-rose-300">
-            {error}
+          <div className="p-3 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50 dark:bg-rose-950/20 text-xs text-rose-700 dark:text-rose-300 flex items-center gap-2">
+            <WifiOff className="w-4 h-4 shrink-0" />
+            <span className="flex-1">
+              {error}
+              {rows && rows.length > 0 ? " Đang hiện số lần trước." : ""}
+            </span>
+            <button onClick={() => void load()} className="shrink-0 px-2.5 py-1 rounded-lg bg-rose-600 hover:bg-rose-700 text-white font-semibold">
+              Thử lại
+            </button>
           </div>
         )}
 
-        <div className="rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden">
-          {rows === null || (loading && rows.length === 0) ? (
-            <div className="p-8 flex items-center justify-center gap-2 text-sm text-slate-500 dark:text-zinc-400">
-              <Loader2 className="w-4 h-4 animate-spin" /> Đang tải…
+        <div className="relative rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm overflow-hidden" aria-busy={loading}>
+          {/* Refreshing a board already on screen: a thin bar, the rows stay readable */}
+          {loading && rows && rows.length > 0 && (
+            <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-amber-100 dark:bg-amber-950/60">
+              <div className="h-full w-1/3 bg-amber-500 animate-[leaderboard-progress_1.2s_ease-in-out_infinite]" />
             </div>
+          )}
+          {rows === null ? (
+            error ? (
+              <div className="p-8 text-center text-sm text-slate-500 dark:text-zinc-400">Chưa tải được bảng xếp hạng.</div>
+            ) : (
+              <>
+                <div className="px-4 pt-3 pb-1 flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400" role="status">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  {slow ? "Mạng hơi chậm, vẫn đang tải bảng xếp hạng…" : "Đang tải bảng xếp hạng…"}
+                </div>
+                <SkeletonRows />
+              </>
+            )
           ) : top.length === 0 && !mineOutside ? (
+            loading ? (
+              <SkeletonRows count={3} />
+            ) : (
             <div className="p-8 text-center text-sm text-slate-500 dark:text-zinc-400">
               Chưa có ai trên bảng này. Ôn vài thẻ để lên bảng đầu tiên!
             </div>
+            )
           ) : (
-            <>
+            <div className={cn("transition-opacity", loading && slow && "opacity-60")}>
               {top.map(row)}
               {mineOutside && (
                 <>
@@ -213,7 +303,7 @@ export default function LeaderboardTab({ onOpenSettings }: { onOpenSettings?: ()
                   {row(mineOutside)}
                 </>
               )}
-            </>
+            </div>
           )}
         </div>
 

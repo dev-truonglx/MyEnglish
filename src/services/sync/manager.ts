@@ -11,6 +11,7 @@ import { AccountMismatchError, AccountResetElsewhereError, adoptAccount, getLast
 import { isSyncPaused, setRunningPass } from "./pause";
 import { supabaseTransport } from "./supabaseTransport";
 import type { SyncReport } from "./types";
+import { WORDS_CHANGED_WHILE_HIDDEN_EVENT } from "../reviewRecorder";
 
 const DEBOUNCE_MS = 30_000;
 const INTERVAL_MS = 5 * 60_000;
@@ -93,7 +94,7 @@ export function startSyncScheduler(): () => void {
     if (document.visibilityState === "hidden" && useAuthStore.getState().user) void runSync();
   };
   const onOnline = () => void runSync();
-  const events = ["myenglish-xp-updated", "words-changed", "myenglish-grammar-updated"];
+  const events = ["myenglish-xp-updated", "words-changed", WORDS_CHANGED_WHILE_HIDDEN_EVENT, "myenglish-grammar-updated"];
   events.forEach((e) => window.addEventListener(e, onChange));
   document.addEventListener("visibilitychange", onHidden);
   window.addEventListener("online", onOnline);

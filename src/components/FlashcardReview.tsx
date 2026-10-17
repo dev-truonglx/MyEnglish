@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
@@ -22,6 +22,13 @@ import ClozeCard from "./review/ClozeCard";
 import SpellingCard from "./review/SpellingCard";
 import GradingBar from "./review/GradingBar";
 import PretestCard, { PretestFeedback } from "./review/PretestCard";
+import FocusBar from "./review/FocusBar";
+import FocusSummary from "./review/FocusSummary";
+import FocusTip from "./review/FocusTip";
+import { useFocusSession } from "@/hooks/useFocusSession";
+import { nextReviewPeek, type FocusPlan } from "@/services/focusSession";
+import { useWordsStore } from "@/stores/wordsStore";
+import type { DashboardTab } from "./dashboard/shared";
 
 export type { StudyMode } from "@/hooks/useReviewSession";
 
@@ -39,6 +46,12 @@ interface FlashcardReviewProps {
   active?: boolean;
   onFinish: () => void;
   onExit: () => void;
+  /** Focus session: timed, ends after the card on screen once the time is up */
+  focus?: FocusPlan | null;
+  /** From the summary: a focus session of this length (5 more minutes, or a first try after a normal session) */
+  onStartFocus?: (minutes: number) => void;
+  /** Summary of a focus session that ran out of cards: go and use the minutes left elsewhere */
+  onNavigate?: (tab: DashboardTab) => void;
 }
 
 export default function FlashcardReview({
@@ -48,7 +61,11 @@ export default function FlashcardReview({
   active = true,
   onFinish,
   onExit,
+  focus = null,
+  onStartFocus,
+  onNavigate,
 }: FlashcardReviewProps) {
+  const focusSession = useFocusSession(focus);
   const {
     revealedWithoutRecall,
     pendingRating,
@@ -101,12 +118,52 @@ export default function FlashcardReview({
     quizRightAfterIntro,
     celebration,
     lastPracticeReason,
-  } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active });
+    finishNow,
+  } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active, stopAfterCurrent: !!focus && focusSession.timeUp });
+
+  // Distinct cards answered in this session (a card asked again after a miss counts once)
+  const focusCards =
+    sessionStats.firstTryCorrect + sessionStats.retryCorrect + sessionStats.revealedCount + sessionStats.skippedCount;
+  const focusCounts = { cards: focusCards, firstTry: sessionStats.firstTryCorrect };
+  // The review reached its summary: the focus session ends there (time up, no card left, or "Xong")
+  useEffect(() => {
+    if (focus && sessionCompleted) focusSession.complete(focusCounts);
+  }, [sessionCompleted]);
+  const leave = () => {
+    if (focus) focusSession.abandon(focusCounts);
+    onExit();
+  };
+  const words = useWordsStore((s) => s.words);
+  const nextReview = useMemo(() => (sessionCompleted ? nextReviewPeek(words) : null), [sessionCompleted, words]);
 
   // The rank before this session: the end screen shows what the session's XP changed
   useEffect(() => {
     useStandingStore.getState().captureBaseline();
   }, []);
+
+  const synonyms = useMemo(() => (currentWord ? parseTerms(currentWord.synonyms) : []), [currentWord]);
+
+  // Cloze sentence: the example for this review (rotated, the learner's own sentence first). Only
+  // sentences that contain the word are used; without one the cloze falls back to spelling.
+  const clozeExample = useMemo(() => (currentWord ? pickExample(currentWord) : undefined), [currentWord]);
+  const originalSentence = clozeExample?.sentence_en ?? "";
+
+  // Mask the word (escaped, with inflections) so terms like "c++" or ".net" can't break the regex
+  // (every occurrence is masked, otherwise a second occurrence would reveal the answer)
+  const wordPattern = useMemo(
+    () => (currentWord ? new RegExp(wordFormsPattern(currentWord.word), "gi") : null),
+    [currentWord]
+  );
+  const clozeDisplaySentence = useMemo(
+    () => (wordPattern ? originalSentence.replace(wordPattern, "____[ ? ]____") : originalSentence),
+    [currentWord, originalSentence, wordPattern]
+  );
+  const clozeAnswerForm = useMemo(
+    () => (currentWord ? (formInSentence(originalSentence, currentWord.word) ?? currentWord.word) : ""),
+    [currentWord, originalSentence]
+  );
+  // Words still to come in this session: never shown inside another card's exercise
+  const upcomingIds = useMemo(() => new Set(queue.slice(currentIndex + 1).map((c) => c.id)), [queue, currentIndex]);
 
   // Hidden behind another tab: the exercises are unmounted so their window key listeners stop
   if (!active) return null;
@@ -121,6 +178,21 @@ export default function FlashcardReview({
         xpState={xpState}
         lastResult={lastResult}
         onFinish={onFinish}
+        bonusXp={focusSession.result?.xp ?? 0}
+        // A focus session's own summary already says when the next review is
+        nextReview={focusSession.result ? undefined : nextReview}
+        header={
+          focusSession.result ? (
+            <FocusSummary
+              result={focusSession.result}
+              next={nextReview}
+              onExtend={() => onStartFocus?.(5)}
+              onNavigate={(tab) => onNavigate?.(tab)}
+            />
+          ) : !focus && !practiceMode && onStartFocus ? (
+            <FocusTip onStart={onStartFocus} />
+          ) : null
+        }
       />
     );
   }
@@ -129,35 +201,39 @@ export default function FlashcardReview({
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
         <p className="text-slate-500 dark:text-zinc-400 text-xs">Không có thẻ nào cần ôn tập hôm nay.</p>
-        <button onClick={onExit} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
+        <button onClick={leave} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
           Quay lại
         </button>
       </div>
     );
   }
 
-  const synonyms = parseTerms(currentWord.synonyms);
-
-  // Cloze sentence: the example for this review (rotated, the learner's own sentence first). Only
-  // sentences that contain the word are used; without one the cloze falls back to spelling.
-  const clozeExample = pickExample(currentWord);
-  const originalSentence = clozeExample?.sentence_en ?? "";
-
-  // Mask the word (escaped, with inflections) so terms like "c++" or ".net" can't break the regex
-  // (every occurrence is masked, otherwise a second occurrence would reveal the answer)
-  const wordPattern = new RegExp(wordFormsPattern(currentWord.word), "gi");
-  const clozeDisplaySentence = originalSentence.replace(wordPattern, "____[ ? ]____");
-  const clozeAnswerForm = formInSentence(originalSentence, currentWord.word) ?? currentWord.word;
-  // Words still to come in this session: never shown inside another card's exercise
-  const upcomingIds = new Set(queue.slice(currentIndex + 1).map((c) => c.id));
   // Once the answer / meaning is on screen it can be selected and copied (the rest of the frame stays unselectable)
   const answerShown = isIntroCard || hasCheckedAnswer || (effectiveExerciseType === "flip" && isFlipped);
 
   return (
     <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+      {focus && (
+        <FocusBar
+          remainingMs={focusSession.remainingMs}
+          plannedMs={focusSession.plannedMs}
+          paused={focusSession.paused}
+          timeUp={focusSession.timeUp}
+          cards={focusCards}
+          canFinish={focusSession.canFinish}
+          onExit={leave}
+          onDone={() => {
+            focusSession.markDone();
+            finishNow();
+          }}
+          onConfirmChange={focusSession.hold}
+        />
+      )}
+
       {/* Top Bar with Mode Selector & Progress */}
       <ReviewTopBar
-        onExit={onExit}
+        onExit={leave}
+        hideExit={!!focus}
         mode={mode}
         handleModeChange={handleModeChange}
         currentIndex={currentIndex}
