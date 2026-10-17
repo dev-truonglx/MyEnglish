@@ -5,7 +5,7 @@
 import { getDatabase } from "../db";
 import { getXPState } from "../smartReview";
 import { computeStreak, getActivityLogs } from "../streak";
-import { applyRows, createApplyContext } from "./apply";
+import { applyRows, createApplyContext, type ApplyContext } from "./apply";
 import { notifyWordsChanged } from "../reviewRecorder";
 import { COLLECTORS, collectKv, PUSH_BATCH } from "./collect";
 import { EPOCH } from "./keys";
@@ -152,15 +152,17 @@ export async function syncNow(transport: SyncTransport, userId: string): Promise
   }
   report.xpChanged = applyRemoteXp(await pullXpChanges(transport), deviceId);
 
-  // 3. Pull. One context for the whole pull (the word index is read once); the windows are told once at the end.
-  const ctx = await createApplyContext();
+  // 3. Pull. One context for the whole pull (the word index is read once, and only when there is something to
+  // apply: most passes pull nothing); the windows are told once at the end.
+  let ctx: ApplyContext | null = null;
+  const context = async () => (ctx ??= await createApplyContext());
   const cursor = await getSyncState("pull");
   let since = cursor ? new Date(Date.parse(cursor) - PULL_OVERLAP_MS).toISOString() : EPOCH;
   let deferred: SyncRow[] = await readDeferred();
   for (;;) {
     const page = await transport.pull(since, PULL_PAGE);
     if (page.length === 0) break;
-    const result = await applyRows(page, ctx);
+    const result = await applyRows(page, await context());
     report.pulled += page.length;
     report.applied += result.applied;
     if (result.deferred.length > 0) {
@@ -174,12 +176,12 @@ export async function syncNow(transport: SyncTransport, userId: string): Promise
     since = last;
   }
   if (deferred.length > 0) {
-    const retry = await applyRows(deferred, ctx);
+    const retry = await applyRows(deferred, await context());
     report.applied += retry.applied;
     // Still unknown (a deck word this machine's deck lacks): kept for later passes
     await writeDeferred(retry.deferred);
   }
-  if (ctx.wordsChanged) notifyWordsChanged();
+  if ((ctx as ApplyContext | null)?.wordsChanged) notifyWordsChanged();
 
   // 4. Profile (leaderboard row), only when it changed
   const profile = { level: getXPState().level, streak: currentStreak() };

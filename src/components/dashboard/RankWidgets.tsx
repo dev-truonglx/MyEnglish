@@ -60,6 +60,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
   const pref = useStandingStore((s) => s.scopePref);
   const setScope = useStandingStore((s) => s.setScope);
   const stale = useStandingStore((s) => s.error);
+  const loadingStanding = useStandingStore((s) => s.loading);
   const label = useScopeLabel();
   const activeScope = effectiveScope(pref, groups);
 
@@ -155,7 +156,15 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
             <p className="text-sm font-medium text-slate-800 dark:text-zinc-100">{standingMessage(standing)}</p>
           </>
         ) : (
-          <p className="text-sm text-slate-500 dark:text-zinc-400">Đang tải thứ hạng… Ôn vài thẻ rồi đồng bộ để lên bảng.</p>
+          loadingStanding ? (
+            <div aria-hidden className="space-y-2 animate-pulse motion-reduce:animate-none">
+              <div className="h-9 w-24 rounded-lg bg-amber-100 dark:bg-amber-950/50" />
+              <div className="h-3 w-40 rounded bg-slate-200 dark:bg-zinc-800" />
+              <div className="h-3 w-52 rounded bg-slate-200 dark:bg-zinc-800" />
+            </div>
+          ) : (
+            <p className="text-sm text-slate-500 dark:text-zinc-400">Chưa có thứ hạng. Ôn vài thẻ rồi đồng bộ để lên bảng.</p>
+          )
         )}
       </div>
 

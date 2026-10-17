@@ -2,8 +2,7 @@ import { memo } from "react";
 import { Volume2, Trash2, ChevronRight, Tag, Clock, Sparkles } from "lucide-react";
 import { parseTerms, type WordDetail } from "@/types/database";
 import { getRetrievabilityInfo } from "@/services/smartReview";
-import { getNextReviewDate } from "@/services/cards";
-import { formatNextReviewRelative } from "@/utils/reviewSchedule";
+import { librarySchedule } from "@/services/librarySchedule";
 
 const EMPTY_TERMS: ReturnType<typeof parseTerms> = [];
 
@@ -37,9 +36,9 @@ const WordCard = memo(function WordCard({
   const rInfo = meta?.rInfo ?? getRetrievabilityInfo(item.srs);
   const leech = meta?.leech ?? false;
 
-  const isNew = (!item.srs.reps && !item.srs.repetitions) || item.srs.repetitions === 0;
-  const nextDate = getNextReviewDate(item);
-  const relativeInfo = formatNextReviewRelative(nextDate, isNew);
+  // The session's rules: a recall card waiting for the new-card budget, or one buried until tomorrow, is not due
+  const schedule = librarySchedule(item);
+  const relativeInfo = schedule.info;
 
   const total = item.stats?.totalAttempts ?? (item.srs.repetitions || 0);
   const wrong = item.stats?.wrongCount ?? (item.srs.lapses || 0);

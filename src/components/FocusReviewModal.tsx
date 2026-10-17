@@ -32,7 +32,7 @@ import { checkTask } from "@/services/grammarItems";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import { isWordDue, practiceCards } from "@/services/cards";
 import { shuffle } from "@/lib/utils";
-import { clearBookCache } from "@/services/grammarBook";
+import { BOOK_REVISION_KEY, clearBookCache } from "@/services/grammarBook";
 import {
   getRecentIntros,
   postponeNewCard,
@@ -80,6 +80,7 @@ import {
 } from "@/services/smartReview";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
 import { Rating } from "ts-fsrs";
+import { playAnswerSound, playSound, resetSoundSession } from "@/services/sound";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 
 interface FocusReviewModalProps {
@@ -207,6 +208,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const [selectedChoiceId, setSelectedChoiceId] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [isCorrect, setIsCorrect] = useState(false);
+  // Answer tones (sound.ts): every answer (choice, tiles, typing, "Không nhớ", skip) turns isAnswered on once,
+  // together with isCorrect
+  useEffect(() => {
+    if (isAnswered) playAnswerSound(isCorrect);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAnswered]);
 
   // Typing mode state
   const [typedInput, setTypedInput] = useState("");
@@ -296,6 +303,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (summary) {
       summaryShownRef.current = true;
       sessionOpenRef.current = false;
+      playSound("complete");
     }
   }, [summary]);
   // Words of the deck, to explain which word a wrong option was
@@ -566,7 +574,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (onClose) onClose();
     if (!isPreview) {
       await hideReviewPopup();
-      // The window stays alive hidden (the in-app preview unmounts instead)
+      // Rust keeps the hidden window a little while before releasing it, so a reminder soon after reuses it
+      // (the in-app preview unmounts instead)
       resetSession();
     }
   }, [onClose, isPreview]);
@@ -777,6 +786,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setIntroduced(new Set());
       advancedFromRef.current = -1;
       sessionResultsRef.current = new Map();
+      resetSoundSession();
       // Wrong options: the learner's words read for this session plus unseen deck words of their levels
       const pool = new Map<string, WordDetail>();
       for (const w of [...selectedWords, ...dueWords, ...studiedWords, ...catalogDistractors]) {
@@ -805,9 +815,10 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   };
 
   /**
-   * The popup is really on screen: count the display and load a new session (N2). The review-popup window is
-   * created hidden at launch, so mounting is not an opening; Rust emits review-popup-opened each time it
-   * shows the hidden window.
+   * The popup is really on screen: count the display and load a new session (N2). Rust creates the review-popup
+   * window when a reminder first needs it and releases it a while after it hides; a window it reuses was hidden,
+   * so mounting is not an opening: Rust emits review-popup-opened each time it shows the window, and a window
+   * created for this opening finds itself visible once its listener is ready.
    */
   const openSession = (source: "event" | "visible" | "mount") => {
     // The visibility check and the event of the same opening both arrive: load once
@@ -830,10 +841,23 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (!nativeWindow) openSession("mount");
 
     // Lắng nghe sự kiện mở popup từ Tauri backend
+    const readBookRevision = () => {
+      try {
+        return localStorage.getItem(BOOK_REVISION_KEY);
+      } catch {
+        return null;
+      }
+    };
+    let bookRevision = readBookRevision();
     listen("review-popup-opened", () => {
       if (isCancelled) return;
-      // The window lives on hidden: a grammar book imported meanwhile in the main window must be re-read
-      clearBookCache();
+      // A reused window was hidden: a grammar book imported meanwhile in the main window must be re-read.
+      // Only then: re-reading the whole book on every reminder cost a reload of all its tables
+      const revision = readBookRevision();
+      if (revision !== bookRevision) {
+        bookRevision = revision;
+        clearBookCache();
+      }
       openSession("event");
     })
       .then((fn) => {

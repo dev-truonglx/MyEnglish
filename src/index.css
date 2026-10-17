@@ -181,6 +181,21 @@ pre code {
   animation: shake 0.35s ease-in-out;
 }
 
+/* Leaderboard refreshing: an indeterminate bar sliding across the top of the board */
+@keyframes leaderboard-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-\[leaderboard-progress_1\.2s_ease-in-out_infinite\] {
+    animation: none;
+  }
+}
+
 /* Review reminder: corner card slides in, the full review fades/scales in instead of popping */
 @keyframes nudge-enter {
   from {

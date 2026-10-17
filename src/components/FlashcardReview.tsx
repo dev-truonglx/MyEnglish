@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
@@ -22,6 +22,13 @@ import ClozeCard from "./review/ClozeCard";
 import SpellingCard from "./review/SpellingCard";
 import GradingBar from "./review/GradingBar";
 import PretestCard, { PretestFeedback } from "./review/PretestCard";
+import FocusBar from "./review/FocusBar";
+import FocusSummary from "./review/FocusSummary";
+import FocusTip from "./review/FocusTip";
+import { useFocusSession } from "@/hooks/useFocusSession";
+import { nextReviewPeek, type FocusPlan } from "@/services/focusSession";
+import { useWordsStore } from "@/stores/wordsStore";
+import type { DashboardTab } from "./dashboard/shared";
 
 export type { StudyMode } from "@/hooks/useReviewSession";
 
@@ -39,6 +46,12 @@ interface FlashcardReviewProps {
   active?: boolean;
   onFinish: () => void;
   onExit: () => void;
+  /** Focus session: timed, ends after the card on screen once the time is up */
+  focus?: FocusPlan | null;
+  /** From the summary: a focus session of this length (5 more minutes, or a first try after a normal session) */
+  onStartFocus?: (minutes: number) => void;
+  /** Summary of a focus session that ran out of cards: go and use the minutes left elsewhere */
+  onNavigate?: (tab: DashboardTab) => void;
 }
 
 export default function FlashcardReview({
@@ -48,7 +61,11 @@ export default function FlashcardReview({
   active = true,
   onFinish,
   onExit,
+  focus = null,
+  onStartFocus,
+  onNavigate,
 }: FlashcardReviewProps) {
+  const focusSession = useFocusSession(focus);
   const {
     revealedWithoutRecall,
     pendingRating,
@@ -101,7 +118,23 @@ export default function FlashcardReview({
     quizRightAfterIntro,
     celebration,
     lastPracticeReason,
-  } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active });
+    finishNow,
+  } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active, stopAfterCurrent: !!focus && focusSession.timeUp });
+
+  // Distinct cards answered in this session (a card asked again after a miss counts once)
+  const focusCards =
+    sessionStats.firstTryCorrect + sessionStats.retryCorrect + sessionStats.revealedCount + sessionStats.skippedCount;
+  const focusCounts = { cards: focusCards, firstTry: sessionStats.firstTryCorrect };
+  // The review reached its summary: the focus session ends there (time up, no card left, or "Xong")
+  useEffect(() => {
+    if (focus && sessionCompleted) focusSession.complete(focusCounts);
+  }, [sessionCompleted]);
+  const leave = () => {
+    if (focus) focusSession.abandon(focusCounts);
+    onExit();
+  };
+  const words = useWordsStore((s) => s.words);
+  const nextReview = useMemo(() => (sessionCompleted ? nextReviewPeek(words) : null), [sessionCompleted, words]);
 
   // The rank before this session: the end screen shows what the session's XP changed
   useEffect(() => {
@@ -121,6 +154,21 @@ export default function FlashcardReview({
         xpState={xpState}
         lastResult={lastResult}
         onFinish={onFinish}
+        bonusXp={focusSession.result?.xp ?? 0}
+        // A focus session's own summary already says when the next review is
+        nextReview={focusSession.result ? undefined : nextReview}
+        header={
+          focusSession.result ? (
+            <FocusSummary
+              result={focusSession.result}
+              next={nextReview}
+              onExtend={() => onStartFocus?.(5)}
+              onNavigate={(tab) => onNavigate?.(tab)}
+            />
+          ) : !focus && !practiceMode && onStartFocus ? (
+            <FocusTip onStart={onStartFocus} />
+          ) : null
+        }
       />
     );
   }
@@ -129,7 +177,7 @@ export default function FlashcardReview({
     return (
       <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
         <p className="text-slate-500 dark:text-zinc-400 text-xs">Không có thẻ nào cần ôn tập hôm nay.</p>
-        <button onClick={onExit} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
+        <button onClick={leave} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
           Quay lại
         </button>
       </div>
@@ -155,9 +203,27 @@ export default function FlashcardReview({
 
   return (
     <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+      {focus && (
+        <FocusBar
+          remainingMs={focusSession.remainingMs}
+          plannedMs={focusSession.plannedMs}
+          paused={focusSession.paused}
+          timeUp={focusSession.timeUp}
+          cards={focusCards}
+          canFinish={focusSession.canFinish}
+          onExit={leave}
+          onDone={() => {
+            focusSession.markDone();
+            finishNow();
+          }}
+          onConfirmChange={focusSession.hold}
+        />
+      )}
+
       {/* Top Bar with Mode Selector & Progress */}
       <ReviewTopBar
-        onExit={onExit}
+        onExit={leave}
+        hideExit={!!focus}
         mode={mode}
         handleModeChange={handleModeChange}
         currentIndex={currentIndex}

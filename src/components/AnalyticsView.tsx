@@ -1,6 +1,6 @@
 import BeginnerProgressCard from "./BeginnerProgressCard";
 import { isBeginner, isSimpleMode } from "@/services/learnerProfile";
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Trophy,
   Brain,
@@ -11,59 +11,83 @@ import {
   BookOpen,
   PieChart as PieIcon,
   Activity,
-  Lightbulb,
+  LayoutDashboard,
+  Repeat,
+  CalendarClock,
+  type LucideIcon,
 } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import {
   getWordStatsSummary,
-  getLeechWords,
-  getLeechSettings,
-  saveLeechSettings,
   getXPState,
   getReviewAnalytics,
   isKnownOnly,
   type WordStatsSummary,
   type XPState,
   type ReviewAnalyticsData,
-  type LeechSettings,
 } from "@/services/smartReview";
 import { countBadgeWords, getAchievements } from "@/services/achievements";
 import { loadWorkloadForecast, type WorkloadForecast } from "@/services/progress";
 import { calculateStreakAndGoal } from "@/services/streak";
-import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 import Heatmap from "./Heatmap";
 import { PAGE_CONTAINER } from "./dashboard/shared";
 import ProficiencyAssessmentCard from "./ProficiencyAssessmentCard";
 import WeeklyProgressCard from "./WeeklyProgressCard";
 import WeeklyRankBadge from "./dashboard/WeeklyRankBadge";
-import { setWordSuspended } from "@/services/reviewRecorder";
-import { pipeline } from "@/services/pipeline";
+import { loadForgottenWords } from "@/services/forgottenWords";
 import LearningInsightsCard from "./LearningInsightsCard";
 import HabitInsightsCard from "./HabitInsightsCard";
-import { AI_VOCAB_ENABLED } from "@/services/features";
+import RetentionCard from "./RetentionCard";
 
 interface AnalyticsViewProps {
   words: WordDetail[];
-  onStartReviewWord?: (word: WordDetail) => void;
+  /** The "Từ hay quên" section (its list, review and leech settings) */
+  onOpenForgotten?: () => void;
   onRefreshWords?: () => void;
+  /** Open a lesson of the grammar book (from the tenses of a CEFR level) */
+  onOpenGrammarLesson?: (lessonId: string) => void;
   /** Words still due today, as the dashboard counts them (keeps the goal and streak in step with its header) */
   dueRemaining?: number | null;
 }
 
+/** The sub-tabs of the progress screen; the last one opened comes back next time */
+type ProgressTab = "overview" | "vocab" | "habits" | "schedule" | "badges";
+const PROGRESS_TABS: Array<{ id: ProgressTab; label: string; icon: LucideIcon; hint: string }> = [
+  { id: "overview", label: "Tổng quan", icon: LayoutDashboard, hint: "Các con số chính, tuần này và lịch học mỗi ngày" },
+  { id: "vocab", label: "Từ vựng", icon: BookOpen, hint: "Trình độ, các từ đang ở giai đoạn nào, độ chính xác khi ôn" },
+  { id: "habits", label: "Thói quen", icon: Repeat, hint: "Giờ học hiệu quả, phiên tập trung và tỉ lệ quay lại học" },
+  { id: "schedule", label: "Lịch ôn", icon: CalendarClock, hint: "Số thẻ sắp phải ôn và số liệu của thuật toán ôn tập" },
+  { id: "badges", label: "Thành tựu", icon: Trophy, hint: "Cấp độ, XP và các danh hiệu" },
+];
+const PROGRESS_TAB_KEY = "myenglish_progress_tab_v1";
+
+function readProgressTab(): ProgressTab {
+  try {
+    const v = localStorage.getItem(PROGRESS_TAB_KEY);
+    return PROGRESS_TABS.some((t) => t.id === v) ? (v as ProgressTab) : "overview";
+  } catch {
+    return "overview";
+  }
+}
+
 export default function AnalyticsView({
   words,
-  onStartReviewWord,
+  onOpenForgotten,
   onRefreshWords,
+  onOpenGrammarLesson,
   dueRemaining = null,
 }: AnalyticsViewProps) {
   const simple = isSimpleMode();
   const beginner = isBeginner();
-  const [showTechnical, setShowTechnical] = useState(false);
+  const [tab, setTabState] = useState<ProgressTab>(readProgressTab);
+  const setTab = (next: ProgressTab) => {
+    setTabState(next);
+    try {
+      localStorage.setItem(PROGRESS_TAB_KEY, next);
+    } catch {}
+  };
   const [xpState, setXpState] = useState<XPState>(getXPState);
-  const [leechSettings, setLeechSettings] = useState<LeechSettings>(getLeechSettings);
   const [reviewAnalytics, setReviewAnalytics] = useState<ReviewAnalyticsData | null>(null);
-  const [activeMnemonicWordId, setActiveMnemonicWordId] = useState<string | null>(null);
-  const [mnemonicText, setMnemonicText] = useState<string | null>(null);
 
   useEffect(() => {
     const onXPUpdate = () => setXpState(getXPState());
@@ -72,12 +96,17 @@ export default function AnalyticsView({
   }, []);
 
   const stats: WordStatsSummary = useMemo(() => getWordStatsSummary(words), [words]);
-  const leechWords = useMemo(
-    () => getLeechWords(words, leechSettings).filter((w) => !w.suspended),
-    [words, leechSettings]
-  );
-  const suspendedWords = useMemo(() => words.filter((w) => !!w.suspended), [words]);
-  const [leechMessage, setLeechMessage] = useState<string | null>(null);
+  // Same count as the "Từ hay quên" section
+  const [forgottenCount, setForgottenCount] = useState<number | null>(null);
+  useEffect(() => {
+    let stale = false;
+    loadForgottenWords(words)
+      .then((d) => !stale && setForgottenCount(d.active.length))
+      .catch(() => {});
+    return () => {
+      stale = true;
+    };
+  }, [words]);
   const streakStats = useMemo(() => calculateStreakAndGoal(words, dueRemaining), [words, dueRemaining]);
 
   // Reviews coming up: the next days in one line (simple mode), the full calibration card otherwise
@@ -145,61 +174,74 @@ export default function AnalyticsView({
     });
   }, [words.length, badgeCounts, streakStats.currentStreak]);
 
-  // Latest requested word id; slower generations for other words are discarded
-  const activeMnemonicRef = useRef<string | null>(null);
-
-  const handleShowMnemonic = async (w: WordDetail) => {
-    activeMnemonicRef.current = w.id;
-    setActiveMnemonicWordId(w.id);
-    const existing = getStoredMnemonic(w.id, w.meaning_vn);
-    if (existing) {
-      setMnemonicText(existing);
-    } else {
-      setMnemonicText(null);
-      const generated = await generateSmartMnemonic(w);
-      if (activeMnemonicRef.current !== w.id) return;
-      setMnemonicText(generated);
-    }
-  };
 
   const unlockedCount = achievements.filter((a) => a.isUnlocked).length;
 
+  const card = "rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm";
+  const nextWeekReviews = forecast ? forecast.days.slice(1, 8).reduce((sum, d) => sum + d.reviews, 0) : null;
+
   return (
-    <div className={`${PAGE_CONTAINER} space-y-8 animate-in fade-in duration-200`}>
-      {/* Header Banner */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-200 dark:border-zinc-800 pb-6">
-        <div>
-          <h2 className="text-2xl font-black text-slate-900 dark:text-white tracking-tight flex items-center gap-2.5">
-            <Activity className="w-7 h-7 text-cyan-500" />
-            <span>Trung Tâm Phân Tích & Tiến Trình</span>
-          </h2>
-          <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
-            Theo dõi trình độ, khả năng ghi nhớ, thói quen học và chế độ tự động bổ sung từ.
-          </p>
+    <div className={`${PAGE_CONTAINER} space-y-5 animate-in fade-in duration-200`}>
+      {/* Title, level and the sub-tabs */}
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Activity className="w-5 h-5 text-cyan-500" />
+              <span>Tiến độ</span>
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">{PROGRESS_TABS.find((t) => t.id === tab)?.hint}</p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTab("badges")}
+            title="Xem cấp độ và danh hiệu"
+            className="flex items-center gap-2.5 pl-2 pr-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/10 to-transparent border border-amber-500/30 hover:border-amber-500/60 transition-colors text-left"
+          >
+            <span className="w-8 h-8 rounded-lg bg-amber-500/20 flex items-center justify-center text-lg shrink-0">{xpState.rankEmoji}</span>
+            <span>
+              <span className="block text-xs font-bold text-amber-600 dark:text-amber-400">
+                Cấp {xpState.level} · {xpState.rank}
+              </span>
+              <span className="block text-[11px] font-mono text-slate-500 dark:text-zinc-400">
+                {xpState.totalXP.toLocaleString()} XP · +{xpState.todayXP} hôm nay
+              </span>
+            </span>
+          </button>
         </div>
 
-        {/* Level & Rank Pill */}
-        <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/30">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center text-xl shrink-0">
-            {xpState.rankEmoji}
-          </div>
-          <div>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
-                Cấp {xpState.level} • {xpState.rank}
-              </span>
-            </div>
-            <p className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">
-              {xpState.totalXP.toLocaleString()} XP ({xpState.todayXP} XP hôm nay)
-            </p>
-            <WeeklyRankBadge />
-          </div>
+        <div role="tablist" aria-label="Mục tiến độ" className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-zinc-800 -mx-1 px-1">
+          {PROGRESS_TABS.map((t) => {
+            const Icon = t.icon;
+            const selected = t.id === tab;
+            return (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => setTab(t.id)}
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 -mb-px border-b-2 text-sm font-medium transition-colors ${
+                  selected
+                    ? "border-cyan-500 text-cyan-700 dark:text-cyan-300"
+                    : "border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
+                }`}
+              >
+                <Icon className="w-4 h-4" />
+                {t.label}
+                {t.id === "badges" && (
+                  <span className="text-[10px] font-mono px-1.5 rounded-full bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300">
+                    {unlockedCount}/{achievements.length}
+                  </span>
+                )}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* CEFR User Proficiency Assessment & Auto-Replenish Center */}
-      <ProficiencyAssessmentCard words={words} onRefreshWords={onRefreshWords} />
-
+      {tab === "overview" && (
+        <>
       {/* Top 4 Key Metric Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Retention Health */}
@@ -228,7 +270,7 @@ export default function AnalyticsView({
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">
-              Đã khắc sâu (21d+)
+              Nhớ lâu (21 ngày+)
             </span>
             <CheckCircle2 className="w-4 h-4 text-cyan-500" />
           </div>
@@ -250,7 +292,7 @@ export default function AnalyticsView({
         {/* Streak */}
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">Chuỗi Streak</span>
+            <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">Chuỗi ngày học</span>
             <Flame className="w-4 h-4 text-amber-500" />
           </div>
           <div className="flex items-baseline gap-2">
@@ -264,21 +306,25 @@ export default function AnalyticsView({
           </p>
         </div>
 
-        {/* Leech Words */}
+        {/* Words often forgotten: the count here, the list and the leech settings in their own section */}
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">
-              Từ khó (Leech)
-            </span>
+            <span className="text-xs font-medium text-slate-500 dark:text-zinc-400">Từ hay quên</span>
             <Bug className="w-4 h-4 text-rose-500" />
           </div>
           <div className="flex items-baseline gap-2">
-            <span className="text-2xl font-black text-rose-500 font-mono">{stats.leechCount}</span>
-            <span className="text-[11px] text-slate-400 dark:text-zinc-500">từ hay quên</span>
+            <span className="text-2xl font-black text-rose-500 font-mono">{forgottenCount ?? "…"}</span>
+            <span className="text-[11px] text-slate-400 dark:text-zinc-500">từ</span>
           </div>
-          <p className="text-[11px] text-slate-400 dark:text-zinc-500">
-            {stats.leechCount > 0 ? "Sẽ được ôn kèm mẹo nhớ" : "Tuyệt vời, chưa có từ nào hay quên!"}
-          </p>
+          {onOpenForgotten ? (
+            <button onClick={onOpenForgotten} className="text-[11px] font-semibold text-rose-600 dark:text-rose-400 hover:underline">
+              {forgottenCount ? "Mở mục Từ hay quên →" : "Chưa có từ nào hay quên →"}
+            </button>
+          ) : (
+            <p className="text-[11px] text-slate-400 dark:text-zinc-500">
+              {forgottenCount ? "Sẽ được ôn kèm mẹo nhớ" : "Tuyệt vời, chưa có từ nào hay quên!"}
+            </p>
+          )}
         </div>
       </div>
 
@@ -286,36 +332,58 @@ export default function AnalyticsView({
 
       <WeeklyProgressCard words={words} />
 
-      <HabitInsightsCard words={words} />
-
-      {/* Calibration of the scheduler: technical, hidden behind a toggle in simple mode */}
-      {simple && !showTechnical ? (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm">
-          {forecast && (
-            <p className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-zinc-300">
-              <Calendar className="w-4 h-4 text-cyan-500 shrink-0" />
-              <span>
-                Sắp phải ôn: Mai ~{forecast.days[1]?.reviews ?? 0} thẻ, 7 ngày tới ~
-                {forecast.days.slice(1, 8).reduce((sum, d) => sum + d.reviews, 0)} thẻ
-              </span>
-            </p>
-          )}
-          <button onClick={() => setShowTechnical(true)} className="text-xs text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200 underline self-start sm:self-auto">
-            Xem số liệu kỹ thuật của thuật toán ôn tập
-          </button>
-        </div>
-      ) : (
-        <LearningInsightsCard />
-      )}
-
       {/* Heatmap Widget */}
-      <div className="space-y-3">
+      <div className={`${card} p-5 space-y-3`}>
         <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <Calendar className="w-4 h-4 text-cyan-500" />
-          <span>Lịch Sử Học Tập Hàng Ngày</span>
+          <span>Lịch sử học mỗi ngày</span>
         </h3>
         <Heatmap words={words} dueRemaining={dueRemaining} />
       </div>
+        </>
+      )}
+
+      {tab === "habits" && (
+        <>
+          <HabitInsightsCard words={words} />
+          <RetentionCard />
+        </>
+      )}
+
+      {tab === "schedule" && (
+        <>
+          {/* The days ahead in one line, then the calibration of the scheduler */}
+          <div className={`${card} p-4 grid grid-cols-1 sm:grid-cols-3 gap-3`}>
+            <div className="space-y-0.5">
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Mai phải ôn</span>
+              <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">{forecast ? `~${forecast.days[1]?.reviews ?? 0}` : "…"}</p>
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500">thẻ</span>
+            </div>
+            <div className="space-y-0.5">
+              <span className="text-xs text-slate-500 dark:text-zinc-400">7 ngày tới</span>
+              <p className="text-2xl font-black font-mono text-slate-900 dark:text-white">{nextWeekReviews === null ? "…" : `~${nextWeekReviews}`}</p>
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500">thẻ, chưa tính từ mới</span>
+            </div>
+            <div className="space-y-0.5">
+              <span className="text-xs text-slate-500 dark:text-zinc-400">Trung bình mỗi ngày</span>
+              <p className="text-2xl font-black font-mono text-cyan-600 dark:text-cyan-400">
+                {nextWeekReviews === null ? "…" : `~${Math.round(nextWeekReviews / 7)}`}
+              </p>
+              <span className="text-[11px] text-slate-400 dark:text-zinc-500">thẻ ôn trong tuần tới</span>
+            </div>
+          </div>
+          {simple && (
+            <p className="text-xs text-slate-500 dark:text-zinc-400 px-1">
+              Phần dưới là số liệu kỹ thuật của thuật toán ôn tập, không cần đọc để học tốt.
+            </p>
+          )}
+          <LearningInsightsCard />
+        </>
+      )}
+
+      {tab === "vocab" && (
+        <>
+      <ProficiencyAssessmentCard words={words} onRefreshWords={onRefreshWords} onOpenGrammarLesson={onOpenGrammarLesson} />
 
       {/* Accuracy & Review Logs Summary (if logs exist) */}
       {reviewAnalytics && reviewAnalytics.totalReviews > 0 && (
@@ -323,7 +391,7 @@ export default function AnalyticsView({
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Activity className="w-4 h-4 text-emerald-500" />
-              <span>Hiệu Suất Ôn Tập 14 Ngày Qua (Review Logs)</span>
+              <span>Độ chính xác khi ôn, 14 ngày qua</span>
             </h3>
             <span className="text-xs font-mono font-bold text-emerald-600 dark:text-emerald-400">
               Độ chính xác: {reviewAnalytics.accuracyRate}%
@@ -449,7 +517,7 @@ export default function AnalyticsView({
         <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-cyan-500" />
-            <span>Mức Độ Làm Chủ Theo Cấp Độ</span>
+            <span>Nhớ lâu theo cấp độ</span>
           </h3>
 
           <div className="space-y-3 max-h-[220px] overflow-y-auto pr-1">
@@ -479,197 +547,32 @@ export default function AnalyticsView({
         </div>
       </div>
 
-      {/* Leech Center Section */}
-      <div className="p-6 rounded-2xl border border-rose-200 dark:border-rose-900/40 bg-rose-50/20 dark:bg-rose-950/10 shadow-sm space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-rose-500/20 flex items-center justify-center text-rose-500">
-              <Bug className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                Trung Tâm Khắc Phục Từ Khó (Leech Words)
-              </h3>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
-                Những từ bị quên từ {leechSettings.threshold} lần trở lên, cần mẹo ghi nhớ hoặc chuyển đổi phương pháp học.
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">Ngưỡng:</span>
-            <div className="flex items-center gap-1 bg-white dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
-              {[2, 3, 4, 5].map((thresh) => (
-                <button
-                  key={thresh}
-                  onClick={() => {
-                    saveLeechSettings({ threshold: thresh });
-                    setLeechSettings(getLeechSettings());
-                  }}
-                  className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all ${
-                    leechSettings.threshold === thresh
-                      ? "bg-rose-500 text-white shadow-xs"
-                      : "text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800"
-                  }`}
-                  title={`Coi từ là Leech khi quên từ ${thresh} lần trở lên`}
-                >
-                  {thresh} lần
-                </button>
-              ))}
-            </div>
-            <span className="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-100 dark:bg-rose-950/80 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-800">
-              {leechWords.length} từ
-            </span>
-          </div>
-        </div>
+        </>
+      )}
 
-        {/* What happens when a word becomes a leech */}
-        <div className="flex flex-wrap items-center gap-2 text-[11px]">
-          <span className="text-slate-500 dark:text-zinc-400">Khi một từ thành từ khó:</span>
-          {(
-            [
-              ["highlight", "Chỉ đánh dấu"],
-              ["relearn", "Học lại như từ mới (xem lại nghĩa, ví dụ trước khi hỏi)"],
-              ["suspend", "Tạm ngưng ôn (xử lý tay sau)"],
-            ] as const
-          ).map(([action, label]) => (
-            <button
-              key={action}
-              onClick={() => {
-                saveLeechSettings({ action });
-                setLeechSettings(getLeechSettings());
-              }}
-              className={`px-2 py-0.5 rounded-md border transition-colors ${
-                leechSettings.action === action
-                  ? "bg-rose-500 text-white border-rose-500"
-                  : "border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        {leechMessage && <p className="text-[11px] text-emerald-600 dark:text-emerald-400">{leechMessage}</p>}
-
-        {suspendedWords.length > 0 && (
-          <div className="p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-xs space-y-2">
-            <div className="font-semibold text-slate-700 dark:text-zinc-300">Đang tạm ngưng ({suspendedWords.length})</div>
-            <div className="flex flex-wrap gap-2">
-              {suspendedWords.map((w) => (
-                <span key={w.id} className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-slate-100 dark:bg-zinc-800">
-                  <span className="font-mono">{w.word}</span>
-                  <button
-                    onClick={async () => {
-                      await setWordSuspended(w.id, false);
-                      setLeechMessage(`Đã đưa "${w.word}" trở lại lịch ôn`);
-                      onRefreshWords?.();
-                    }}
-                    className="text-cyan-600 dark:text-cyan-400 hover:underline"
-                  >
-                    Ôn lại
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {leechWords.length === 0 ? (
-          <div className="text-center py-6 text-xs text-slate-400 dark:text-zinc-500">
-            🎉 Bạn không có từ khó nào bị tắc nghẽn. Trí nhớ của bạn đang hoạt động rất tốt!
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
-            {leechWords.map((w) => {
-              const isShowingMnemonic = activeMnemonicWordId === w.id;
-
-              return (
-                <div
-                  key={w.id}
-                  className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/90 shadow-sm space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-bold font-mono text-slate-900 dark:text-white">
-                          {w.word}
-                        </span>
-                        {w.phonetic && (
-                          <span className="text-xs font-mono text-slate-400 dark:text-zinc-500">
-                            {w.phonetic}
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-slate-600 dark:text-zinc-400 line-clamp-1 mt-0.5">
-                        {w.meaning_vn}
-                      </p>
-                    </div>
-
-                    <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 shrink-0">
-                      Quên {Math.max(w.srs.lapses ?? 0, w.srsProduction?.lapses ?? 0)} lần
-                    </span>
-                  </div>
-
-                  {/* AI Mnemonic Expansion */}
-                  {isShowingMnemonic && mnemonicText && (
-                    <div className="p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in">
-                      {mnemonicText}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between pt-1 text-xs">
-                    <button
-                      onClick={() => handleShowMnemonic(w)}
-                      className="inline-flex items-center gap-1 text-amber-600 dark:text-amber-400 hover:underline"
-                    >
-                      <Lightbulb className="w-3.5 h-3.5" />
-                      <span>{isShowingMnemonic ? "Mẹo ghi nhớ" : "Xem mẹo ghi nhớ"}</span>
-                    </button>
-
-                    {AI_VOCAB_ENABLED && <button
-                      onClick={() => {
-                        pipeline.enqueue(w.word).then((res) =>
-                          setLeechMessage(res.accepted ? `AI đang tạo lại nghĩa & ví dụ mới cho "${w.word}"...` : `Không thể phân tích lại: ${res.reason}`)
-                        );
-                      }}
-                      title="Ví dụ mới cho bối cảnh mới: nhớ lại từ nhiều ngữ cảnh khác nhau giúp hết quên"
-                      className="text-cyan-600 dark:text-cyan-400 hover:underline"
-                    >
-                      Tạo ví dụ mới (AI)
-                    </button>}
-                    <button
-                      onClick={async () => {
-                        await setWordSuspended(w.id, true);
-                        setLeechMessage(`Đã tạm ngưng "${w.word}"`);
-                        onRefreshWords?.();
-                      }}
-                      className="text-slate-500 dark:text-zinc-400 hover:underline"
-                    >
-                      Tạm ngưng
-                    </button>
-
-                    {onStartReviewWord && (
-                      <button
-                        onClick={() => onStartReviewWord(w)}
-                        className="px-2.5 py-1 rounded-lg font-medium text-xs bg-slate-100 dark:bg-zinc-800 hover:bg-cyan-50 dark:hover:bg-cyan-950/50 hover:text-cyan-600 text-slate-700 dark:text-zinc-300 transition-colors"
-                      >
-                        Luyện gõ ngay
-                      </button>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Achievements Gallery Showcase */}
+      {tab === "badges" && (
       <div className="space-y-4">
+        {/* Level and weekly rank */}
+        <div className={`${card} p-4 flex flex-wrap items-center gap-4`}>
+          <div className="w-14 h-14 rounded-2xl bg-amber-500/20 border border-amber-500/30 flex items-center justify-center text-3xl shrink-0">
+            {xpState.rankEmoji}
+          </div>
+          <div className="min-w-0 flex-1 space-y-1">
+            <p className="text-base font-bold text-slate-900 dark:text-white">
+              Cấp {xpState.level} · <span className="text-amber-600 dark:text-amber-400">{xpState.rank}</span>
+            </p>
+            <p className="text-xs font-mono text-slate-500 dark:text-zinc-400">
+              {xpState.totalXP.toLocaleString()} XP tổng · {xpState.todayXP} XP hôm nay
+            </p>
+            <WeeklyRankBadge />
+          </div>
+        </div>
+
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Trophy className="w-5 h-5 text-amber-500" />
             <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-              Bảng Danh Hiệu & Thành Tựu
+              Danh hiệu
             </h3>
           </div>
           <span className="text-xs font-mono font-semibold text-slate-500 dark:text-zinc-400">
@@ -736,6 +639,7 @@ export default function AnalyticsView({
           ))}
         </div>
       </div>
+      )}
     </div>
   );
 }

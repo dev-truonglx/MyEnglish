@@ -53,6 +53,7 @@ import { celebrationFor, type Celebration } from "@/services/celebrations";
 import { logLearningEvent } from "@/services/learningEvents";
 import { checkAndUnlockAchievements, recordFirstTryCorrect } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
+import { playAnswerSound, playSound, playWrongTry, resetSoundSession } from "@/services/sound";
 import { handleSpeak } from "@/components/review/speech";
 
 const MAX_REQUEUES_PER_WORD = 2;
@@ -117,6 +118,10 @@ export interface SessionStats {
     dailyGoal: number;
     /** This session reached the daily goal for the first time today */
     goalReachedNow: boolean;
+    /** The daily goal is reached (now or earlier today): the summary says the learner may stop */
+    goalReached: boolean;
+    /** Review cards still due after the session (null until counted) */
+    dueLeft: number | null;
   };
 }
 
@@ -139,13 +144,27 @@ interface UseReviewSessionOptions {
   practiceMode: boolean;
   /** False while the session is kept mounted behind another tab: its keyboard shortcuts must not run */
   active?: boolean;
+  /**
+   * Focus session out of time: the session ends once the card on screen is answered (never in the middle of
+   * one). Cards not reached stay due as they were.
+   */
+  stopAfterCurrent?: boolean;
 }
 
 /**
  * Review session engine: queue with in-session requeue of forgotten cards, per-card answer state,
  * adaptive exercise selection, grading (FSRS / practice), session stats, XP and keyboard shortcuts.
  */
-export function useReviewSession({ wordsToReview, distractorPool, practiceMode, active = true }: UseReviewSessionOptions) {
+export function useReviewSession({
+  wordsToReview,
+  distractorPool,
+  practiceMode,
+  active = true,
+  stopAfterCurrent = false,
+}: UseReviewSessionOptions) {
+  // Read when a card is done (after awaits): the latest value, not the one of the render that started it
+  const stopAfterCurrentRef = useRef(stopAfterCurrent);
+  stopAfterCurrentRef.current = stopAfterCurrent;
   // Preferred mode persistence
   const [mode, setMode] = useState<StudyMode>(() => {
     // Simple mode: the app always picks the exercise (no mode selector on screen)
@@ -159,6 +178,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
 
   const [fallbackMode, setFallbackMode] = useState<ExerciseType | null>(null);
   const [consecutiveCorrect, setConsecutiveCorrect] = useState(0);
+  // The answer tones count right answers in a row per session
+  useEffect(() => resetSoundSession(), []);
 
   // Session queue: words graded Again are re-inserted a few cards later for in-session relearning
   const [queue, setQueue] = useState<ReviewCard[]>(() =>
@@ -466,6 +487,11 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
       last_review: currentWord.srs.last_review ?? new Date().toISOString(),
     };
     recordIntro(currentWord).catch(() => {});
+    // Focus session out of time: the introduction was the last card (its quiz comes in a later session)
+    if (stopAfterCurrentRef.current) {
+      endSession(reviewCount);
+      return;
+    }
     const insertAt = requeuePosition(queue.length, currentIndex, INTRO_GAP);
     setQueue((prev) => [...prev.slice(0, insertAt), currentWord, ...prev.slice(insertAt)]);
     setCurrentIndex((prev) => prev + 1);
@@ -561,6 +587,8 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
       rating !== Rating.Again &&
       !introRetryRef.current.has(cardKey) &&
       currentIndex < queueRef.current.length - 1;
+    // The tone plays now, still inside the answer's key press or click (see playSound)
+    playAnswerSound(rating > Rating.Again);
     let recorded: Awaited<ReturnType<typeof recordCardAnswer>>;
     try {
       recorded = await recordCardAnswer({
@@ -680,19 +708,20 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
   const finishDay = () => {
     const today = getLocalDateString();
     const now = calculateStreakAndGoal([]);
-    const dayOf = (s: typeof now, goalReachedNow: boolean) => ({
+    const dayOf = (s: typeof now, goalReachedNow: boolean, dueLeft: number | null) => ({
       streak: s.currentStreak,
       todayCount: s.todayCount,
       dailyGoal: s.dailyGoal,
       goalReachedNow,
+      goalReached: s.goalReached,
+      dueLeft,
     });
-    setSessionStats((prev) => ({ ...prev, day: dayOf(now, false) }));
+    setSessionStats((prev) => ({ ...prev, day: dayOf(now, false, null) }));
     const reachedAtStart = goalAtStartRef.current ?? false;
     countTodayWork()
-      .then((w) => w.total)
       .catch(() => null)
-      .then((left) => {
-        const after = calculateStreakAndGoal([], left);
+      .then((work) => {
+        const after = calculateStreakAndGoal([], work?.total ?? null);
         const celebrate = shouldCelebrateDailyGoal({
           reachedAtStart,
           reachedNow: after.goalReached,
@@ -700,23 +729,37 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
           today,
         });
         if (after.goalReached) markGoalCelebrated(today);
-        if (!celebrate) return;
-        triggerConfetti(3000);
-        setSessionStats((prev) => ({ ...prev, day: dayOf(after, true) }));
+        setSessionStats((prev) => ({ ...prev, day: dayOf(after, celebrate, work?.reviews ?? null) }));
+        if (celebrate) triggerConfetti(3000);
       });
   };
 
-  /** Next card, or the end of the session */
+  /** The summary: the day's goal and streak, achievements, the session log. Once per session. */
+  const sessionEndedRef = useRef(false);
+  const endSession = (cards: number) => {
+    if (sessionEndedRef.current) return;
+    sessionEndedRef.current = true;
+    if (cards > 0) playSound("complete");
+    finishDay();
+    setSessionCompleted(true);
+    checkAndUnlockAchievements({ ...collectionStats, sessionCompleted: true });
+    logLearningEvent("session_completed", { meta: { cards, practice: practiceMode } });
+  };
+
+  /** Next card, or the end of the session (no card left, or a focus session out of time) */
   const advance = (recorded: RecordedAnswer) => {
-    if (currentIndex + 1 < recorded.nextQueueLength) {
+    if (currentIndex + 1 < recorded.nextQueueLength && !stopAfterCurrentRef.current) {
       setCurrentIndex((prev) => prev + 1);
     } else {
-      finishDay();
-      setSessionCompleted(true);
-      checkAndUnlockAchievements({ ...collectionStats, sessionCompleted: true });
-      logLearningEvent("session_completed", { meta: { cards: recorded.reviewCountAfter, practice: practiceMode } });
+      endSession(recorded.reviewCountAfter);
     }
   };
+
+  /**
+   * End now ("Xong" in a focus session). An answer still on screen was recorded when it was given (holdAnswer),
+   * so nothing is lost.
+   */
+  const finishNow = () => endSession(reviewCount);
 
   /** Record an answer and go to the next card right away (flip grades, skip, free writing) */
   const handleGrade = async (
@@ -836,6 +879,7 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
       const newAttempts = wrongAttempts + 1;
       setWrongAttempts(newAttempts);
       setIsCorrect(false);
+      playWrongTry();
       setIsShaking(true);
       setTimeout(() => setIsShaking(false), 350);
 
@@ -1056,5 +1100,6 @@ export function useReviewSession({ wordsToReview, distractorPool, practiceMode, 
     handleCheckAnswer,
     handleSkip,
     handleShowAnswer,
+    finishNow,
   };
 }

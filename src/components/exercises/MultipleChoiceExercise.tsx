@@ -9,6 +9,7 @@ import {
   type MultipleChoiceOption,
 } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
+import { playWrongTry } from "@/services/sound";
 
 interface MultipleChoiceExerciseProps {
   word: WordDetail;
@@ -79,6 +80,7 @@ export default function MultipleChoiceExercise({
         onComplete(true, wrongAttempts, rating);
       } else {
         setWrongAttempts((prev) => prev + 1);
+        playWrongTry();
         setShakeIdx(index);
         setTimeout(() => setShakeIdx(null), 400);
         // Say what the picked option really is: a wrong choice still teaches something

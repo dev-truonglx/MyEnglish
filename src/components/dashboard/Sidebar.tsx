@@ -23,109 +23,24 @@ import {
   AudioLines,
   Layers,
   Dumbbell,
-  Bell,
-  Hourglass,
-  Clock,
   Trophy,
   UserRound,
+  Bug,
+  BadgeCheck,
+  Zap,
 } from "lucide-react";
 import type { PipelineItem } from "@/services/pipeline";
 import type { calculateStreakAndGoal } from "@/services/streak";
 import { getSavedTheme, setTheme, type ThemeMode } from "@/services/theme";
 import { CURRENT_VERSION, useUpdateStore } from "@/services/updateService";
-import { getXPState, type XPState } from "@/services/smartReview";
+import { getXPState, isKnownOnly, type XPState } from "@/services/smartReview";
 import { getDueGrammarLessons } from "@/services/grammarService";
 import { useWordsStore } from "@/stores/wordsStore";
 import { AI_VOCAB_ENABLED } from "@/services/features";
-import {
-  getLastPopupDisplayTime,
-  getNextReminderTime,
-  getReminderSettings,
-  isSnoozed,
-  reminderPause,
-  getNudgesShownToday,
-  triggerReviewPopup,
-  type ReminderSettings,
-} from "@/services/reminderSettings";
 import { useAuthStore } from "@/stores/authStore";
 import { RankLine } from "./RankWidgets";
 import Avatar from "../Avatar";
 import { SIMPLE_NAV_GROUPS, type DashboardTab, type LibraryStats, type NavGroupId } from "./shared";
-
-export function formatDisplayTime(ms: number): string {
-  if (!ms || ms <= 0) return "Chưa có";
-  const d = new Date(ms);
-  const now = new Date();
-  const isToday =
-    d.getDate() === now.getDate() &&
-    d.getMonth() === now.getMonth() &&
-    d.getFullYear() === now.getFullYear();
-
-  const timeStr = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  if (isToday) return timeStr;
-
-  const yesterday = new Date(now);
-  yesterday.setDate(now.getDate() - 1);
-  const isYesterday =
-    d.getDate() === yesterday.getDate() &&
-    d.getMonth() === yesterday.getMonth() &&
-    d.getFullYear() === yesterday.getFullYear();
-
-  const shortTime = d.toLocaleTimeString("vi-VN", { hour: "2-digit", minute: "2-digit" });
-  if (isYesterday) return `Hôm qua ${shortTime}`;
-  return `${d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" })} ${shortTime}`;
-}
-
-export function formatCountdown(totalSec: number): string {
-  if (totalSec <= 0) return "Đến giờ!";
-  if (totalSec < 60) return `${totalSec}s`;
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (m < 60) {
-    return s > 0 ? `${m}m ${s < 10 ? "0" : ""}${s}s` : `${m}m`;
-  }
-  const h = Math.floor(m / 60);
-  const remM = m % 60;
-  return remM > 0 ? `${h}h ${remM}m` : `${h}h`;
-}
-
-export function getPauseReason(settings: ReminderSettings, goalMet: boolean): string | null {
-  if (isSnoozed()) {
-    return "Đang hoãn";
-  }
-  const pause = reminderPause(settings, {
-    hour: new Date().getHours(),
-    goalReached: goalMet,
-    shownToday: getNudgesShownToday(),
-  });
-  if (pause === "night") return "Nghỉ ban đêm";
-  if (pause === "goal_reached") return "Đã xong mục tiêu";
-  if (pause === "daily_cap") return "Đủ số lần hôm nay";
-  return null;
-}
-
-/** The clock to the next reminder ticks by itself, so the whole sidebar does not re-render every second */
-function NextReminderCountdown({ nextMs }: { nextMs: number }) {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => {
-      if (document.visibilityState === "visible") setNow(Date.now());
-    }, 1000);
-    return () => clearInterval(id);
-  }, []);
-  const remainingSeconds = Math.max(0, Math.ceil((nextMs - now) / 1000));
-  return (
-    <span
-      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${
-        remainingSeconds <= 60
-          ? "bg-amber-100 text-amber-800 dark:bg-amber-950/80 dark:text-amber-300 animate-pulse"
-          : "bg-cyan-100/80 text-cyan-800 dark:bg-cyan-950/80 dark:text-cyan-300"
-      }`}
-    >
-      {remainingSeconds <= 0 ? "Đến giờ!" : formatCountdown(remainingSeconds)}
-    </span>
-  );
-}
 
 interface SidebarProps {
   activeTab: DashboardTab;
@@ -136,6 +51,9 @@ interface SidebarProps {
   libraryStats: LibraryStats;
   /** Simple mode: five entries (Hôm nay · Từ vựng · Ngữ pháp · Luyện thêm · Cài đặt) instead of ten tabs */
   simpleMode?: boolean;
+  /** Words often forgotten, and those of them due now (badge of "Từ hay quên") */
+  forgottenCount?: number;
+  forgottenDue?: number;
 }
 
 /** LEFT SIDEBAR: logo + update badge, navigation, learning stats, account & theme switcher */
@@ -147,8 +65,11 @@ export default function Sidebar({
   streakStats,
   libraryStats,
   simpleMode = false,
+  forgottenCount = 0,
+  forgottenDue = 0,
 }: SidebarProps) {
   const words = useWordsStore((s) => s.words);
+  const knownWaitingCount = useMemo(() => words.filter((w) => isKnownOnly(w.srs)).length, [words]);
   const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const [xpState, setXpState] = useState<XPState>(getXPState);
@@ -156,13 +77,6 @@ export default function Sidebar({
   const accountName = useAuthStore((s) => s.profile?.displayName);
   const accountAvatar = useAuthStore((s) => s.profile?.avatar);
   const syncStatus = useAuthStore((s) => s.sync.status);
-
-  // Realtime Popup Reminder status & countdown
-  const [reminderSettings, setReminderSettings] = useState<ReminderSettings>(getReminderSettings);
-  const [lastDisplayMs, setLastDisplayMs] = useState<number>(getLastPopupDisplayTime);
-  const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime);
-  const [, setStatusTick] = useState(0);
-  const [testingPopup, setTestingPopup] = useState(false);
 
   // Only the fields shown here: the rest of the store (the update handle, release notes) changing re-renders nothing
   const updateStatus = useUpdateStore((s) => s.status);
@@ -219,44 +133,6 @@ export default function Sidebar({
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
   }, []);
 
-  useEffect(() => {
-    const syncReminder = () => {
-      // Same values keep the old object: the 5 s poll must not re-render the sidebar for nothing
-      const next = getReminderSettings();
-      setReminderSettings((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
-      setLastDisplayMs(getLastPopupDisplayTime());
-      setNextReminderMs(getNextReminderTime());
-    };
-    syncReminder();
-
-    window.addEventListener("myenglish-reminder-settings-updated", syncReminder);
-    window.addEventListener("myenglish-popup-displayed", syncReminder);
-
-    const syncTimer = setInterval(() => {
-      if (document.visibilityState === "visible") {
-        syncReminder();
-      }
-    }, 5000);
-
-    // Status (snoozed / paused / night) is read at render time: a slow re-render keeps it current
-    const statusTimer = setInterval(() => {
-      if (document.visibilityState === "visible") setStatusTick((t) => t + 1);
-    }, 15000);
-
-    const onVisible = () => {
-      if (document.visibilityState === "visible") syncReminder();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-
-    return () => {
-      window.removeEventListener("myenglish-reminder-settings-updated", syncReminder);
-      window.removeEventListener("myenglish-popup-displayed", syncReminder);
-      document.removeEventListener("visibilitychange", onVisible);
-      clearInterval(syncTimer);
-      clearInterval(statusTimer);
-    };
-  }, []);
-
   const countBadge = (n: number, highlight = false) =>
     n > 0 ? (
       <span
@@ -279,6 +155,8 @@ export default function Sidebar({
       icon: BookOpen,
       badge: countBadge(libraryWordCount),
     },
+    // Words marked "Đã biết", still waiting for their one check
+    { tab: "known", label: "Đã biết", icon: BadgeCheck, iconClass: "text-emerald-500", badge: countBadge(knownWaitingCount) },
     { tab: "grammar", label: "Ngữ pháp", icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     { tab: "pronunciation", label: "Phát âm", icon: AudioLines, iconClass: "text-violet-500" },
     { tab: "reading", label: "Đọc", icon: BookOpenText },
@@ -294,7 +172,6 @@ export default function Sidebar({
         }
       : { tab: "capture", label: "Lộ trình từ vựng", icon: Layers, iconClass: "text-cyan-500" },
     { tab: "analytics", label: "Tiến độ", icon: BarChart3, iconClass: "text-emerald-400" },
-    { tab: "leaderboard", label: "Xếp hạng", icon: Trophy, iconClass: "text-amber-500" },
     { tab: "guide", label: "Cài đặt", icon: Terminal, iconClass: "text-cyan-500" },
   ];
 
@@ -304,12 +181,13 @@ export default function Sidebar({
     vocab: { icon: BookOpen, iconClass: "text-orange-400", badge: countBadge(dueCount, true) },
     grammar: { icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     practice: { icon: Dumbbell, iconClass: "text-violet-500" },
+    quick: { icon: Zap, iconClass: "text-amber-500" },
     settings: { icon: Terminal, iconClass: "text-cyan-500" },
     account: { icon: UserRound },
   };
   const visibleItems: Array<{ key: string; label: string; icon: typeof BookOpen; iconClass?: string; badge?: ReactNode; active: boolean; onClick: () => void }> =
     simpleMode
-      ? SIMPLE_NAV_GROUPS.filter((g) => g.id !== "account").map((g) => {
+      ? SIMPLE_NAV_GROUPS.filter((g) => g.id !== "account" && g.id !== "quick").map((g) => {
           const active = g.tabs.some((t) => t.tab === activeTab);
           return {
             key: g.id,
@@ -320,6 +198,39 @@ export default function Sidebar({
           };
         })
       : navItems.map((item) => ({ ...item, key: item.tab, active: activeTab === item.tab, onClick: () => setActiveTab(item.tab) }));
+
+  // "Truy cập nhanh": two tiles under the list, in both modes
+  const quickItems: Array<{ tab: DashboardTab; label: string; icon: typeof BookOpen; tone: string; activeTone: string; badge?: ReactNode; title: string }> = [
+    {
+      tab: "forgotten",
+      label: "Từ hay quên",
+      icon: Bug,
+      tone: "text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 border-rose-200 dark:border-rose-900/50 hover:bg-rose-100 dark:hover:bg-rose-950/60",
+      activeTone: "ring-2 ring-rose-400 dark:ring-rose-500/60",
+      title:
+        forgottenCount > 0
+          ? `${forgottenCount} từ hay quên${forgottenDue > 0 ? `, ${forgottenDue} từ đang đến hạn ôn` : ", chưa từ nào đến hạn"}`
+          : "Những từ bạn hay trả lời sai",
+      badge:
+        forgottenCount > 0 ? (
+          <span
+            className={`text-[10px] font-mono px-1.5 rounded-full font-bold ${
+              forgottenDue > 0 ? "bg-rose-500 text-white" : "bg-rose-100 dark:bg-rose-900/60 text-rose-700 dark:text-rose-300"
+            }`}
+          >
+            {forgottenCount}
+          </span>
+        ) : null,
+    },
+    {
+      tab: "leaderboard",
+      label: "Xếp hạng",
+      icon: Trophy,
+      tone: "text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-900/50 hover:bg-amber-100 dark:hover:bg-amber-950/60",
+      activeTone: "ring-2 ring-amber-400 dark:ring-amber-500/60",
+      title: "Bảng xếp hạng XP tuần, tháng và chuỗi ngày học",
+    },
+  ];
 
   const goalText =
     streakStats.goalReached && streakStats.dueRemaining === 0 && streakStats.todayCount < streakStats.dailyGoal
@@ -376,7 +287,7 @@ export default function Sidebar({
                     downloadAndInstall();
                   }}
                   title={`Đã có bản cập nhật mới: v${newVersion}`}
-                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-600 text-white shadow-sm shadow-cyan-600/30 hover:bg-cyan-700 transition-all shrink-0 cursor-pointer animate-pulse"
+                  className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-600 text-white shadow-sm shadow-cyan-600/30 hover:bg-cyan-700 transition-all shrink-0 cursor-pointer animate-pulse [animation-iteration-count:3]"
                 >
                   <Sparkles className="w-2.5 h-2.5" />
                   <span>v{newVersion}</span>
@@ -523,6 +434,34 @@ export default function Sidebar({
           })}
         </nav>
 
+        {/* Quick access: the words to fix and the race, one click from anywhere */}
+        <div className="space-y-1.5">
+          <div className="px-1 text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500">Truy cập nhanh</div>
+          <div className="grid grid-cols-2 gap-2">
+            {quickItems.map((item) => {
+              const Icon = item.icon;
+              const active = activeTab === item.tab;
+              return (
+                <button
+                  key={item.tab}
+                  onClick={() => setActiveTab(item.tab)}
+                  aria-current={active ? "page" : undefined}
+                  title={item.title}
+                  className={`relative flex flex-col items-start gap-1 px-2.5 py-2 rounded-xl border text-left text-xs font-semibold transition-all active:scale-[0.97] ${item.tone} ${
+                    active ? item.activeTone : ""
+                  }`}
+                >
+                  <div className="w-full flex items-center justify-between">
+                    <Icon className="w-4 h-4" />
+                    {item.badge}
+                  </div>
+                  <span>{item.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Compact stats: streak + today's goal, then the two word tiers (click: Tiến độ) */}
         <button
           type="button"
@@ -570,137 +509,16 @@ export default function Sidebar({
 
         {/* Weekly XP rank: one line under the streak (signed-in learners) */}
         <RankLine onOpen={() => setActiveTab("leaderboard")} />
-
-        {/* Realtime Popup reminder status widget */}
-        {(() => {
-          const isReminderEnabled = reminderSettings.enabled && reminderSettings.intervalMinutes > 0;
-          const snoozed = isSnoozed();
-          const pauseReason = isReminderEnabled && !snoozed ? getPauseReason(reminderSettings, Boolean(streakStats.goalReached)) : null;
-
-          let statusBadge: ReactNode;
-          if (!isReminderEnabled) {
-            statusBadge = (
-              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400">
-                Tắt
-              </span>
-            );
-          } else if (snoozed) {
-            statusBadge = (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800/60">
-                <Hourglass className="w-2.5 h-2.5 animate-spin" />
-                Hoãn
-              </span>
-            );
-          } else if (pauseReason) {
-            statusBadge = (
-              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-50 dark:bg-amber-950/80 text-amber-700 dark:text-amber-400 border border-amber-200/80 dark:border-amber-800/60">
-                Tạm dừng
-              </span>
-            );
-          } else {
-            statusBadge = (
-              <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-400 border border-emerald-200/80 dark:border-emerald-800/60">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Bật
-              </span>
-            );
-          }
-
-          return (
-            <div
-              role="button"
-              tabIndex={0}
-              onClick={() => setActiveTab("guide")}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setActiveTab("guide");
-                }
-              }}
-              title={`Nhắc nhở Pop-up ôn tập${isReminderEnabled ? ` (chu kỳ ${reminderSettings.intervalMinutes} phút)` : " (Đang tắt)"} • Bấm để mở Cài đặt`}
-              className="w-full text-left rounded-xl border border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/60 hover:bg-slate-50 dark:hover:bg-zinc-800/50 p-2.5 space-y-2 shadow-sm transition-colors group cursor-pointer"
-            >
-              {/* Header row */}
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <Bell
-                    className={`w-3.5 h-3.5 shrink-0 ${
-                      !isReminderEnabled || pauseReason
-                        ? "text-slate-400 dark:text-zinc-500"
-                        : "text-cyan-600 dark:text-cyan-400"
-                    }`}
-                  />
-                  <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 truncate">
-                    Nhắc nhở Pop-up
-                  </span>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {statusBadge}
-                  <button
-                    type="button"
-                    onClick={async (e) => {
-                      e.stopPropagation();
-                      setTestingPopup(true);
-                      try {
-                        await triggerReviewPopup();
-                      } finally {
-                        setTimeout(() => setTestingPopup(false), 800);
-                      }
-                    }}
-                    disabled={testingPopup}
-                    title="Bật pop-up ngay bây giờ để thử"
-                    className="p-1 rounded-md text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-cyan-50 dark:hover:bg-cyan-950/60 transition-colors cursor-pointer"
-                  >
-                    <Sparkles className={`w-3 h-3 ${testingPopup ? "animate-spin text-cyan-600" : ""}`} />
-                  </button>
-                </div>
-              </div>
-
-              {/* Next reminder row */}
-              <div className="flex items-center justify-between text-xs gap-1.5">
-                <span className="text-slate-500 dark:text-zinc-400 text-[11px] shrink-0">Lần tới:</span>
-                {!isReminderEnabled ? (
-                  <span className="text-[11px] text-slate-500 dark:text-zinc-400 font-medium">Chỉ mở thủ công</span>
-                ) : pauseReason ? (
-                  <span
-                    className="text-[11px] text-amber-700 dark:text-amber-400 font-semibold truncate text-right"
-                    title={pauseReason}
-                  >
-                    {pauseReason}
-                  </span>
-                ) : (
-                  <div className="flex items-center gap-1.5 font-mono">
-                    <span className="font-bold text-slate-900 dark:text-zinc-100 text-[11px]">
-                      {formatDisplayTime(nextReminderMs)}
-                    </span>
-                    <NextReminderCountdown nextMs={nextReminderMs} />
-                  </div>
-                )}
-              </div>
-
-              {/* Last display row */}
-              <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400 pt-1.5 border-t border-slate-100 dark:border-zinc-800/60">
-                <span className="flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-slate-400 dark:text-zinc-500 shrink-0" />
-                  <span>Lần gần nhất:</span>
-                </span>
-                <span className="font-mono font-medium text-slate-700 dark:text-zinc-300">
-                  {formatDisplayTime(lastDisplayMs)}
-                </span>
-              </div>
-            </div>
-          );
-        })()}
       </div>
 
-      {/* Account & theme switcher (always visible) */}
-      <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 space-y-2 shrink-0">
-        {/* Account: its own entry, below the others (sign-in, sync, leaderboard) */}
+      {/* Account and theme on one row (always visible) */}
+      <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 flex items-center gap-2 shrink-0">
+        {/* Account: sign-in, sync, leaderboard */}
         <button
           onClick={() => setActiveTab("account")}
           aria-current={activeTab === "account" ? "page" : undefined}
           title={accountUser ? `Đã đăng nhập: ${accountUser.email}` : "Đăng nhập để đồng bộ tiến trình và đua XP"}
-          className={`w-full flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg border transition-colors text-left shadow-sm ${
+          className={`min-w-0 flex-1 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border transition-colors text-left shadow-sm ${
             activeTab === "account"
               ? "bg-cyan-50 dark:bg-cyan-500/10 border-cyan-200 dark:border-cyan-500/20 text-cyan-700 dark:text-cyan-400"
               : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/80 hover:bg-slate-100 dark:hover:bg-zinc-800/60 text-slate-800 dark:text-zinc-200"
@@ -713,30 +531,27 @@ export default function Sidebar({
               <UserRound className="w-4 h-4 shrink-0" />
             )}
             <span className="text-xs font-medium truncate">
-              {accountUser ? (accountName ?? accountUser.email) : "Tài khoản"}
+              {accountUser ? (accountName ?? accountUser.email) : "Đăng nhập"}
             </span>
           </span>
-          {accountUser ? (
+          {accountUser && (
             <span
               className={`shrink-0 w-2 h-2 rounded-full ${
                 syncStatus === "error" ? "bg-rose-500" : syncStatus === "syncing" ? "bg-amber-400 animate-pulse" : "bg-emerald-500"
               }`}
               title={syncStatus === "error" ? "Đồng bộ lỗi" : syncStatus === "syncing" ? "Đang đồng bộ" : "Đã đồng bộ"}
             />
-          ) : (
-            <span className="shrink-0 text-[10px] font-semibold text-cyan-700 dark:text-cyan-300">Đăng nhập</span>
           )}
         </button>
 
-        {/* Theme Selector (segmented control) */}
-        <div role="group" aria-label="Giao diện" className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800/80">
+        {/* Theme: three icons (the names are in the tooltips) */}
+        <div role="group" aria-label="Giao diện" className="shrink-0 flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800/80">
           {(
             [
-              { mode: "light", label: "Sáng", title: "Giao diện sáng", icon: Sun, on: "bg-white text-amber-700 border border-slate-200 shadow-sm" },
-              { mode: "dark", label: "Tối", title: "Giao diện tối", icon: Moon, on: "bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 shadow-sm" },
+              { mode: "light", title: "Giao diện sáng", icon: Sun, on: "bg-white text-amber-600 border border-slate-200 shadow-sm" },
+              { mode: "dark", title: "Giao diện tối", icon: Moon, on: "bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-cyan-500/40 shadow-sm" },
               {
                 mode: "system",
-                label: "Hệ thống",
                 title: "Theo cài đặt của máy",
                 icon: Laptop,
                 on: "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm",
@@ -750,14 +565,14 @@ export default function Sidebar({
                 type="button"
                 onClick={() => handleThemeChange(t.mode)}
                 title={t.title}
+                aria-label={t.title}
                 aria-pressed={currentTheme === t.mode}
-                className={`flex-1 flex items-center justify-center gap-1 px-1 py-1 rounded-md text-[11px] font-medium whitespace-nowrap transition-all ${currentTheme === t.mode
+                className={`p-1.5 rounded-md transition-all ${currentTheme === t.mode
                   ? t.on
                   : "border border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
                   }`}
               >
-                <Icon className="w-3 h-3" />
-                <span>{t.label}</span>
+                <Icon className="w-3.5 h-3.5" />
               </button>
             );
           })}

@@ -15,7 +15,7 @@ import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
 import { getCardRetrievability, getStudyLimits } from "./srs";
 import { shuffle } from "@/lib/utils";
-import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs } from "./cards";
+import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs, nextLocalDayStart, toCard } from "./cards";
 import { persistKeyNow } from "./storageBackup";
 import { recordXpEarned, XP_DAILY_LOG_KEY, XP_TOTAL_KEY } from "./sync/xpLedger";
 import { COMMON_WORDS } from "@/data/commonWords";
@@ -543,6 +543,86 @@ export function summarizeTodayWork(
     for (const other of due) if (other !== first && (other.srs.state ?? 0) !== 2) count(other);
   }
   return todayWorkFrom(reviews, waiting, introduced, limits.newCardsPerDay, limits.maxSessionSize);
+}
+
+export interface SessionForecast {
+  /** Reviews a session would ask each day, today first (date: local YYYY-MM-DD) */
+  days: Array<{ date: string; reviews: number }>;
+  /** Learning cards whose next step comes later today (not in a session started now) */
+  laterToday: number;
+}
+
+/**
+ * Reviews per day for the next `horizonDays` days, counted the way sessions pick cards:
+ *  - today: exactly the reviews of summarizeTodayWork (askable now, one review card per word, learning cards apart)
+ *  - a review card waits a day when the other card of its word is asked that day (bury siblings), so a word
+ *    gives at most one review card a day; learning / relearning cards (minute steps) are never moved
+ *  - new cards are not reviews (they come with the new-card budget); suspended words and words without a
+ *    meaning yet are left out
+ * Future days only hold what is already scheduled: today's answers add more.
+ */
+export function forecastSessionLoad(words: readonly WordDetail[], horizonDays: number, now: Date = new Date()): SessionForecast {
+  const dayStart = (offset: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+  const days = Array.from({ length: horizonDays }, (_, i) => {
+    const d = dayStart(i);
+    return { date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`, reviews: 0 };
+  });
+  const tomorrow = nextLocalDayStart(now);
+  /** Index of the local day of `t` (0 = today) */
+  const dayIndex = (t: number) => {
+    let i = 1;
+    while (i < horizonDays + 1 && t >= dayStart(i + 1).getTime()) i++;
+    return i;
+  };
+  let laterToday = 0;
+  const add = (i: number) => {
+    if (i >= 0 && i < horizonDays) days[i].reviews++;
+  };
+
+  for (const w of words) {
+    if (isPlaceholderMeaning(w.meaning_vn) || isSuspended(w)) continue;
+    const cards = [toCard(w, "recognition"), ...(w.srsProduction ? [toCard(w, "production")] : [])].filter((c) => !isNewCard(c));
+    if (cards.length === 0) continue;
+    // Today, as summarizeTodayWork counts it
+    const askable = askableCards(w, now).filter((c) => !isNewCard(c));
+    const reviewDays: number[] = [];
+    if (askable.length > 0) {
+      const first = pickSessionCard(askable, now);
+      add(0);
+      for (const other of askable) {
+        if (other === first) continue;
+        if ((other.srs.state ?? 0) !== 2) add(0);
+        else reviewDays.push(1); // asked after its sibling: tomorrow
+      }
+      // The sibling asked today puts this word's other review card due tomorrow one day later at least
+      reviewDays.push(-1);
+    }
+    for (const c of cards) {
+      // askableCards builds its own card objects: match by direction
+      if (askable.some((x) => x.direction === c.direction)) continue;
+      const due = new Date(c.srs.next_review_date).getTime();
+      if (!Number.isFinite(due)) continue;
+      const review = (c.srs.state ?? 0) === 2;
+      if (isDueSrs(c.srs, now)) {
+        // Due but not askable now: buried by its sibling reviewed today
+        if (review) reviewDays.push(1);
+        else add(1);
+      } else if (due < tomorrow) {
+        if (review) reviewDays.push(1);
+        else laterToday++;
+      } else if (review) reviewDays.push(dayIndex(due));
+      else add(dayIndex(due));
+    }
+    // One review card of a word a day: a second one on the same day moves to the next free day
+    const taken = new Set<number>(reviewDays.includes(-1) ? [0] : []);
+    for (const d of reviewDays.filter((d) => d >= 0).sort((a, b) => a - b)) {
+      let day = d;
+      while (taken.has(day)) day++;
+      taken.add(day);
+      add(day);
+    }
+  }
+  return { days, laterToday };
 }
 
 /** Leeches allowed in one session: more of them makes a session discouraging and slow */
@@ -1332,7 +1412,8 @@ export function getWordStatsSummary(words: WordDetail[]): WordStatsSummary {
       }
     }
 
-    if (isLeech(w.srs, leechSettings)) {
+    // Either card, as the badges, the library filter and the sidebar count
+    if (isLeechWord(w, leechSettings)) {
       leechCount++;
     }
 

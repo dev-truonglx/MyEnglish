@@ -4,6 +4,7 @@ import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { cleanMeaningForOption, generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
 import { pickSenseForExample, sharesSense } from "@/utils/exerciseHints";
+import { playWrongTry } from "@/services/sound";
 
 interface ReverseClozeExerciseProps {
   word: WordDetail;
@@ -83,6 +84,7 @@ export default function ReverseClozeExercise({
       onComplete(true, wrongAttempts, rating);
     } else {
       setWrongAttempts((prev) => prev + 1);
+      playWrongTry();
       setShakeIdx(idx);
       setTimeout(() => setShakeIdx(null), 400);
     }

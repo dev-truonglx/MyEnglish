@@ -152,9 +152,10 @@ export function assessUserProficiency(words: WordDetail[]): UserProficiencyProfi
   const userOverrideLevel = getUserOverrideLevel();
 
   const LEVEL_DESCRIPTIONS: Record<GrammarLevel, string> = {
-    A1: "Thì cơ bản, cấu trúc câu đơn & từ vựng nhập môn",
-    A2: "Quá khứ tiếp diễn, câu so sánh & ngữ cảnh hàng ngày",
-    B1: "Hiện tại hoàn thành, câu điều kiện 1 & 2, bị động",
+    // Tenses are listed per level apart (levelTenses.ts): these name the other grammar of the level
+    A1: "Động từ to be, câu đơn, đại từ & từ vựng nhập môn",
+    A2: "So sánh hơn & nhất, động từ khuyết thiếu (can, must), ngữ cảnh hằng ngày",
+    B1: "Câu điều kiện loại 1 & 2, câu bị động, mệnh đề quan hệ",
     B2: "Điều kiện hỗn hợp, bị động nâng cao, mệnh đề phân từ",
     C1: "Đảo ngữ, câu chẻ, văn phong kỹ thuật & học thuật cao cấp",
   };

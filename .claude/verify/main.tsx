@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import ReactDOM from "react-dom/client";
 import "@/index.css";
 import { getDatabase } from "@/services/db";
-import { buildNudgePayload, saveReminderSettings } from "@/services/reminderSettings";
+import { buildNudgePayload, saveReminderSettings, snoozeReminder } from "@/services/reminderSettings";
 import FocusReviewModal from "@/components/FocusReviewModal";
 import ReviewNudge from "@/components/ReviewNudge";
 import WeeklyProgressCard from "@/components/WeeklyProgressCard";
@@ -26,6 +26,10 @@ import ReadingTab from "@/components/dashboard/ReadingTab";
 import WritingTab from "@/components/dashboard/WritingTab";
 import { saveMistakes } from "@/services/mistakes";
 import TodayTab from "@/components/dashboard/TodayTab";
+import DailyQuestsCard from "@/components/dashboard/DailyQuestsCard";
+import SessionSummary from "@/components/review/SessionSummary";
+import DayCloseCard from "@/components/dashboard/DayCloseCard";
+import { getXPState as xpStateNow } from "@/services/smartReview";
 import PronunciationTab from "@/components/dashboard/PronunciationTab";
 import VocabTab from "@/components/dashboard/VocabTab";
 import VocabSetupScreen from "@/components/VocabSetupScreen";
@@ -38,8 +42,18 @@ import LeaderboardTab from "@/components/dashboard/LeaderboardTab";
 import { useAuthStore } from "@/stores/authStore";
 import { RankPanel, RankLine, RankDelta } from "@/components/dashboard/RankWidgets";
 import { useStandingStore } from "@/stores/standingStore";
+import Sidebar from "@/components/dashboard/Sidebar";
+import KnownTab from "@/components/dashboard/KnownTab";
+import CliGuideView from "@/components/CliGuideView";
+import { librarySchedule } from "@/services/librarySchedule";
+import { markWordKnown } from "@/services/reviewRecorder";
+import WordInspector from "@/components/dashboard/WordInspector";
+import { calculateStreakAndGoal as streakFor } from "@/services/streak";
+import type { DashboardTab, ViewMode } from "@/components/dashboard/shared";
+import DashboardHeader from "@/components/dashboard/DashboardHeader";
 import { calculateStreakAndGoal } from "@/services/streak";
 import GrammarHub from "@/components/grammar/GrammarHub";
+import AnalyticsView from "@/components/AnalyticsView";
 import { mergeChapterParts, saveGrammarBookChapter } from "@/services/grammarBook";
 import type { GrammarBookFile } from "@/types/grammarBook";
 import sampleP1 from "../../test/fixtures/grammarBook/ch01-p1.json";
@@ -315,7 +329,8 @@ function Today() {
       const db = await getDatabase();
       // localStorage outlives a reload (the database does not): start each scenario clean
       for (const k of ["myenglish_pronunciation_last_day_v1", "myenglish_remembered_milestone_v1", "myenglish_weekly_card_v1",
-        "myenglish_coverage_baseline_v1", "myenglish_daily_goal_v1", "myenglish_simple_mode_v1", "myenglish_goal_celebrated_v1"]) localStorage.removeItem(k);
+        "myenglish_coverage_baseline_v1", "myenglish_daily_goal_v1", "myenglish_simple_mode_v1", "myenglish_goal_celebrated_v1",
+        "myenglish_daily_quests_v1", "myenglish_bonus_freezes_v1"]) localStorage.removeItem(k);
       const dayStr = (back: number) => { const d = new Date(); d.setDate(d.getDate() - back); return getLocalDateString(d); };
       const logs: Record<string, number> = {};
       for (let back = 1; back <= 5; back++) logs[dayStr(back)] = 15;
@@ -377,11 +392,307 @@ function Today() {
       streakStats={calculateStreakAndGoal(words, work.total)}
       onStart={() => ((window as any).__started = true)}
       onQuickStart={() => ((window as any).__quick = true)}
+      onStartFocus={(m) => ((window as any).__focus = m)}
       setActiveTab={(t) => ((window as any).__tab = t)}
       simpleMode={q.has("simple")}
       now={fixedNow}
     />
   );
+}
+
+// ?quests: the "Nhiệm vụ hôm nay" card with fixed quests (2 right answers of 3, no focus session, no pronunciation lesson)
+//   &done      all three done: the chest is ready to open
+//   &claimed   the chest already opened today (+25 XP, a freeze)
+//   &fresh     no stored quests: today's pick from the seeded words
+function Quests() {
+  const q = new URLSearchParams(location.search);
+  const [words, setWords] = useState<Awaited<ReturnType<typeof getAllWords>> | null>(null);
+  React.useEffect(() => {
+    (async () => {
+      const today = getLocalDateString();
+      localStorage.removeItem("myenglish_bonus_freezes_v1");
+      if (q.has("fresh")) localStorage.removeItem("myenglish_daily_quests_v1");
+      else
+        localStorage.setItem("myenglish_daily_quests_v1", JSON.stringify({
+          day: today,
+          quests: [{ id: "first_try", target: 3 }, { id: "focus", target: 1 }, { id: "pronunciation", target: 1 }],
+          claimed: q.has("claimed"),
+          ...(q.has("claimed") ? { reward: { xp: 25, freeze: true } } : {}),
+        }));
+      const full = q.has("done") || q.has("claimed");
+      const base = { exerciseType: "multiple_choice" as const, responseTimeMs: 3000, wrongAttempts: 0, xpEarned: 10, direction: "recognition" as const };
+      for (let k = 0; k < (full ? 3 : 2); k++) {
+        await saveReviewLog({ ...base, wordId: "w-deploy", isCorrect: true, rating: 3, isScheduled: true, timestamp: new Date(Date.now() - (k + 1) * 60e3).toISOString() });
+      }
+      if (full) await logLearningEvent("focus_completed", { meta: { endedBy: "time", activeSec: 600, cards: 12 } });
+      if (full) await logLearningEvent("pronunciation_quiz", { meta: { lessonId: "final-s", correct: 5, total: 5 } });
+      setStudyLevels(["A1"]);
+      setWords(await getAllWords());
+    })();
+  }, []);
+  if (!words) return null;
+  return (
+    <div className="max-w-3xl mx-auto p-6">
+      <DailyQuestsCard
+        words={words}
+        newToday={6}
+        dailyGoal={10}
+        hasStudied
+        freezesAvailable={0}
+        onStartReview={() => ((window as any).__started = true)}
+        onStartFocus={() => ((window as any).__focus = true)}
+        setActiveTab={(t) => ((window as any).__tab = t)}
+      />
+    </div>
+  );
+}
+
+// ?summary: the end-of-session screen. &reached: today's goal reached ("Hôm nay xong ✓", next review at 14:30-ish);
+//   default: 7/10 answers today, the goal not reached yet
+function SummaryView() {
+  const q = new URLSearchParams(location.search);
+  const reached = q.has("reached");
+  const at = new Date(Date.now() + 25 * 60e3);
+  const stats = {
+    firstTryCorrect: 6, retryCorrect: 2, revealedCount: 1, skippedCount: 0, totalWrongAttempts: 2, totalXPEarned: 48, leechesSlain: 0,
+    rescuedCount: 1, masteredWords: [], day: { streak: 6, todayCount: reached ? 12 : 7, dailyGoal: 10, goalReachedNow: reached, goalReached: reached, dueLeft: 0 },
+  } as any;
+  return (
+    <SessionSummary
+      wordsToReview={[]}
+      sessionStats={stats}
+      reviewCount={9}
+      xpState={xpStateNow()}
+      lastResult={null}
+      onFinish={() => ((window as any).__finished = true)}
+      nextReview={q.has("none") ? null : { at, count: 6 }}
+    />
+  );
+}
+
+// ?dayclose: the Today tab's day close on its own. &left: 7/10 answers (goal not reached); default: goal reached
+function DayCloseView() {
+  const q = new URLSearchParams(location.search);
+  const reached = !q.has("left");
+  const stats = {
+    currentStreak: 6, longestStreak: 9, todayCount: reached ? 12 : 7, dailyGoal: 10, goalReached: reached,
+    goalPercentage: reached ? 100 : 70, freezesAvailable: 1, frozenDates: [], dueRemaining: 0,
+  };
+  return (
+    <div className="max-w-xl mx-auto p-6">
+      <DayCloseCard
+        streakStats={stats}
+        laterToday={2}
+        hour={new Date().getHours()}
+        nextStep={{ label: "Phát âm 5 phút", tab: "pronunciation" }}
+        onNextStep={() => {}}
+        onQuickStart={() => {}}
+        more={{ label: "Học thêm từ mới", onClick: () => {} }}
+        nextReview={{ at: new Date(Date.now() + 25 * 60e3), count: 6 }}
+        dueNow={0}
+      />
+    </div>
+  );
+}
+
+// ?sidebar (&simple): the left sidebar with its quick-access tiles (12 words often forgotten, 3 due), and the
+// header beside it; &snooze=min sets a reminder pause of that many minutes (the header shows it, with "Hủy hoãn")
+function SidebarView() {
+  const q = new URLSearchParams(location.search);
+  const [tab, setTab] = useState<DashboardTab>((q.get("tab") as DashboardTab) || "today");
+  const [viewMode, setViewMode] = useState<ViewMode>("gallery");
+  const searchRef = React.useRef<HTMLInputElement>(null);
+  if (q.has("simple")) localStorage.setItem("myenglish_simple_mode_v1", "1");
+  React.useState(() => {
+    if (q.has("snooze")) snoozeReminder(Number(q.get("snooze")) || 15);
+  });
+  return (
+    <div className="h-screen flex bg-slate-50 dark:bg-zinc-950">
+      <Sidebar
+        activeTab={tab}
+        setActiveTab={(t) => {
+          setTab(t);
+          (window as any).__tab = t;
+        }}
+        pipelineQueue={[]}
+        dueCount={8}
+        streakStats={streakFor([])}
+        libraryStats={{ dueWords: [], learningCount: 20, rememberedLongCount: 5, leechCount: 2, perTopic: {} }}
+        simpleMode={q.has("simple")}
+        forgottenCount={12}
+        forgottenDue={3}
+      />
+      <div className="flex-1 min-w-0 flex flex-col">
+        <DashboardHeader
+          searchInputRef={searchRef}
+          searchQuery=""
+          setSearchQuery={() => {}}
+          activeTab={tab}
+          setActiveTab={setTab}
+          viewMode={viewMode}
+          setViewMode={setViewMode}
+          streakStats={streakFor([])}
+          dueCount={8}
+          effectiveLevel="A2"
+          setGlobalToast={() => {}}
+          onStartReview={() => {}}
+          onStartFocus={() => {}}
+          simpleMode={q.has("simple")}
+          forgottenCount={12}
+          forgottenDue={3}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ?progress (&tab=overview|vocab|habits|schedule|badges): the progress screen with the seeded words
+function ProgressView() {
+  const q = new URLSearchParams(location.search);
+  const [words, setWords] = useState<Awaited<ReturnType<typeof getAllWords>> | null>(null);
+  React.useEffect(() => {
+    if (q.get("tab")) localStorage.setItem("myenglish_progress_tab_v1", q.get("tab")!);
+    getAllWords().then(setWords);
+  }, []);
+  return words ? <AnalyticsView words={words} onOpenForgotten={() => {}} /> : <div>loading…</div>;
+}
+
+// ?inspector (&word=deploy): the word detail panel. "deploy" gets synonyms, collocations, a production card,
+// lapses and answers; &catalog shows the first Oxford A1 word instead (several senses, US/UK IPA)
+function InspectorView() {
+  const q = new URLSearchParams(location.search);
+  const [ready, setReady] = useState(false);
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  React.useEffect(() => {
+    (async () => {
+      const db = await getDatabase();
+      await db.execute(
+        `UPDATE words SET phonetic = '/dɪˈplɔɪ/', collocations = $1, synonyms = $2, antonyms = $3, code_snippet = $4 WHERE id = 'w-deploy'`,
+        [
+          JSON.stringify(["deploy to production", "deploy a fix", "auto-deploy"]),
+          JSON.stringify([{ word: "release", phonetic: "/rɪˈliːs/", meaning_vn: "phát hành", examples: [{ sentence_en: "We release on Mondays.", meaning_vn: "Chúng tôi phát hành vào thứ Hai.", structure: "S + V + on + day", why_used: "Thói quen lặp lại: hiện tại đơn." }] }, { word: "ship", meaning_vn: "đưa ra (sản phẩm)" }]),
+          JSON.stringify([{ word: "rollback", meaning_vn: "hoàn tác phiên bản" }]),
+          "git push origin main\nkubectl rollout status deploy/api",
+        ]
+      );
+      await db.execute(`UPDATE examples SET grammar_analysis = 'S (We) + V (deploy) + trạng từ tần suất (every Friday) → hiện tại đơn' WHERE word_id = 'w-deploy'`);
+      await db.execute(`UPDATE srs_reviews SET lapses = 3, stability = 2.4, difficulty = 7.2, reps = 9 WHERE word_id = 'w-deploy'`);
+      await db.execute(
+        `INSERT OR REPLACE INTO srs_production (word_id, ease_factor, interval, repetitions, next_review_date, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps)
+         VALUES ('w-deploy', 2.5, 2, 2, $1, 1.6, 6.5, 1, 2, 4, 1, 3, $2, 0)`,
+        [iso(2 * DAY), iso(-1 * DAY)]
+      );
+      const base = { exerciseType: "spelling" as const, responseTimeMs: 3000, wrongAttempts: 0, xpEarned: 10, direction: "recognition" as const };
+      for (let k = 0; k < 6; k++) await saveReviewLog({ ...base, wordId: "w-deploy", isCorrect: k % 3 !== 0, rating: k % 3 === 0 ? 1 : 3, isScheduled: true, timestamp: iso(-(k + 1) * DAY) });
+      let id = "w-" + (q.get("word") || "deploy");
+      if (q.has("catalog")) {
+        setStudyLevels(["A1"]);
+        await topUpNewWords();
+        const all = await getAllWords();
+        id = all.find((w) => w.catalog_id)?.id ?? id;
+      }
+      const all = await getAllWords();
+      useWordsStore.setState({ words: all });
+      useWordsStore.getState().setSelectedWord(all.find((w) => w.id === id) ?? all[0] ?? null);
+      setReady(true);
+    })();
+  }, []);
+  if (!ready) return null;
+  return (
+    <div className="h-screen bg-slate-50 dark:bg-zinc-950">
+      <WordInspector
+        requestDeleteWord={() => ((window as any).__delete = true)}
+        expandedTerms={expanded}
+        toggleTermExpanded={(k) => setExpanded((p) => ({ ...p, [k]: !p[k] }))}
+        copiedSnippet={false}
+        handleCopyCode={() => {}}
+        setActiveTab={(t) => ((window as any).__tab = t)}
+        setMessage={(m) => ((window as any).__message = m)}
+      />
+    </div>
+  );
+}
+
+// ?known: the "Đã biết" tab with 3 words waiting for their check, 1 confirmed and 1 failed
+function KnownView() {
+  const [ready, setReady] = useState(false);
+  React.useEffect(() => {
+    (async () => {
+      const db = await getDatabase();
+      const base: Array<[string, string, string]> = [["w-k1", "table", "Cái bàn"], ["w-k2", "water", "Nước"], ["w-k3", "house", "Ngôi nhà"]];
+      // &many: 70 more across levels (the list pages, the level filter)
+      if (new URLSearchParams(location.search).has("many"))
+        for (let i = 0; i < 70; i++) base.push([`w-m${i}`, `word${String(i).padStart(2, "0")}`, `Nghĩa số ${i}`]);
+      for (const [i, [id, word, meaning]] of base.entries()) {
+        const level = ["A1", "A2", "B1", "B2"][i % 4];
+        await db.execute(`INSERT OR REPLACE INTO words (id, word, meaning_vn, synonyms, antonyms, topic, cefr_level, created_at) VALUES ($1,$2,$3,'[]','[]',$4,$4,$5)`, [id, word, meaning, level, iso(-5 * DAY)]);
+        await markWordKnown(id);
+      }
+      for (const [id, lapses] of [["w-banana", 0], ["w-apple", 1]] as const) {
+        await db.execute(`INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled) VALUES ($1,$2,'known',0,1,0,3,0,$3,0)`, [`k-${id}`, id, iso(-12 * DAY)]);
+        await db.execute(`UPDATE srs_reviews SET reps = 2, lapses = $1, state = $2, stability = $3 WHERE word_id = $4`, [lapses, lapses ? 3 : 2, lapses ? 1 : 25, id]);
+      }
+      useWordsStore.setState({ words: await getAllWords() });
+      setReady(true);
+    })();
+  }, []);
+  return ready ? <div className="h-screen flex"><KnownTab onCheckNow={(ws) => ((window as any).__check = ws.map((w) => w.word))} /></div> : null;
+}
+
+// ?reviewtab: the review landing with words at three levels, some due (overview layout)
+//   &done  nothing due any more
+function ReviewTabView() {
+  const q = new URLSearchParams(location.search);
+  const [state, setState] = useState<any>(null);
+  React.useEffect(() => {
+    (async () => {
+      const db = await getDatabase();
+      const levels = ["A1", "A2", "B1"];
+      for (let i = 0; i < 36; i++) {
+        const id = `w-rt-${i}`;
+        const level = levels[i % 3];
+        await db.execute(
+          `INSERT OR REPLACE INTO words (id, word, part_of_speech, meaning_vn, synonyms, antonyms, topic, cefr_level, created_at) VALUES ($1,$2,'noun',$3,'[]','[]',$4,$4,$5)`,
+          [id, `vocabulary${i}`, `nghĩa tiếng Việt khá dài của từ số ${i}`, level, iso(-30 * DAY)]
+        );
+        const due = !q.has("done") && i % 2 === 0;
+        await db.execute(
+          `INSERT OR REPLACE INTO srs_reviews (word_id, ease_factor, interval, repetitions, next_review_date, stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps)
+           VALUES ($1, 2.5, 4, 3, $2, 4, 5, 4, 4, 3, 0, 2, $3, 0)`,
+          [id, due ? iso(-(i % 5 + 1) * DAY) : iso(((i % 6) + 1) * DAY), iso(-6 * DAY)]
+        );
+      }
+      const words = await getAllWords();
+      useWordsStore.setState({ words });
+      const now = new Date();
+      const perTopic: Record<string, { total: number; due: number }> = {};
+      const dueWords = [];
+      for (const w of words) {
+        const isDue = librarySchedule(w, now).isDue;
+        if (isDue) dueWords.push(w);
+        const key = (w.topic || "General Tech").trim().toLowerCase();
+        const e = perTopic[key] || (perTopic[key] = { total: 0, due: 0 });
+        e.total++;
+        if (isDue) e.due++;
+      }
+      const work = summarizeTodayWork(words, await getNewCardsIntroducedToday());
+      const topics = Array.from(new Set(words.map((w) => w.topic || "General Tech")));
+      setState({ work, stats: { dueWords, learningCount: 0, rememberedLongCount: 0, leechCount: 0, perTopic }, topics });
+    })();
+  }, []);
+  return state ? (
+    <ReviewTab
+      dueCount={state.work.total}
+      todayWork={state.work}
+      comeback={null}
+      libraryStats={state.stats}
+      availableTopics={state.topics}
+      handleStartReview={(onlyDue, topic) => ((window as any).__started = { onlyDue, topic })}
+      onStartFocus={(m) => ((window as any).__focus = m)}
+      onOpenDueWords={() => ((window as any).__openDue = true)}
+      setMessage={() => {}}
+    />
+  ) : null;
 }
 
 // ?tiles: the letter-tiles exercise on "deploy"; the result is exposed on window.__tiles
@@ -466,16 +777,26 @@ function App() {
   }, []);
   if (!ready) return <div>seeding…</div>;
   const q = new URLSearchParams(location.search);
+  if (q.has("sidebar")) return <SidebarView />;
+  if (q.has("known")) return <KnownView />;
+  // ?settings: the Settings screen
+  if (q.has("settings")) return <div className="h-screen flex flex-col"><CliGuideView onRefreshWords={() => {}} /></div>;
+  if (q.has("inspector")) return <InspectorView />;
+  if (q.has("progress")) return <ProgressView />;
   if (q.has("account") || q.has("leaderboard") || q.has("rank")) return <Account />;
   if (q.has("weekly")) return <Weekly />;
   if (q.has("flash")) return <Flash />;
   if (q.has("insights")) return <Insights />;
   if (q.has("habits")) return <Habits />;
+  if (q.has("reviewtab")) return <ReviewTabView />;
   if (q.has("comeback")) return <Comeback />;
   if (q.has("onboarding")) return <Onboarding />;
   if (q.has("reading")) return <Reading />;
   if (q.has("writing")) return <Writing />;
   if (q.has("today")) return <Today />;
+  if (q.has("quests")) return <Quests />;
+  if (q.has("summary")) return <SummaryView />;
+  if (q.has("dayclose")) return <DayCloseView />;
   if (q.has("levels")) return <Levels />;
   if (q.has("deckflash")) return <DeckFlash />;
   if (q.has("setup")) return <VocabSetupScreen mode="migrate" onDone={() => ((window as any).__setupDone = true)} />;
@@ -485,14 +806,17 @@ function App() {
   if (q.has("tiles")) return <Tiles />;
   if (q.has("placement"))
     return <PlacementTest onClose={() => {}} onDone={(level) => ((window as any).__placement = level)} />;
-  if (q.has("nudge") && q.has("quiz")) {
+  if (q.has("nudge") && (q.has("quiz") || q.has("card"))) {
     // ?nudge&quiz: the corner card opens on its one-question quiz (payload served as the native app would)
+    // ?nudge&card: the same payload on the reminder card itself (its buttons)
     (window as any).__TAURI_INTERNALS__ = {};
     (globalThis as any).__tauriInvoke = (cmd: string) => {
       if (cmd === "take_review_nudge_payload") {
         return {
           ...buildNudgePayload(5),
-          motivation: { tone: "level_1_encouraging", title: "Một câu nhanh?", message: "1 câu rồi quay lại việc.", mascotMood: "happy", isMicroQuizPreferred: true },
+          motivation: q.has("card")
+            ? { tone: "level_1_encouraging", title: "Đến giờ ôn tập rồi bạn ơi! 🦉", message: "Có 7 từ cần bạn điểm danh, khoảng 2 phút.", mascotMood: "happy", isMicroQuizPreferred: false }
+            : { tone: "level_1_encouraging", title: "Một câu nhanh?", message: "1 câu rồi quay lại việc.", mascotMood: "happy", isMicroQuizPreferred: true },
           microQuiz: {
             wordId: "w-deploy",
             word: "deploy",
@@ -540,7 +864,13 @@ function installFakeCloud(q: URLSearchParams) {
         return json([...board.map(flags), { rank: 5, display_name: "Tú", avatar: null, xp: 120, level: 3, streak: 1, is_me: false, is_above: false, is_below: true, total: 24 }]);
       }
       if (url.includes("/rpc/my_standing")) return json([{ rank: 4, total: 24, xp: 410, above_name: "Hà", above_xp: 990, below_name: "Tú", below_xp: 120 }]);
-      if (url.includes("/rpc/leaderboard")) return json(q.has("empty") ? [] : board);
+      // &slow=ms: the board answers after that delay (the loading states); &slow=never: no answer at all
+      if (url.includes("/rpc/leaderboard")) {
+        const slow = q.get("slow");
+        if (slow === "never") return new Promise<Response>(() => {});
+        if (slow) await new Promise((r) => setTimeout(r, Number(slow) || 6000));
+        return json(q.has("empty") ? [] : board);
+      }
       if (url.includes("/rpc/my_groups")) return json([{ id: "g1", name: "Team IT", invite_code: "3F9A12BC", member_count: 4, is_owner: true }]);
       if (url.includes("/rest/v1/profiles")) return json({ display_name: "Bạn A", level: 5, streak: 3, avatar: "rocket-indigo" });
       if (url.includes("/rpc/")) return json([]);

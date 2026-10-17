@@ -3,7 +3,8 @@ import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
 import type { GrammarProgress } from "@/types/grammar";
 import { getNextReviewDate } from "@/services/cards";
 
-export type ReviewTimeBucket = "all" | "due" | "today" | "1-3d" | "4-7d" | "future" | "new";
+/** "waiting": a recall card waiting for room in the daily new-card budget (see services/librarySchedule) */
+export type ReviewTimeBucket = "all" | "due" | "today" | "1-3d" | "4-7d" | "future" | "waiting" | "new";
 
 export interface ReviewTimeRelativeInfo {
   label: string;

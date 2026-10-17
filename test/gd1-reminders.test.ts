@@ -59,6 +59,8 @@ describe("isMainSessionActive (item 5)", () => {
 
 // Same worker setup as popup.test.ts: one new word, the last reminder shown `lastPopupAgoMs` ago
 async function setup(opts: Partial<ReminderSettings> & { lastPopupAgoMs?: number } = {}) {
+  // Let a previous tick's tray refresh finish its lazy imports before the reset (see gd4-tray.test.ts)
+  await vi.dynamicImportSettled();
   vi.resetModules();
   const db = await import("@/services/db");
   const srs = await import("@/services/srs");

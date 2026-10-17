@@ -4,6 +4,7 @@ import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareContextMatch, type ContextMatchPair } from "@/services/smartReview";
+import { playWrongTry } from "@/services/sound";
 
 interface ContextMatchExerciseProps {
   word: WordDetail;
@@ -156,6 +157,7 @@ export default function ContextMatchExercise({
       if (targetWrong) targetMistakesRef.current += 1;
       setIsCorrect(false);
       setWrongAttempts((prev) => prev + 1);
+      playWrongTry();
       // Keep the correct pairs, clear the wrong ones so the learner sees exactly what to fix
       setMatches((prev) => {
         const next: Record<string, string> = {};

@@ -192,6 +192,10 @@ export interface WordsChangedDetail {
   wordIds?: string[];
 }
 
+/** DOM event of the main window for another window's word changes held back while it is hidden (the list and
+ *  the cards reload once it is shown): the cloud sync listens to it to push them meanwhile */
+export const WORDS_CHANGED_WHILE_HIDDEN_EVENT = "myenglish-words-changed-while-hidden";
+
 /** Tells every window the words changed. `source`: the Tauri event also comes back to the window that sent it,
  *  which has already had the DOM event, so only other windows' changes are re-dispatched there. */
 export function notifyWordsChanged(wordIds?: string[]): void {

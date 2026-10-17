@@ -13,7 +13,6 @@ import {
   PAGE_CONTAINER,
   handleSpeak,
   type DashboardTab,
-  type FilterMode,
   type ViewMode,
 } from "./shared";
 import { AI_VOCAB_ENABLED } from "@/services/features";
@@ -27,7 +26,6 @@ interface LibraryTabProps {
   cardMeta: Map<string, WordCardMeta>;
   viewMode: ViewMode;
   searchQuery: string;
-  filterMode: FilterMode;
   selectedTopic: string;
   setSelectedTopic: (topic: string) => void;
   availableTopics: string[];
@@ -50,7 +48,6 @@ export default function LibraryTab({
   cardMeta,
   viewMode,
   searchQuery,
-  filterMode,
   selectedTopic,
   setSelectedTopic,
   availableTopics,
@@ -113,7 +110,7 @@ export default function LibraryTab({
             words={filteredWords}
             onSelectWord={setSelectedWord}
             onDeleteWord={requestDeleteWord}
-            resetKey={`${searchQuery}|${filterMode}|${selectedTopic}|${reviewTimeFilter}`}
+            resetKey={`${searchQuery}|${selectedTopic}|${reviewTimeFilter}`}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

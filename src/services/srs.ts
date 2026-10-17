@@ -823,8 +823,9 @@ class SRSBackgroundWorker {
     if (gen !== this.generation) return;
     this.unlistenTrayAction = trayAction;
 
-    // 2. Also keep a fallback local timer ticking every 15 seconds
-    this.timerId = window.setInterval(() => this.tick(), 15000);
+    // 2. A local timer only when the heartbeat could not be attached: running both woke the worker every
+    // 10-15 s, and a hidden webview's timers are throttled anyway
+    if (!heartbeat) this.timerId = window.setInterval(() => this.tick(), 15000);
   }
 
   public restart() {
@@ -859,6 +860,8 @@ class SRSBackgroundWorker {
   }
 
   private lastTrayRefresh = 0;
+  /** Today's work from the last tray refresh, reused by the goal check for a minute */
+  private recentWork: { at: number; work: Awaited<ReturnType<typeof countTodayWork>> } | null = null;
   private lastQuietRefresh = 0;
   /** Previous reading of the computer's state, to notice transitions */
   private lastObservation: { at: number; blockers: PopupBlockers | null } | null = null;
@@ -904,8 +907,11 @@ class SRSBackgroundWorker {
     try {
       // Keep the menu-bar / tray count fresh (once a minute), whatever the reminder settings
       if (Date.now() - this.lastTrayRefresh > 60 * 1000) {
-        this.lastTrayRefresh = Date.now();
-        countTodayWork().catch(() => {});
+        const at = Date.now();
+        this.lastTrayRefresh = at;
+        countTodayWork()
+          .then((work) => (this.recentWork = { at, work }))
+          .catch(() => {});
       }
       const settings = getReminderSettings();
       this.activeMoment = null;
@@ -925,29 +931,40 @@ class SRSBackgroundWorker {
         // Interval 0 turns off the automatic reminders, not the study times the learner chose (N10)
         const automaticOff = settings.intervalMinutes === 0;
         if (automaticOff && !anchor) return;
-        const moment = anchor ? ANCHOR_TIMES[anchor].moment : settings.contextMoments ? await this.observeMoment(now) : null;
         if (settings.avoidQuietHours && now - this.lastQuietRefresh > 60 * 60 * 1000) {
           this.lastQuietRefresh = now;
           refreshQuietHours().catch(() => {});
         }
-        if (isSnoozed()) return;
+        // Paused, studying in the main window, at night, goal done or enough reminders today: nothing can
+        // show, so the computer's state is not read either (each reading is native window-list queries)
+        const idle = () => {
+          this.lastObservation = null;
+          this.pendingMoment = null;
+        };
+        if (isSnoozed()) return idle();
         // The main window is studying: the same card would be graded twice
-        if (isMainSessionActive()) return;
+        if (isMainSessionActive()) return idle();
         // Night, today's goal done, or enough reminders for one day: wait until tomorrow.
         // The goal counts only once no review is due any more (S5)
         const goalMet = (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal();
         let grammarDue = 0;
+        let goalWork: Awaited<ReturnType<typeof countTodayWork>> | null = null;
         if (goalMet && settings.stopAfterGoal) {
-          work = await countTodayWork();
+          // Counted by the tray refresh less than a minute ago: reuse it rather than query on every tick
+          // (only for this check: a reminder about to show counts afresh below)
+          const recent = this.recentWork && now - this.recentWork.at < 60 * 1000 ? this.recentWork.work : null;
+          goalWork = recent ?? (work = await countTodayWork());
           grammarDue = await countDueGrammarLessons();
         }
         const pause = reminderPause(settings, {
           hour: new Date(now).getHours(),
-          goalReached: goalMet && work?.reviews === 0 && grammarDue === 0,
+          goalReached: goalMet && goalWork?.reviews === 0 && grammarDue === 0,
           shownToday: getNudgesShownToday(),
         });
         // A study time the learner chose is not cut by the daily cap (N4)
-        if (pause && !(pause === "daily_cap" && anchor)) return;
+        if (pause && !(pause === "daily_cap" && anchor)) return idle();
+        // Read after the pauses: the first reading after one compares with nothing, as at launch
+        const moment = anchor ? ANCHOR_TIMES[anchor].moment : settings.contextMoments ? await this.observeMoment(now) : null;
 
         const lastDisplay = getLastPopupDisplayTime();
 

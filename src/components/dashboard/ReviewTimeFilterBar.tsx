@@ -52,6 +52,12 @@ const BUCKET_CONFIGS: BucketConfig[] = [
       "bg-indigo-600 text-white border-indigo-600 shadow-sm font-semibold",
   },
   {
+    id: "waiting",
+    label: "Chờ lượt",
+    activeClass:
+      "bg-violet-600 text-white border-violet-600 shadow-sm font-semibold",
+  },
+  {
     id: "new",
     label: "Chưa học",
     activeClass:

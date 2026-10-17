@@ -68,6 +68,10 @@ const nudgeMoment = () => (shownNudge()?.args as { payload: { moment?: string | 
 
 // Same worker setup as gd1-reminders.test.ts: one new word, the last reminder shown `lastPopupAgoMs` ago
 async function setup(opts: Partial<ReminderSettings> & { lastPopupAgoMs?: number } = {}) {
+  // A previous tick's tray refresh (countTodayWork, not awaited) is still importing smartReview/vocabFeed
+  // lazily: let it finish first, or those imports land in the fresh registry and race the imports below
+  // through the srs <-> db cycle (srs then comes back half evaluated, without srsWorker)
+  await vi.dynamicImportSettled();
   vi.resetModules();
   const db = await import("@/services/db");
   const srs = await import("@/services/srs");
@@ -147,14 +151,15 @@ describe("tray pauses (N9)", () => {
 describe("worker start/stop race (N17)", () => {
   const count = (event: string) => native.listeners.get(event)?.size ?? 0;
 
-  it("two overlapping starts leave one set of listeners and one timer", async () => {
+  it("two overlapping starts leave one set of listeners and no fallback timer", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const { worker } = await setup();
     await Promise.all([worker.start(), worker.start()]);
     expect(count("srs-heartbeat")).toBe(1);
     expect(count("review-popup-opened")).toBe(1);
     expect(count("tray-reminder-action")).toBe(1);
-    expect(vi.getTimerCount()).toBe(1);
+    // The Rust heartbeat drives the ticks: a local timer runs only when it could not be attached
+    expect(vi.getTimerCount()).toBe(0);
 
     worker.stop();
     expect(count("srs-heartbeat") + count("review-popup-opened") + count("tray-reminder-action")).toBe(0);

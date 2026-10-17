@@ -88,6 +88,8 @@ describe("background worker", () => {
     respectFocus: boolean,
     opts: { contextMoments?: boolean; intervalMinutes?: 15 | 60; lastPopupAgoMs?: number } = {}
   ) {
+    // Let a previous tick's tray refresh finish its lazy imports before the reset (see gd4-tray.test.ts)
+    await vi.dynamicImportSettled();
     vi.resetModules();
     const db = await import("@/services/db");
     const srs = await import("@/services/srs");

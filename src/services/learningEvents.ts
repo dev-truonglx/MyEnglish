@@ -10,6 +10,8 @@
  *  - "grammar_intro": first meeting with a grammar point in the popup (meta.lessonId, correct)
  *  - "known": a new word the learner said they already know (a Review card due in KNOWN_CHECK_MIN_DAYS to
  *    KNOWN_CHECK_MAX_DAYS days, no quiz; it counts as known only after a real review confirms it)
+ *  - focus session: "focus_started" (meta.id, plannedMin, day), then "focus_completed" (meta.endedBy, activeSec,
+ *    cards, firstTry, xp) or "focus_abandoned". A start with no end (app quit) counts as abandoned.
  * Used to celebrate progress that matters and to show when the learner actually studies.
  */
 import { getDatabase } from "./db";
@@ -32,7 +34,10 @@ export type LearningEventType =
   | "pronunciation_quiz"
   | "say_aloud"
   | "grammar_intro"
-  | "known";
+  | "known"
+  | "focus_started"
+  | "focus_completed"
+  | "focus_abandoned";
 
 export interface LearningEvent {
   type: LearningEventType;
