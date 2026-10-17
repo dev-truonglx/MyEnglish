@@ -13,6 +13,7 @@ import { parseTerms, type WordDetail, type WordExample, type SRSReview, type Rev
 import Database from "@tauri-apps/plugin-sql";
 import { Rating } from "ts-fsrs";
 import { getDatabase, isPlaceholderMeaning } from "./db";
+import { getRecentIntros } from "./intros";
 import { getCardRetrievability, getStudyLimits } from "./srs";
 import { shuffle } from "@/lib/utils";
 import { directionForExercise, getDueCards, INTRO_READY_MS, isDueSrs, nextLocalDayStart, toCard } from "./cards";
@@ -381,10 +382,7 @@ const cardKey = (c: ReviewCard) => `${c.id}:${c.direction}`;
  */
 export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const db = await getDatabase();
-  // Dynamic import: reviewRecorder imports this module
-  const introsLoading = import("./reviewRecorder")
-    .then((m) => m.getRecentIntros())
-    .catch(() => new Map<string, number>());
+  const introsLoading = getRecentIntros().catch(() => new Map<string, number>());
   // A word marked "already known" never uses the budget for recognition (neither the day it is marked nor
   // the day of its first real review). Its recall card, started later, is a new card like any other.
   // Only words with a log today are grouped (idx_review_logs_time; this runs every minute): their MIN(timestamp)

@@ -13,6 +13,7 @@ import { getTodayGrammarPlan } from "@/services/grammarPath";
 import { countWordStatus, WORD_STATUS_LABELS } from "@/services/wordStatus";
 import { AI_VOCAB_ENABLED } from "@/services/features";
 import { PAGE_CONTAINER, type DashboardTab } from "./shared";
+import { useAuthStore } from "@/stores/authStore";
 import {
   TASK_TAB,
   buildTodayTasks,
@@ -62,11 +63,10 @@ interface TodayTabProps {
 /** From this many words often forgotten due now, Today points to their own section */
 const FORGOTTEN_HINT_MIN = 3;
 
-function greeting(hour: number): string {
-  if (hour < 11) return "Chào buổi sáng";
-  if (hour < 14) return "Chào buổi trưa";
-  if (hour < 18) return "Chào buổi chiều";
-  return "Chào buổi tối";
+function greeting(hour: number, name?: string | null): string {
+  const base = hour < 11 ? "Chào buổi sáng" : hour < 14 ? "Chào buổi trưa" : hour < 18 ? "Chào buổi chiều" : "Chào buổi tối";
+  const clean = name?.trim();
+  return clean ? `${base}, ${clean}` : base;
 }
 
 /** Minutes for today's words: a new word costs an introduction and a quiz, about two reviews */
@@ -98,6 +98,9 @@ export default function TodayTab({
 }: TodayTabProps) {
   const now = fixedNow ?? new Date();
   const today = getLocalDateString(now);
+  // Signed in: the account's display name in the greeting (none while signed out, or before the profile loads)
+  const signedIn = useAuthStore((s) => s.user != null);
+  const displayName = useAuthStore((s) => s.profile?.displayName);
   const showRank = useRankPanelVisible();
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [pron, setPron] = useState<TodayTaskInput["pronunciation"]>(null);
@@ -217,7 +220,9 @@ export default function TodayTab({
         {/* Greeting on the left, the three numbers as compact cards on the right (they wrap below on narrow windows) */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white leading-tight">{greeting(now.getHours())} 👋</h2>
+            <h2 className="text-xl font-bold text-slate-900 dark:text-white leading-tight truncate">
+              {greeting(now.getHours(), signedIn ? displayName : null)} 👋
+            </h2>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
               {now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long" })}
             </p>

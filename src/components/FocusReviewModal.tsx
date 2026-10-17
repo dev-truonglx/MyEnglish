@@ -33,8 +33,8 @@ import type { WordDetail, ReviewCard } from "@/types/database";
 import { isWordDue, practiceCards } from "@/services/cards";
 import { shuffle } from "@/lib/utils";
 import { BOOK_REVISION_KEY, clearBookCache } from "@/services/grammarBook";
+import { getRecentIntros } from "@/services/intros";
 import {
-  getRecentIntros,
   postponeNewCard,
   recordCardAnswer,
   recordIntro,

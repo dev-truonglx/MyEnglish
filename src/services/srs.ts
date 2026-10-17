@@ -15,8 +15,8 @@ import { getDatabase, getDueWordsFromDb, getWordsLite, SRS_COLUMNS } from "./db"
 import { isWordDue, nextLocalDayStart } from "./cards";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import { getStoredWeights } from "./fsrsOptimizer";
-import { applyComebackToWork, resolveComeback, type ComebackStatus } from "./comeback";
 import { persistKeyNow } from "./storageBackup";
+import { countTodayWork } from "./todayWork";
 
 export { Rating, State };
 
@@ -544,40 +544,6 @@ async function countDueGrammarLessons(): Promise<number> {
 }
 
 /**
- * What is left to study today (reviews due + new cards the daily budget still allows), counted the way a
- * session takes cards (summarizeTodayWork: same due rule, one review per word, the backlog limit on new
- * cards), so Today, the tray and the popup agree with the session. Also shows it on the menu-bar / tray icon.
- */
-export async function countTodayWork(): Promise<{
-  reviews: number;
-  newToday: number;
-  total: number;
-  comeback: ComebackStatus | null;
-}> {
-  const { summarizeTodayWork, getNewCardsIntroducedToday } = await import("./smartReview");
-  // A new day may need new words of the chosen levels in the buffer (cheap when it is full)
-  await import("./vocabFeed").then((m) => m.topUpNewWords()).catch(() => {});
-  const now = new Date();
-  const [words, introduced] = await Promise.all([
-    loadTodaySchedules(now),
-    getNewCardsIntroducedToday().catch(() => ({ recognition: 0, production: 0 })),
-  ]);
-  const limits = getStudyLimits();
-  const full = summarizeTodayWork(words, introduced, now, limits);
-  // After a break, only today's share of the backlog is counted (see comeback.ts), with the plan's new
-  // words instead of the daily budget, not cut by the backlog (as buildReviewSession's comebackNewCards):
-  // no session size limit, so newCardAllowance lets them all through
-  const comeback = resolveComeback(full.reviews, limits.maxSessionSize, now);
-  const base = comeback && !comeback.caughtUp
-    ? summarizeTodayWork(words, introduced, now, { newCardsPerDay: comeback.newWordsPerDay, maxSessionSize: Number.MAX_SAFE_INTEGER })
-    : full;
-  const work = applyComebackToWork(base, comeback, introduced);
-  // The tooltip also says when a pause ends (N9)
-  invoke("set_tray_due_count", { reviews: work.reviews, newCards: work.newToday, pausedUntil: snoozedUntilLabel() }).catch(() => {});
-  return { ...work, comeback };
-}
-
-/**
  * Trigger an OS notification if reviews are due
  */
 export async function checkAndNotifyDueReviews(sendIfZero: boolean = false): Promise<number> {
@@ -692,7 +658,6 @@ import { listen, type EventCallback } from "@tauri-apps/api/event";
 import {
   getReminderSettings,
   isSnoozed,
-  snoozedUntilLabel,
   applyTrayReminderAction,
   TRAY_REMINDER_EVENT,
   triggerReviewPopup,
