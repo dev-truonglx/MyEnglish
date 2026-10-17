@@ -33,8 +33,8 @@ import type { WordDetail, ReviewCard } from "@/types/database";
 import { isWordDue, practiceCards } from "@/services/cards";
 import { shuffle } from "@/lib/utils";
 import { BOOK_REVISION_KEY, clearBookCache } from "@/services/grammarBook";
+import { getRecentIntros } from "@/services/intros";
 import {
-  getRecentIntros,
   postponeNewCard,
   recordCardAnswer,
   recordIntro,
@@ -1251,7 +1251,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         !e.ctrlKey &&
         !e.altKey &&
         !inTextInput &&
-        (showIntro || activeMode !== "typing") &&
+        // Only where letters are not answers: in letter tiles / typing, "s" is a letter of the word
+        (showIntro || activeMode === "multiple_choice") &&
         !isAnswered
       ) {
         e.preventDefault();
@@ -2207,12 +2208,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 <span>Kiểm tra</span>
               </span>
             )}
-            <span className="flex items-center gap-1">
-              <kbd className="px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
-                S
-              </kbd>
-              <span>Hoãn {settings.snoozeMinutes}p</span>
-            </span>
+            {(showIntro || activeMode === "multiple_choice") && !isAnswered && (
+              <span className="flex items-center gap-1">
+                <kbd className="px-1.5 py-0.5 rounded bg-slate-200/80 dark:bg-zinc-800 font-mono text-[10px] text-slate-700 dark:text-zinc-300">
+                  S
+                </kbd>
+                <span>Hoãn {settings.snoozeMinutes}p</span>
+              </span>
+            )}
           </div>
 
           <div className="flex items-center gap-1">

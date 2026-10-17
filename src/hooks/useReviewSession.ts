@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from "react";
+import { countTodayWork } from "@/services/todayWork";
 import {
-  countTodayWork,
   getNextIntervalPreviews,
   Rating,
   type FSRSResult,
@@ -33,9 +33,9 @@ import {
   type XPReward,
   type XPState,
 } from "@/services/smartReview";
+import { getRecentIntros } from "@/services/intros";
 import {
   cardWithResult,
-  getRecentIntros,
   INTRO_MIN_GAP_MS,
   postponeNewCard,
   recordCardAnswer,

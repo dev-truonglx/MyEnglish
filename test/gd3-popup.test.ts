@@ -117,7 +117,7 @@ describe("comeback: the plan's new words (not cut by the backlog)", () => {
     localStorage.setItem("myenglish_comeback_plan_v1", JSON.stringify(plan));
     localStorage.setItem("myenglish_study_logs_v1", JSON.stringify({ [getLocalDateString(new Date(Date.now() - 6 * DAY_MS))]: 10 }));
 
-    const work = await srs.countTodayWork();
+    const work = await (await import("@/services/todayWork")).countTodayWork();
     expect(work.comeback?.newWordsPerDay).toBe(1);
     expect(work.reviews).toBe(5); // today's share
     expect(work.newToday).toBe(1); // 12 reviews > 2 sessions of 5: the normal budget would give 0

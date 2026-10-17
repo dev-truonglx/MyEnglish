@@ -348,7 +348,7 @@ describe("Today counts like the session (P11)", () => {
       b,
     ]);
     srs.saveStudyLimits({ newCardsPerDay: 10, maxSessionSize: 30 });
-    const work = await srs.countTodayWork();
+    const work = await (await import("@/services/todayWork")).countTodayWork();
     expect(work.reviews).toBe(2); // alpha's two cards count once
     const now = new Date();
     const expected = smart.summarizeTodayWork(await srs.loadTodaySchedules(now), await smart.getNewCardsIntroducedToday(), now);

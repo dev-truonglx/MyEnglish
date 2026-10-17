@@ -95,7 +95,7 @@ describe("recordCardAnswer", () => {
     const card = cards.toCard(word, "recognition");
     await recorder.recordIntro(card);
     expect((await smart.getNewCardsIntroducedToday()).recognition).toBe(1);
-    expect((await recorder.getRecentIntros()).has(`${id}:recognition`)).toBe(true);
+    expect((await (await import("@/services/intros")).getRecentIntros()).has(`${id}:recognition`)).toBe(true);
     const [afterIntro] = await db.getWordsByIds([id]);
     expect(afterIntro.srs.last_review).not.toBeNull();
 
