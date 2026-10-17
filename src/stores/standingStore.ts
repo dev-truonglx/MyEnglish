@@ -158,7 +158,7 @@ export function startStanding(): () => void {
   // A new week starts on Monday: last week's standing must not be shown as this week's
   const timer = window.setInterval(() => {
     const s = useStandingStore.getState().standing;
-    if (s && new Date(s.fetchedAt).getDay() !== new Date().getDay()) void useStandingStore.getState().refresh(true);
+    if (s && weekStart(new Date(s.fetchedAt)).getTime() !== weekStart().getTime()) void useStandingStore.getState().refresh(true);
   }, 15 * 60_000);
   return () => {
     window.removeEventListener("myenglish-sync-finished", onSynced);

@@ -141,6 +141,30 @@ export default function FlashcardReview({
     useStandingStore.getState().captureBaseline();
   }, []);
 
+  const synonyms = useMemo(() => (currentWord ? parseTerms(currentWord.synonyms) : []), [currentWord]);
+
+  // Cloze sentence: the example for this review (rotated, the learner's own sentence first). Only
+  // sentences that contain the word are used; without one the cloze falls back to spelling.
+  const clozeExample = useMemo(() => (currentWord ? pickExample(currentWord) : undefined), [currentWord]);
+  const originalSentence = clozeExample?.sentence_en ?? "";
+
+  // Mask the word (escaped, with inflections) so terms like "c++" or ".net" can't break the regex
+  // (every occurrence is masked, otherwise a second occurrence would reveal the answer)
+  const wordPattern = useMemo(
+    () => (currentWord ? new RegExp(wordFormsPattern(currentWord.word), "gi") : null),
+    [currentWord]
+  );
+  const clozeDisplaySentence = useMemo(
+    () => (wordPattern ? originalSentence.replace(wordPattern, "____[ ? ]____") : originalSentence),
+    [currentWord, originalSentence, wordPattern]
+  );
+  const clozeAnswerForm = useMemo(
+    () => (currentWord ? (formInSentence(originalSentence, currentWord.word) ?? currentWord.word) : ""),
+    [currentWord, originalSentence]
+  );
+  // Words still to come in this session: never shown inside another card's exercise
+  const upcomingIds = useMemo(() => new Set(queue.slice(currentIndex + 1).map((c) => c.id)), [queue, currentIndex]);
+
   // Hidden behind another tab: the exercises are unmounted so their window key listeners stop
   if (!active) return null;
 
@@ -184,20 +208,6 @@ export default function FlashcardReview({
     );
   }
 
-  const synonyms = parseTerms(currentWord.synonyms);
-
-  // Cloze sentence: the example for this review (rotated, the learner's own sentence first). Only
-  // sentences that contain the word are used; without one the cloze falls back to spelling.
-  const clozeExample = pickExample(currentWord);
-  const originalSentence = clozeExample?.sentence_en ?? "";
-
-  // Mask the word (escaped, with inflections) so terms like "c++" or ".net" can't break the regex
-  // (every occurrence is masked, otherwise a second occurrence would reveal the answer)
-  const wordPattern = new RegExp(wordFormsPattern(currentWord.word), "gi");
-  const clozeDisplaySentence = originalSentence.replace(wordPattern, "____[ ? ]____");
-  const clozeAnswerForm = formInSentence(originalSentence, currentWord.word) ?? currentWord.word;
-  // Words still to come in this session: never shown inside another card's exercise
-  const upcomingIds = new Set(queue.slice(currentIndex + 1).map((c) => c.id));
   // Once the answer / meaning is on screen it can be selected and copied (the rest of the frame stays unselectable)
   const answerShown = isIntroCard || hasCheckedAnswer || (effectiveExerciseType === "flip" && isFlipped);
 

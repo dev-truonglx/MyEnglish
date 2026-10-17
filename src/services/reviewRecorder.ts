@@ -130,11 +130,13 @@ function srsAfter(card: SRSReview, r: FSRSResult): SRSReview {
     stability: r.stability,
     difficulty: r.difficulty,
     reps: r.reps,
+    repetitions: r.reps,
     lapses: r.lapses,
     state: r.state as SRSReview["state"],
     last_review: r.lastReview ?? null,
     next_review_date: r.nextReviewDate,
     scheduled_days: r.scheduled_days,
+    interval: r.scheduled_days,
     learning_steps: r.learningSteps,
   };
 }

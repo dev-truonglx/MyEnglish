@@ -152,7 +152,17 @@ async function applyWords(db: Db, rows: SyncRow[], ctx: ApplyContext): Promise<n
          WHERE id = $${WORD_FREE_COLUMNS.length + 3} AND COALESCE(updated_at, created_at) < $${WORD_FREE_COLUMNS.length + 2}`,
         [...WORD_FREE_COLUMNS.map((c) => d[c] ?? null), Number(d.suspended) ? 1 : 0, row.ts, local]
       );
+      // Only a newer remote word brings its examples: from an older row they would resurrect examples
+      // replaced (re-enrichment) or deleted here since
       if (res.rowsAffected > 0) {
+        for (const ex of (d.examples as Data[] | undefined) ?? []) {
+          await db.execute(
+            `INSERT OR IGNORE INTO examples (id, word_id, sentence_en, sentence_vn, grammar_analysis, source, focus, sense_index)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+            [ex.id, local, ex.sentence_en, ex.sentence_vn ?? null, ex.grammar_analysis ?? "", ex.source ?? null, ex.focus ?? null, ex.sense_index ?? null]
+          );
+        }
+        if (found) index.set(row.key, { ...found, ts: row.ts, suspended: Number(d.suspended) ? 1 : 0 });
         ctx.wordsChanged = true;
         applied++;
       }
@@ -331,8 +341,21 @@ async function applyGrammar(rows: SyncRow[]): Promise<number> {
   return applySyncedGrammarProgress(entries);
 }
 
+const KV_EVENTS: Record<string, string> = {
+  myenglish_study_logs_v1: "myenglish-activity-updated",
+  myenglish_daily_goal_v1: "myenglish-activity-updated",
+  myenglish_bonus_freezes_v1: "myenglish-activity-updated",
+  myenglish_daily_quests_v1: "myenglish-quests-updated",
+  myenglish_weekly_challenges_v1: "myenglish-weekly-challenges-updated",
+  myenglish_grammar_introduced_v1: "myenglish-grammar-updated",
+  myenglish_grammar_intro_dates_v1: "myenglish-grammar-updated",
+  myenglish_grammar_item_levels_v1: "myenglish-grammar-updated",
+  myenglish_grammar_set_scores_v1: "myenglish-grammar-updated",
+};
+
 async function applyKv(rows: SyncRow[]): Promise<number> {
   let applied = 0;
+  const events = new Set<string>();
   for (const row of rows) {
     if (!isSyncedKvKey(row.key)) continue; // never trust the server with a key outside the allowlist
     const remote = str(row.data.v);
@@ -358,7 +381,15 @@ async function applyKv(rows: SyncRow[]): Promise<number> {
       at: copied ? row.ts : new Date().toISOString(),
       pushedAt: copied ? row.ts : meta?.pushedAt,
     });
+    const ev = KV_EVENTS[row.key];
+    if (ev) events.add(ev);
     applied++;
+  }
+  if (applied > 0) {
+    events.add("myenglish-activity-updated");
+    try {
+      for (const ev of events) window.dispatchEvent(new CustomEvent(ev));
+    } catch {}
   }
   return applied;
 }

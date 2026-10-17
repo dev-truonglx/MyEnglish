@@ -3,6 +3,7 @@
  */
 
 import { awardXP, isKnownOnly } from "./smartReview";
+import { persistKeyNow } from "./storageBackup";
 import { triggerConfetti } from "@/utils/confetti";
 import type { SRSReview } from "@/types/database";
 
@@ -325,6 +326,7 @@ export function recordFirstTryCorrect(): number {
   const next = getFirstTryTotal() + 1;
   try {
     localStorage.setItem(FIRST_TRY_KEY, String(next));
+    persistKeyNow(FIRST_TRY_KEY);
   } catch {}
   return next;
 }
@@ -419,13 +421,15 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
   // Persist first; only award XP once the unlock is safely stored
   try {
     localStorage.setItem(ACHIEVEMENTS_STORAGE_KEY, JSON.stringify(latest));
+    persistKeyNow(ACHIEVEMENTS_STORAGE_KEY);
   } catch (err) {
     console.warn("Failed to persist achievements:", err);
     return [];
   }
 
-  for (const badge of newlyUnlocked) {
-    awardXP(badge.xpBonus);
+  const totalBonus = newlyUnlocked.reduce((sum, badge) => sum + badge.xpBonus, 0);
+  if (totalBonus > 0) {
+    awardXP(totalBonus);
   }
 
   try {

@@ -6,6 +6,7 @@
 import { Rating, type Grade } from "ts-fsrs";
 import { getDatabase } from "./db";
 import { getGrammarScheduler, srsRowToCard } from "./srs";
+import { persistKeyNow } from "./storageBackup";
 import type { MistakeCategory } from "./ai";
 import { BOOK_CHAPTERS, getAllBookChapters, getKnownLessonIds } from "./grammarBook";
 
@@ -166,6 +167,7 @@ export function mistakeKey(wrong: string, right: string): string {
 
 type MistakesDb = Awaited<ReturnType<typeof getDatabase>>;
 let keyColumnReady: Promise<void> | null = null;
+let keysFilled = false;
 
 /**
  * Mistakes carry their normalized key in an indexed column, so a new one is found with one query instead of
@@ -189,12 +191,14 @@ export function ensureKeyColumn(db: MistakesDb): Promise<void> {
 }
 
 async function fillMissingKeys(db: MistakesDb): Promise<void> {
+  if (keysFilled) return;
   const rows = await db.select<Array<{ id: string; wrong_text: string; right_text: string }>>(
     `SELECT id, wrong_text, right_text FROM mistakes WHERE norm_key IS NULL`
   );
   for (const r of rows) {
     await db.execute(`UPDATE mistakes SET norm_key = $1 WHERE id = $2`, [mistakeKey(r.wrong_text, r.right_text), r.id]);
   }
+  keysFilled = true;
 }
 
 /**
@@ -387,5 +391,6 @@ export function standupUsedToday(now: Date = new Date()): number {
 export function recordStandupUse(now: Date = new Date()): void {
   try {
     localStorage.setItem(STANDUP_KEY, JSON.stringify({ day: todayKey(now), count: standupUsedToday(now) + 1 }));
+    persistKeyNow(STANDUP_KEY);
   } catch {}
 }

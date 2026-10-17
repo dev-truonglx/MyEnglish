@@ -132,12 +132,13 @@ export function cleanDistractors(item: GrammarBookItem, blankIndex: number): str
   return out;
 }
 
-function cleanWrongSentences(item: GrammarBookItem): string[] {
+function cleanWrongSentences(item: GrammarBookItem, full: string = fullSentence(item)): string[] {
   const accepted = acceptedAnswers(item)[0] ?? [];
+  const checkAgainst = full ? [full, ...accepted] : accepted;
   const out: string[] = [];
   for (const s of item.ai?.wrongSentences ?? []) {
     const v = String(s ?? "").trim();
-    if (!v || matchesAny(v, accepted) || out.some((o) => normalizeTypedText(o) === normalizeTypedText(v))) continue;
+    if (!v || matchesAny(v, checkAgainst) || out.some((o) => normalizeTypedText(o) === normalizeTypedText(v))) continue;
     out.push(v);
   }
   return out;
@@ -222,7 +223,7 @@ export function availableFormats(item: GrammarBookItem, setType: GrammarExercise
     // A "choose" item is typed only when its options cannot make a fair quiz
     if (setType !== "choose" || !hasOptions) formats.push("type");
   } else {
-    if (cleanWrongSentences(item).length > 0) formats.push("pick_sentence");
+    if (cleanWrongSentences(item, full).length > 0) formats.push("pick_sentence");
     if (sentenceTiles >= 3 && sentenceTiles <= MAX_SENTENCE_TILES + 4) formats.push("order");
     if (item.ai?.vi && sentenceTiles <= MAX_SENTENCE_TILES) formats.push("translate");
     formats.push("type");
@@ -285,24 +286,47 @@ export function buildTask(
       const options = shuffle([right, ...wrongOptions(item)], random);
       return { ...base, options, correctOption: options.indexOf(right) };
     }
-    // One option per combination of forms; each wrong option changes one blank
+    // One option per combination of forms; build up to 3 distinct wrong combinations across pools
     const correct = item.answers.map((a) => a[0]);
     const wrong: string[][] = [];
     const pools = Array.from({ length: blanks }, (_, i) => cleanDistractors(item, i));
-    for (let k = 0; k < 3; k++) {
-      const b = k % blanks;
-      const d = pools[b][Math.floor(k / blanks) % pools[b].length];
-      if (!d) continue;
-      const combo = [...correct];
-      combo[b] = d;
+    const addCombo = (combo: string[]) => {
+      if (wrong.length >= 3) return;
+      if (combo.join("|") === correct.join("|")) return;
       if (!wrong.some((w) => w.join("|") === combo.join("|"))) wrong.push(combo);
+    };
+    const maxPoolLen = Math.max(0, ...pools.map((p) => p.length));
+    for (let depth = 0; depth < maxPoolLen && wrong.length < 3; depth++) {
+      for (let b = 0; b < blanks && wrong.length < 3; b++) {
+        const d = pools[b][depth];
+        if (!d) continue;
+        const combo = [...correct];
+        combo[b] = d;
+        addCombo(combo);
+      }
+    }
+    // If single-blank substitutions yielded fewer than 3 wrong options (e.g. 2 blanks with 1 distractor each),
+    // combine distractors across multiple blanks
+    if (wrong.length < 3 && blanks >= 2) {
+      for (let b1 = 0; b1 < blanks && wrong.length < 3; b1++) {
+        for (let b2 = b1 + 1; b2 < blanks && wrong.length < 3; b2++) {
+          for (const d1 of pools[b1]) {
+            for (const d2 of pools[b2]) {
+              const combo = [...correct];
+              combo[b1] = d1;
+              combo[b2] = d2;
+              addCombo(combo);
+            }
+          }
+        }
+      }
     }
     const options = shuffle([correct, ...wrong].map((c) => c.join(COMBO_SEPARATOR)), random);
     return { ...base, options, correctOption: options.indexOf(correct.join(COMBO_SEPARATOR)) };
   }
 
   if (fmt === "pick_sentence") {
-    const options = shuffle([full, ...cleanWrongSentences(item).slice(0, 3)], random);
+    const options = shuffle([full, ...cleanWrongSentences(item, full).slice(0, 3)], random);
     return { ...base, options, correctOption: options.indexOf(full) };
   }
 

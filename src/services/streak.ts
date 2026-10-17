@@ -165,6 +165,7 @@ export function getDailyGoal(): number {
 export function setDailyGoal(goal: number): void {
   try {
     localStorage.setItem(GOAL_STORAGE_KEY, String(Math.max(1, goal)));
+    persistKeyNow(GOAL_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
   } catch (err) {
     console.warn("Failed to save daily goal:", err);
@@ -186,6 +187,7 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
     const logs = getActivityLogs();
     const today = getLocalDateString();
     for (const w of words) {
+      if (w.catalog_id != null && !w.srs?.last_review && !((w.srs?.reps ?? 0) > 0)) continue;
       if (!w.created_at) continue;
       const d = new Date(w.created_at);
       if (isNaN(d.getTime())) continue;
@@ -196,6 +198,8 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
     }
     localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
     localStorage.setItem(CREATED_AT_BACKFILL_KEY, "1");
+    persistKeyNow(REVIEWS_STORAGE_KEY);
+    persistKeyNow(CREATED_AT_BACKFILL_KEY);
   } catch {}
 }
 

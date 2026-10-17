@@ -97,8 +97,12 @@ export function useFocusSession(plan: FocusPlan | null): FocusSessionState {
     };
     const onVisibility = () => (document.hidden ? onAway() : onBack());
     // Any input counts as studying; it also ends an idle pause
-    const onInput = () => {
-      lastInputRef.current = Date.now();
+    const onInput = (e: Event) => {
+      const now = Date.now();
+      if (e.type === "pointermove" && pausedRef.current !== "idle" && now - lastInputRef.current < 1000) {
+        return;
+      }
+      lastInputRef.current = now;
       if (pausedRef.current === "idle") resume();
     };
     window.addEventListener("blur", onAway);

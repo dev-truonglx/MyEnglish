@@ -4,6 +4,7 @@
  * pronunciation, settings, streak, XP and badges are kept.
  */
 import { getDatabase } from "./db";
+import { WORD_KEY_SQL } from "./sync/keys";
 
 /** localStorage keys that describe the old words (cleared in app_kv too, or the startup restore brings them back) */
 const VOCAB_KEYS = [
@@ -27,6 +28,14 @@ export async function needsVocabMigration(): Promise<boolean> {
 
 export async function resetVocabulary(): Promise<void> {
   const db = await getDatabase();
+  await db
+    .execute(
+      `INSERT INTO sync_tombstones (kind, key, at)
+       SELECT 'word', ${WORD_KEY_SQL}, $1 FROM words w WHERE w.catalog_id IS NULL
+       ON CONFLICT(kind, key) DO UPDATE SET at = excluded.at`,
+      [new Date().toISOString()]
+    )
+    .catch(() => {});
   for (const sql of [
     `DELETE FROM review_logs`,
     `DELETE FROM srs_production`,

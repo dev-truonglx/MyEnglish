@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Lightbulb, Loader2, Sparkles } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import { generateSmartMnemonic, getStoredMnemonic, saveMnemonic } from "@/services/aiMnemonic";
@@ -18,29 +18,41 @@ export default function MnemonicPanel({
   const [loadingMnemonic, setLoadingMnemonic] = useState(false);
   const [aid, setAid] = useState<MemoryAid | null>(null);
   const [aiState, setAiState] = useState<"idle" | "loading" | "error">("idle");
+  const currentWordIdRef = useRef(currentWord.id);
+  currentWordIdRef.current = currentWord.id;
 
   // A word forgotten again and again needs new hooks (new situations, a tip, the word it is confused
   // with), not a harder exercise. The new sentences become examples for the next reviews.
   const makeMemoryAid = async () => {
+    const wordId = currentWord.id;
+    const wordText = currentWord.word;
+    const meaningVn = currentWord.meaning_vn;
     setAiState("loading");
     try {
-      const result = await generateMemoryAidWithAI(currentWord.word, currentWord.meaning_vn, await getActiveCefrLevel());
+      const result = await generateMemoryAidWithAI(wordText, meaningVn, await getActiveCefrLevel());
       for (const ex of result.examples) {
-        await addUserContextExample(currentWord.id, ex.sentence_en, ex.sentence_vn, "ai_memory_aid").catch(() => false);
+        await addUserContextExample(wordId, ex.sentence_en, ex.sentence_vn, "ai_memory_aid").catch(() => false);
       }
       if (result.tipVn) {
-        saveMnemonic(currentWord.id, `💡 ${result.tipVn}`, currentWord.meaning_vn);
-        setMnemonic(`💡 ${result.tipVn}`);
+        saveMnemonic(wordId, `💡 ${result.tipVn}`, meaningVn);
+        if (currentWordIdRef.current === wordId) {
+          setMnemonic(`💡 ${result.tipVn}`);
+        }
       }
+      if (currentWordIdRef.current !== wordId) return;
       setAid(result);
       setAiState("idle");
     } catch {
-      setAiState("error");
+      if (currentWordIdRef.current === wordId) {
+        setAiState("error");
+      }
     }
   };
 
   useEffect(() => {
     let mounted = true;
+    setAid(null);
+    setAiState("idle");
     const existing = getStoredMnemonic(currentWord.id, currentWord.meaning_vn);
     if (existing) {
       setMnemonic(existing);

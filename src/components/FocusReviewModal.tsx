@@ -41,6 +41,7 @@ import {
   markWordKnown,
   schedulingDecision,
 } from "@/services/reviewRecorder";
+import { setPopupSessionActive } from "@/services/activeSession";
 import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
 import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors, loadCatalogMeanings } from "@/services/vocabCatalog";
@@ -237,6 +238,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const pendingSaveRef = useRef<Promise<unknown>>(Promise.resolve());
   const trackSave = <T,>(save: Promise<T>): Promise<T> => {
     pendingSaveRef.current = Promise.allSettled([pendingSaveRef.current, save]);
+    // Still answering: keeps the reminder worker away (the flag goes stale without answers)
+    if (!isPreview) setPopupSessionActive(true);
     return save;
   };
   // Feedback of an answer saved after a delay is shown only while that item (not a later one, nor its retry
@@ -303,6 +306,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     if (summary) {
       summaryShownRef.current = true;
       sessionOpenRef.current = false;
+      if (!isPreview) setPopupSessionActive(false);
       playSound("complete");
     }
   }, [summary]);
@@ -491,11 +495,12 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   );
 
   // The reading time of the intro starts when it appears (after the guess, if any)
+  const markingKnownRef = useRef(false);
   useEffect(() => {
     if (showIntro && !pretest) introShownAtRef.current = Date.now();
   }, [showIntro, introKey, !!pretest]);
   const finishIntro = useCallback(() => {
-    if (!currentWord) return;
+    if (!currentWord || markingKnownRef.current) return;
     setIntroduced((prev) => new Set(prev).add(introKey));
     introducedAtRef.current.set(introKey, Date.now());
     recordIntro(currentWord).catch(() => {});
@@ -528,6 +533,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       clearTimeout(snoozeTimerRef.current);
       snoozeTimerRef.current = null;
     }
+    markingKnownRef.current = false;
     closingRef.current = false;
     loadSeqRef.current++;
     sessionLoadedRef.current = false;
@@ -562,6 +568,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       clearTimeout(snoozeTimerRef.current);
       snoozeTimerRef.current = null;
     }
+    window.speechSynthesis?.cancel?.();
     // The answer given last may still be saving: the badges and the streak should count it
     await pendingSaveRef.current;
     // Closed before the end of the session (the summary was not reached)
@@ -571,6 +578,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       checkBadges(false);
     }
     sessionOpenRef.current = false;
+    if (!isPreview) setPopupSessionActive(false);
     if (onClose) onClose();
     if (!isPreview) {
       await hideReviewPopup();
@@ -584,6 +592,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     // Already snoozing: a second press must not log or schedule again
     if (closingRef.current) return;
     closingRef.current = true;
+    window.speechSynthesis?.cancel?.();
     if (advanceTimerRef.current) {
       clearTimeout(advanceTimerRef.current);
       advanceTimerRef.current = null;
@@ -642,10 +651,15 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   /** A brand-new word the learner already knows: scheduled as Easy without a quiz, outside the daily budget */
   const markIntroKnown = useCallback(async () => {
-    if (!currentWord) return;
-    setIntroduced((prev) => new Set(prev).add(introKey));
-    await markWordKnown(currentWord.id).catch(() => false);
-    advanceNextItem();
+    if (!currentWord || markingKnownRef.current) return;
+    markingKnownRef.current = true;
+    try {
+      setIntroduced((prev) => new Set(prev).add(introKey));
+      await markWordKnown(currentWord.id).catch(() => false);
+      advanceNextItem();
+    } finally {
+      markingKnownRef.current = false;
+    }
   }, [currentWord, introKey, advanceNextItem]);
 
   // Load review queue: song song từ vựng và ngữ pháp theo thuật toán Spaced Repetition & Interleaving
@@ -799,6 +813,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       setCurrentIndex(0);
       summaryShownRef.current = false;
       sessionOpenRef.current = finalQueue.length > 0;
+      if (!isPreview) setPopupSessionActive(finalQueue.length > 0);
       if (finalQueue.length > 0) logLearningEvent("popup_shown", { meta: { items: finalQueue.length } });
       setIsAnswered(false);
       setSelectedChoiceId(null);
@@ -887,6 +902,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
     return () => {
       isCancelled = true;
+      window.speechSynthesis?.cancel?.();
+      if (!isPreview) setPopupSessionActive(false);
       if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
       if (snoozeTimerRef.current) clearTimeout(snoozeTimerRef.current);
       if (unlistenFn) unlistenFn();
@@ -1225,9 +1242,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         if (e.key !== "s" && e.key !== "S") return;
       }
 
+      const targetTag = (e.target as HTMLElement | null)?.tagName;
+      const inTextInput = targetTag === "INPUT" || targetTag === "TEXTAREA";
+
       if (
         (e.key === "s" || e.key === "S") &&
-        activeMode === "multiple_choice" &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !inTextInput &&
+        (showIntro || activeMode !== "typing") &&
         !isAnswered
       ) {
         e.preventDefault();

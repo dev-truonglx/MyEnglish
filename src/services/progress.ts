@@ -4,6 +4,7 @@
  */
 import type { CardDirection, WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
+import { isKnownOnly } from "./smartReview";
 import { getFSRSSettings, getStudyLimits } from "./srs";
 
 /** A word counts as "nhớ chắc" (known for the long run) from this stability, in days */
@@ -15,9 +16,10 @@ export const MIN_RETENTION_SAMPLE = 20;
 /**
  * The word had at least one real answer: a word only marked "Đã biết" (its single log is 'known', which
  * `stats` leaves out) is not counted as studied in levels, coverage or statistics. Words without `stats`
- * (built in memory) count as reviewed.
+ * (built in memory) count as reviewed if they have FSRS review evidence and are not marked known-only.
  */
 export function hasRealReview(w: WordDetail): boolean {
+  if (isKnownOnly(w.srs)) return false;
   return (w.stats?.totalAttempts ?? 1) > 0;
 }
 

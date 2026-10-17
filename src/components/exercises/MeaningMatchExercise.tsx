@@ -4,6 +4,7 @@ import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareMeaningMatch, type MeaningMatchPair } from "@/services/smartReview";
+import { playWrongTry } from "@/services/sound";
 
 interface MeaningMatchExerciseProps {
   word: WordDetail;
@@ -55,9 +56,11 @@ export default function MeaningMatchExercise({
 
   // Pending completion timer, cleared on unmount so a stale card is never graded
   const completeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wrongFlashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     return () => {
       if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
+      if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
     };
   }, []);
 
@@ -88,9 +91,14 @@ export default function MeaningMatchExercise({
       return;
     }
     if (wordId === word.id || meaningId === word.id) setTargetMistakes((n) => n + 1);
+    playWrongTry();
     setWrongFlash({ wordId, meaningId });
     setSelectedWordId(null);
-    setTimeout(() => setWrongFlash(null), 600);
+    if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
+    wrongFlashTimerRef.current = setTimeout(() => {
+      wrongFlashTimerRef.current = null;
+      setWrongFlash(null);
+    }, 600);
   };
 
   const handleGiveUp = () => {

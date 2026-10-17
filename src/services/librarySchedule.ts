@@ -29,7 +29,7 @@ const dateStr = (d: Date) =>
   d.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export function isNeverStudied(word: WordDetail): boolean {
-  return (!word.srs.reps && !word.srs.repetitions) || word.srs.repetitions === 0;
+  return (word.srs.reps ?? word.srs.repetitions ?? 0) === 0;
 }
 
 export function librarySchedule(word: WordDetail, now: Date = new Date()): LibrarySchedule {

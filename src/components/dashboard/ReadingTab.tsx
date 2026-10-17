@@ -82,8 +82,31 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
     setReading(null);
   }, [resetKey]);
 
+  const lastAnalyzedRef = useRef<{
+    text: string;
+    words: typeof words;
+    knownCommon: ReadonlySet<string>;
+    result: ReadingAnalysis;
+  } | null>(null);
+
+  const getAnalysis = (cleanText: string): ReadingAnalysis => {
+    const cached = lastAnalyzedRef.current;
+    if (
+      cached &&
+      cached.text === cleanText &&
+      cached.words === words &&
+      cached.knownCommon === knownCommon
+    ) {
+      return cached.result;
+    }
+    const result = analyzeText(cleanText, words, knownCommon);
+    lastAnalyzedRef.current = { text: cleanText, words, knownCommon, result };
+    return result;
+  };
+
   const analysis: ReadingAnalysis | null = useMemo(
-    () => (reading ? analyzeText(reading, words, knownCommon) : null),
+    () => (reading ? getAnalysis(reading) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [reading, words, knownCommon]
   );
 
@@ -91,10 +114,11 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
     const clean = text.slice(0, MAX_CHARS).trim();
     if (!clean) return;
     saveDraft(clean);
+    const computed = getAnalysis(clean);
     setReading(clean);
     setPicked(new Map());
     setSavedSentences(new Set());
-    const met = logEncounters(analyzeText(clean, words, knownCommon).bankHits);
+    const met = logEncounters(computed.bankHits);
     if (met > 0) {
       showMessage(
         `Bạn gặp lại ${met} từ đang học trong bài này. Gặp từ trong văn bản thật giúp bạn hiểu cách dùng của nó.`,

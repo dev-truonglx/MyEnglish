@@ -49,6 +49,8 @@ function Tile({ label, value, sub }: { label: string; value: ReactNode; sub?: Re
   );
 }
 
+const FORGOTTEN_PAGE_SIZE = 40;
+
 /**
  * "Từ hay quên": the words the learner keeps getting wrong (see services/forgottenWords), why, one button to
  * review them, the ones won back, the suspended ones, and the leech settings (moved here from Tiến độ).
@@ -59,11 +61,16 @@ export default function ForgottenTab({ onStartSession, onStartFocus, onRefreshWo
   const [data, setData] = useState<ForgottenWords | null>(null);
   const [view, setView] = useState<View>("active");
   const [sort, setSort] = useState<Sort>("score");
+  const [visibleCount, setVisibleCount] = useState(FORGOTTEN_PAGE_SIZE);
   const [leechSettings, setLeechSettings] = useState<LeechSettings>(getLeechSettings);
   const [showSettings, setShowSettings] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [mnemonic, setMnemonic] = useState<{ id: string; text: string | null } | null>(null);
   const mnemonicFor = useRef<string | null>(null);
+
+  useEffect(() => {
+    setVisibleCount(FORGOTTEN_PAGE_SIZE);
+  }, [view, sort]);
 
   useEffect(() => {
     let stale = false;
@@ -82,6 +89,9 @@ export default function ForgottenTab({ onStartSession, onStartFocus, onRefreshWo
     if (view === "active" && sort === "recent") entries.sort((a, b) => (b.stats?.lastWrongAt ?? 0) - (a.stats?.lastWrongAt ?? 0));
     return entries;
   }, [data, view, sort]);
+
+  const visibleList = useMemo(() => list.slice(0, visibleCount), [list, visibleCount]);
+  const remainingCount = Math.max(0, list.length - visibleList.length);
 
   const sessionWords = useMemo(() => (data ? pickSessionWords(data.active) : []), [data]);
   const recoveredRecently = data ? data.recovered.filter((e) => e.stats?.lastWrongAt != null).length : 0;
@@ -238,29 +248,42 @@ export default function ForgottenTab({ onStartSession, onStartFocus, onRefreshWo
               : "Không có từ nào đang tạm ngưng."}
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-          {list.map((e) => (
-            <ForgottenRow
-              key={e.word.id}
-              entry={e}
-              mnemonic={mnemonic?.id === e.word.id ? mnemonic.text : undefined}
-              onOpen={() => setSelectedWord(e.word)}
-              onReview={() => onStartSession([e.word])}
-              onMnemonic={() => showMnemonic(e.word)}
-              onSuspend={(on) => suspend(e.word, on)}
-              onRegenerate={
-                AI_VOCAB_ENABLED
-                  ? () =>
-                      pipeline
-                        .enqueue(e.word.word)
-                        .then((res) =>
-                          setMessage(res.accepted ? `AI đang tạo lại nghĩa & ví dụ mới cho "${e.word.word}"...` : `Không thể phân tích lại: ${res.reason}`)
-                        )
-                  : undefined
-              }
-            />
-          ))}
-        </div>
+        <>
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            {visibleList.map((e) => (
+              <ForgottenRow
+                key={e.word.id}
+                entry={e}
+                mnemonic={mnemonic?.id === e.word.id ? mnemonic.text : undefined}
+                onOpen={() => setSelectedWord(e.word)}
+                onReview={() => onStartSession([e.word])}
+                onMnemonic={() => showMnemonic(e.word)}
+                onSuspend={(on) => suspend(e.word, on)}
+                onRegenerate={
+                  AI_VOCAB_ENABLED
+                    ? () =>
+                        pipeline
+                          .enqueue(e.word.word)
+                          .then((res) =>
+                            setMessage(res.accepted ? `AI đang tạo lại nghĩa & ví dụ mới cho "${e.word.word}"...` : `Không thể phân tích lại: ${res.reason}`)
+                          )
+                    : undefined
+                }
+              />
+            ))}
+          </div>
+          {remainingCount > 0 && (
+            <div className="flex justify-center pt-2">
+              <button
+                type="button"
+                onClick={() => setVisibleCount((c) => c + FORGOTTEN_PAGE_SIZE)}
+                className="px-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-slate-50 dark:hover:bg-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-200 transition-colors"
+              >
+                Xem thêm ({remainingCount} từ còn lại)
+              </button>
+            </div>
+          )}
+        </>
       )}
 
       {/* Leech settings (were at the bottom of Tiến độ) */}

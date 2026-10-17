@@ -89,6 +89,10 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     // If algorithm prefers micro-quiz and question exists, switch directly to quiz
     if (next.microQuiz && next.motivation?.isMicroQuizPreferred) {
       setMode("quiz");
+      const duration = Math.max(next.autoOpenSeconds, QUIZ_COUNTDOWN_SECONDS);
+      deadlineRef.current = Date.now() + duration * 1000;
+      setSecondsLeft(duration);
+      setCountdownTotal(duration);
       // Opened by itself: the answer time starts when the learner reaches the card (first hover), not when
       // it appeared while they were busy elsewhere, or a correct answer would be graded slow (Hard)
       quizStartTimeRef.current = 0;
@@ -140,6 +144,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
 
   // Switch to quiz mode manually
   const switchToQuiz = () => {
+    if (actedRef.current) return;
     if (payload.microQuiz) {
       setMode("quiz");
       quizStartTimeRef.current = Date.now();

@@ -19,8 +19,10 @@ export function supabaseTransport(client: SupabaseClient, userId: string): SyncT
       const { data, error } = await client
         .from("sync_rows")
         .select("kind, key, data, ts, updated_at")
-        .gt("updated_at", since)
+        .gte("updated_at", since)
         .order("updated_at", { ascending: true })
+        .order("kind", { ascending: true })
+        .order("key", { ascending: true })
         .limit(limit);
       fail("sync_pull", error);
       return (data ?? []) as PulledRow[];

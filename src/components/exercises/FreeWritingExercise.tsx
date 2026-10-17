@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { PenLine, Sparkles, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
@@ -30,6 +30,15 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
   const [hintShown, setHintShown] = useState(false);
   const [rating, setRating] = useState<Rating | null>(null);
   const [savedMistakes, setSavedMistakes] = useState(0);
+
+  useEffect(() => {
+    setSentence("");
+    setGrading(false);
+    setGrade(null);
+    setHintShown(false);
+    setRating(null);
+    setSavedMistakes(0);
+  }, [word.id]);
 
   const submit = async () => {
     if (grading || grade || sentence.trim().length < 3) return;

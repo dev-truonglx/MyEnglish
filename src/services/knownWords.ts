@@ -75,7 +75,7 @@ export async function checkKnownNow(wordIds: readonly string[], now: Date = new 
   for (let i = 0; i < wordIds.length; i += 400) {
     const chunk = wordIds.slice(i, i + 400);
     const res = await db.execute(
-      `UPDATE srs_reviews SET next_review_date = $1
+      `UPDATE srs_reviews SET next_review_date = $1, last_review = $1
        WHERE word_id IN (${chunk.map((_, k) => `$${k + 2}`).join(", ")})
          AND state = 2 AND reps = 1 AND COALESCE(lapses, 0) = 0`,
       [now.toISOString(), ...chunk]

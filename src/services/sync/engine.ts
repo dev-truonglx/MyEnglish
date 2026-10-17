@@ -159,20 +159,31 @@ export async function syncNow(transport: SyncTransport, userId: string): Promise
   const cursor = await getSyncState("pull");
   let since = cursor ? new Date(Date.parse(cursor) - PULL_OVERLAP_MS).toISOString() : EPOCH;
   let deferred: SyncRow[] = await readDeferred();
+  const seen = new Set<string>();
   for (;;) {
     const page = await transport.pull(since, PULL_PAGE);
     if (page.length === 0) break;
-    const result = await applyRows(page, await context());
-    report.pulled += page.length;
-    report.applied += result.applied;
-    if (result.deferred.length > 0) {
-      deferred = deferred.concat(result.deferred);
-      // Saved before the cursor moves past them: a crash before the retry below must not lose them
-      await writeDeferred(deferred);
+    const fresh: typeof page = [];
+    for (const r of page) {
+      const id = `${r.kind}:${r.key}@${r.updated_at}`;
+      if (!seen.has(id)) {
+        seen.add(id);
+        fresh.push(r);
+      }
+    }
+    if (fresh.length > 0) {
+      const result = await applyRows(fresh, await context());
+      report.pulled += fresh.length;
+      report.applied += result.applied;
+      if (result.deferred.length > 0) {
+        deferred = deferred.concat(result.deferred);
+        // Saved before the cursor moves past them: a crash before the retry below must not lose them
+        await writeDeferred(deferred);
+      }
     }
     const last = page[page.length - 1].updated_at;
     await setSyncState("pull", last);
-    if (page.length < PULL_PAGE || last === since) break;
+    if (page.length < PULL_PAGE || (last === since && fresh.length === 0)) break;
     since = last;
   }
   if (deferred.length > 0) {
@@ -216,12 +227,13 @@ async function writeDeferred(rows: SyncRow[]): Promise<void> {
  * copy kept from earlier passes (the totals need all of them).
  */
 async function pullXpChanges(transport: SyncTransport): Promise<XpRow[]> {
-  const cursor = await getSyncState("xp_pull");
+  let cursor = await getSyncState("xp_pull");
   let cache: Record<string, XpRow> = {};
   try {
     cache = cursor ? (JSON.parse((await getSyncState("xp_remote")) ?? "{}") as Record<string, XpRow>) : {};
   } catch {
     cache = {};
+    cursor = null;
   }
   const since = cursor ? new Date(Date.parse(cursor) - PULL_OVERLAP_MS).toISOString() : null;
   const rows = await transport.pullXp(since);

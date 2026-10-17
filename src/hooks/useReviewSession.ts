@@ -207,8 +207,15 @@ export function useReviewSession({
   // Praise for a word reaching long-term memory or remembered just before fading (shown a few seconds)
   const [celebration, setCelebration] = useState<Celebration | null>(null);
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const xpPopupTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shakeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reviewCountRef = useRef(0);
+  const consecutiveCorrectRef = useRef(0);
+  const leechesSlainRef = useRef(0);
   useEffect(() => () => {
     if (celebrationTimerRef.current) clearTimeout(celebrationTimerRef.current);
+    if (xpPopupTimerRef.current) clearTimeout(xpPopupTimerRef.current);
+    if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
   }, []);
   // Was the daily goal already reached when the session started (answers given elsewhere, or a practice
   // session with nothing left due)? Then finishing it is no first time today, and no confetti.
@@ -325,6 +332,10 @@ export function useReviewSession({
       topicMasterCount: Math.max(0, ...masteredByTopic.values()),
     };
   }, [distractorPool, wordsToReview]);
+  const knownWordStrings = useMemo(
+    () => (distractorPool ?? wordsToReview).map((w) => w.word),
+    [distractorPool, wordsToReview]
+  );
   const currentWord = queue[currentIndex];
   const currentKey = currentWord ? `${currentWord.id}:${currentWord.direction}` : "";
 
@@ -437,6 +448,14 @@ export function useReviewSession({
   };
 
   const resetCardState = () => {
+    if (xpPopupTimerRef.current) {
+      clearTimeout(xpPopupTimerRef.current);
+      xpPopupTimerRef.current = null;
+    }
+    if (shakeTimerRef.current) {
+      clearTimeout(shakeTimerRef.current);
+      shakeTimerRef.current = null;
+    }
     setIsFlipped(false);
     setUserInput("");
     setHasCheckedAnswer(false);
@@ -489,7 +508,7 @@ export function useReviewSession({
     recordIntro(currentWord).catch(() => {});
     // Focus session out of time: the introduction was the last card (its quiz comes in a later session)
     if (stopAfterCurrentRef.current) {
-      endSession(reviewCount);
+      endSession(reviewCountRef.current);
       return;
     }
     const insertAt = requeuePosition(queue.length, currentIndex, INTRO_GAP);
@@ -506,7 +525,7 @@ export function useReviewSession({
    * budget) and the next waiting word takes its place in the session.
    */
   const handleIntroKnown = async () => {
-    if (!currentWord || !canMarkKnown || gradingLockRef.current) return;
+    if (!currentWord || !canMarkKnown || gradingLockRef.current || sessionCompleted || sessionEndedRef.current) return;
     gradingLockRef.current = true;
     const word = currentWord;
     introducedAtRef.current.set(currentKey, Date.now());
@@ -515,19 +534,25 @@ export function useReviewSession({
       return false;
     });
     if (!marked) console.warn("Word was not marked as known:", word.id);
-    const replacement = await nextWaitingWord(queue.map((c) => c.id)).catch((err) => {
+    const replacement = await nextWaitingWord(queueRef.current.map((c) => c.id)).catch((err) => {
       console.warn("Failed to find a replacement for a known word:", err);
       return null;
     });
-    const rest = queue.filter((c, i) => i <= currentIndex || c.id !== word.id);
+    if (sessionEndedRef.current) {
+      gradingLockRef.current = false;
+      return;
+    }
+    const rest = queueRef.current.filter((c, i) => i <= currentIndex || c.id !== word.id);
     const nextQueue = replacement ? [...rest, toCard(replacement, "recognition")] : rest;
+    queueRef.current = nextQueue;
     setQueue((prev) => {
       const kept = prev.filter((c, i) => i <= currentIndex || c.id !== word.id);
       return replacement ? [...kept, toCard(replacement, "recognition")] : kept;
     });
     // Nothing left after this card: end the session the way the last answer does (advance), instead of
     // moving past the end of the queue with no summary
-    advance({ nextQueueLength: nextQueue.length, reviewCountAfter: reviewCount });
+    resetCardState();
+    advance({ nextQueueLength: nextQueue.length, reviewCountAfter: reviewCountRef.current });
   };
 
   // Exercises report their own attempts; the FSRS grade is derived centrally.
@@ -607,6 +632,11 @@ export function useReviewSession({
       return null;
     }
 
+    const nextReviewCount = reviewCountRef.current + 1;
+    reviewCountRef.current = nextReviewCount;
+    const nextConsecutive = rating === Rating.Again ? 0 : consecutiveCorrectRef.current + 1;
+    consecutiveCorrectRef.current = nextConsecutive;
+
     try {
       // Track statistics (only the first time a word is shown in this session)
       if (!isRequeuedCard) {
@@ -618,7 +648,7 @@ export function useReviewSession({
           setSessionStats((prev) => ({ ...prev, retryCorrect: prev.retryCorrect + 1 }));
         }
       }
-      setConsecutiveCorrect((prev) => (rating === Rating.Again ? 0 : prev + 1));
+      setConsecutiveCorrect(nextConsecutive);
 
       // Still studying: keeps reminders away (the flag goes stale without answers)
       setMainSessionActive(true);
@@ -645,17 +675,21 @@ export function useReviewSession({
         }));
       }
       if (result) setLastResult(result);
-      setReviewCount((prev) => prev + 1);
+      setReviewCount(nextReviewCount);
 
       const xpReward = recorded.xp;
+      const leechSlainDelta = xpReward.totalXP > 0 && wordIsLeech && scheduled && rating >= Rating.Good ? 1 : 0;
+      const nextLeechesSlain = leechesSlainRef.current + leechSlainDelta;
+      leechesSlainRef.current = nextLeechesSlain;
       if (xpReward.totalXP > 0) {
         setLastXPReward(xpReward);
         setShowXPPopup(true);
-        setTimeout(() => setShowXPPopup(false), 1500);
+        if (xpPopupTimerRef.current) clearTimeout(xpPopupTimerRef.current);
+        xpPopupTimerRef.current = setTimeout(() => setShowXPPopup(false), 1500);
         setSessionStats((prev) => ({
           ...prev,
           totalXPEarned: prev.totalXPEarned + xpReward.totalXP,
-          leechesSlain: prev.leechesSlain + (wordIsLeech && scheduled && rating >= Rating.Good ? 1 : 0),
+          leechesSlain: nextLeechesSlain,
         }));
       }
       setXpState(getXPState());
@@ -665,9 +699,9 @@ export function useReviewSession({
         if (rating >= Rating.Good && attemptCount === 0) recordFirstTryCorrect();
         checkAndUnlockAchievements({
           ...collectionStats,
-          consecutiveCorrect: rating >= Rating.Good ? consecutiveCorrect + 1 : 0,
-          sessionReviewCount: reviewCount + 1,
-          leechesSlain: sessionStats.leechesSlain + (wordIsLeech && rating >= Rating.Good ? 1 : 0),
+          consecutiveCorrect: rating >= Rating.Good ? nextConsecutive : 0,
+          sessionReviewCount: nextReviewCount,
+          leechesSlain: nextLeechesSlain,
           responseTimeMs,
           isCorrect: rating >= Rating.Good,
         });
@@ -697,7 +731,7 @@ export function useReviewSession({
       setQueue((prev) => [...prev, card]);
       nextQueueLength += 1;
     }
-    return { nextQueueLength, reviewCountAfter: reviewCount + 1 };
+    return { nextQueueLength, reviewCountAfter: nextReviewCount };
   };
 
   /**
@@ -759,7 +793,10 @@ export function useReviewSession({
    * End now ("Xong" in a focus session). An answer still on screen was recorded when it was given (holdAnswer),
    * so nothing is lost.
    */
-  const finishNow = () => endSession(reviewCount);
+  const finishNow = async () => {
+    const recorded = pendingRecordRef.current ? await pendingRecordRef.current.catch(() => null) : null;
+    endSession(recorded ? recorded.reviewCountAfter : reviewCountRef.current);
+  };
 
   /** Record an answer and go to the next card right away (flip grades, skip, free writing) */
   const handleGrade = async (
@@ -797,7 +834,8 @@ export function useReviewSession({
     if (!currentWord || hasCheckedAnswer || isAdvancing || answerLockedRef.current) return;
     if (!userInput.trim()) {
       setIsShaking(true);
-      setTimeout(() => setIsShaking(false), 350);
+      if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+      shakeTimerRef.current = setTimeout(() => setIsShaking(false), 350);
       setFeedbackMessage({
         text: "Vui lòng nhập từ trước khi nhấn Enter!",
         type: "info",
@@ -813,7 +851,7 @@ export function useReviewSession({
       userInput,
       currentWord.word,
       clozeSentence,
-      (distractorPool ?? wordsToReview).map((w) => w.word)
+      knownWordStrings
     );
     const matched = match !== "wrong";
 
@@ -881,7 +919,8 @@ export function useReviewSession({
       setIsCorrect(false);
       playWrongTry();
       setIsShaking(true);
-      setTimeout(() => setIsShaking(false), 350);
+      if (shakeTimerRef.current) clearTimeout(shakeTimerRef.current);
+      shakeTimerRef.current = setTimeout(() => setIsShaking(false), 350);
 
       setSessionStats((prev) => ({
         ...prev,

@@ -411,6 +411,14 @@ fn ensure_macos_app_registered() {
     }
 }
 
+struct AtomicBoolGuard(&'static AtomicBool);
+
+impl Drop for AtomicBoolGuard {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
 #[tauri::command]
 fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Result<bool, String> {
     let now = SystemTime::now()
@@ -434,8 +442,10 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
 
         // If an earlier notification is still waiting for a click, don't park another thread forever
         let wait_for_click = !NOTIFICATION_WAITING.swap(true, Ordering::SeqCst);
+        let waiting_guard = wait_for_click.then(|| AtomicBoolGuard(&NOTIFICATION_WAITING));
 
         std::thread::spawn(move || {
+            let _waiting_guard = waiting_guard;
             let mut notif = mac_notification_sys::Notification::new();
             // No sound: it would ring out in meetings and screen shares, which are only partly detected (N20)
             notif.title(&title_c)
@@ -444,9 +454,7 @@ fn send_desktop_notification(app: AppHandle, title: String, body: String) -> Res
                 .wait_for_click(wait_for_click);
 
             let response = notif.send();
-            if wait_for_click {
-                NOTIFICATION_WAITING.store(false, Ordering::SeqCst);
-            }
+            drop(_waiting_guard);
             if let Err(e) = &response {
                 eprintln!("[Notification] send failed: {:?}", e);
             }
@@ -1007,6 +1015,9 @@ fn hide_and_release(window: &tauri::WebviewWindow) {
         }
         if let Some(window) = app.get_webview_window(&label) {
             if !window.is_visible().unwrap_or(false) {
+                if release_gen(&label).load(Ordering::SeqCst) != gen {
+                    return;
+                }
                 let _ = window.destroy();
             }
         }
@@ -1068,7 +1079,20 @@ fn take_review_nudge_payload() -> Option<serde_json::Value> {
 #[tauri::command]
 fn is_cursor_over_nudge(app: AppHandle) -> bool {
     let Some(window) = app.get_webview_window(REVIEW_NUDGE) else { return false };
-    let (Ok(cursor), Ok(pos), Ok(size)) = (window.cursor_position(), window.outer_position(), window.outer_size()) else {
+    let (Ok(pos), Ok(size)) = (window.outer_position(), window.outer_size()) else {
+        return false;
+    };
+    #[cfg(target_os = "macos")]
+    if let Some(cursor) = macos_cursor::get_global_cursor_pos() {
+        let scale = window.scale_factor().ok().filter(|&s| s > 0.0).unwrap_or(1.0);
+        let origin = pos.to_logical::<f64>(scale);
+        let bounds = size.to_logical::<f64>(scale);
+        return cursor.x >= origin.x
+            && cursor.x < origin.x + bounds.width
+            && cursor.y >= origin.y
+            && cursor.y < origin.y + bounds.height;
+    }
+    let Ok(cursor) = window.cursor_position() else {
         return false;
     };
     cursor.x >= pos.x as f64
@@ -2127,11 +2151,10 @@ async fn compute_fsrs_parameters(items: Vec<FsrsItemInput>) -> Result<FsrsOptimi
     if OPTIMIZING.swap(true, Ordering::SeqCst) {
         return Err("Đang tối ưu tham số, vui lòng đợi lượt trước xong".to_string());
     }
-    let result = tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
+    let _guard = AtomicBoolGuard(&OPTIMIZING);
+    tauri::async_runtime::spawn_blocking(move || optimize_fsrs_parameters(&items))
         .await
-        .map_err(|e| format!("Task execution failed: {}", e));
-    OPTIMIZING.store(false, Ordering::SeqCst);
-    result?
+        .map_err(|e| format!("Task execution failed: {}", e))?
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]

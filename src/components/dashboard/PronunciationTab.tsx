@@ -54,9 +54,10 @@ function useShortcuts(handler: (e: KeyboardEvent) => boolean | void) {
       const el = e.target instanceof HTMLElement ? e.target : null;
       if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.tagName === "SELECT" || el.isContentEditable)) return;
       if (document.querySelector('[aria-modal="true"]')) return;
+      const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      if (e.key === "Enter" && active && (active.tagName === "BUTTON" || active.tagName === "A")) return;
       if (ref.current(e)) {
         e.preventDefault();
-        if (document.activeElement instanceof HTMLButtonElement) document.activeElement.blur();
       }
     };
     window.addEventListener("keydown", onKey);

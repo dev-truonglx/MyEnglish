@@ -16,7 +16,6 @@ import { AI_VOCAB_ENABLED } from "@/services/features";
 import { countWaitingWords, getStudyLevels, hasChosenStudyLevels, topUpNewWords, syncWordsWithCatalog } from "@/services/vocabFeed";
 import { ensureCatalogSeeded, loadCatalogDistractors } from "@/services/vocabCatalog";
 import { ensureGrammarBookSeeded } from "@/services/grammarBook";
-import { ensureReleaseMigrationV27 } from "@/services/releaseMigration";
 import { hasChosenInitialTenses } from "@/services/grammarPath";
 import { needsVocabMigration } from "@/services/vocabReset";
 import { isSimpleMode } from "@/services/learnerProfile";
@@ -261,14 +260,6 @@ export default function MainDashboard({
   };
 
   useEffect(() => {
-    ensureReleaseMigrationV27()
-      .then((wiped) => {
-        if (wiped) {
-          refreshWords();
-          setActivityVersion((v) => v + 1);
-        }
-      })
-      .catch(() => {});
     // Not awaited here: the catalog readers below wait for the same (shared) seeding themselves
     ensureCatalogSeeded()
       .then(() => syncWordsWithCatalog().catch(() => {}))

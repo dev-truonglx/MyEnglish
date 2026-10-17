@@ -122,10 +122,12 @@ export function sharesSense(meaningA: string, meaningB: string): boolean {
  * "email; gửi email" becomes "___; gửi ___", while "therefore" is left alone for "there".
  */
 export function maskTargetInMeaning(meaning: string, word: string): string {
-  const target = word.trim();
+  const target = word.trim().normalize("NFC");
   if (!meaning || !target) return meaning;
   const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return meaning.replace(new RegExp(`(^|[^a-z])${escaped}(?=$|[^a-z])`, "gi"), "$1___");
+  return meaning
+    .normalize("NFC")
+    .replace(new RegExp(`(^|[^\\p{L}])${escaped}(?=$|[^\\p{L}])`, "giu"), "$1___");
 }
 
 /** IPA reduced to its letters: no slashes, brackets, stress marks or spaces, lowercase */

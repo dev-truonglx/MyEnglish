@@ -16,6 +16,7 @@ import { isWordDue, nextLocalDayStart } from "./cards";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import { getStoredWeights } from "./fsrsOptimizer";
 import { applyComebackToWork, resolveComeback, type ComebackStatus } from "./comeback";
+import { persistKeyNow } from "./storageBackup";
 
 export { Rating, State };
 
@@ -73,6 +74,7 @@ export function getStudyLimits(): StudyLimits {
 export function saveStudyLimits(limits: Partial<StudyLimits>): void {
   try {
     localStorage.setItem(STUDY_LIMITS_KEY, JSON.stringify({ ...getStudyLimits(), ...limits }));
+    persistKeyNow(STUDY_LIMITS_KEY);
   } catch {}
 }
 
@@ -111,9 +113,11 @@ export function saveFSRSSettings(settings: Partial<FSRSSettings>): void {
   try {
     if (settings.requestRetention !== undefined) {
       localStorage.setItem(FSRS_RETENTION_KEY, settings.requestRetention.toString());
+      persistKeyNow(FSRS_RETENTION_KEY);
     }
     if (settings.maximumInterval !== undefined) {
       localStorage.setItem(FSRS_MAX_INTERVAL_KEY, settings.maximumInterval.toString());
+      persistKeyNow(FSRS_MAX_INTERVAL_KEY);
     }
   } catch {}
 }
@@ -140,10 +144,12 @@ export function getGrammarScheduler() {
       enable_fuzz: true,
       enable_short_term: false,
     })
-  );
+  ).useStrategy(StrategyMode.SEED, grammarSeedStrategy);
   cachedGrammarScheduler = { key, scheduler };
   return scheduler;
 }
+
+const grammarSeedStrategy = GenSeedStrategyWithCardId("card_id");
 
 export function getFSRSScheduler(customSettings?: Partial<FSRSSettings>) {
   const current = getFSRSSettings();
@@ -425,10 +431,11 @@ export async function recordReview(
     updatedCard.state === State.Review &&
     updatedCard.stability >= productionUnlockDays()
   ) {
+    const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
     await db.execute(
       `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
        VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
-      [wordId, new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString()]
+      [wordId, tomorrow]
     );
   }
 
@@ -717,7 +724,7 @@ import {
   FullscreenExitTracker,
   type ReminderMoment,
 } from "./reminderMoments";
-import { isMainSessionActive } from "./activeSession";
+import { isMainSessionActive, isPopupSessionActive } from "./activeSession";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -942,8 +949,8 @@ class SRSBackgroundWorker {
           this.pendingMoment = null;
         };
         if (isSnoozed()) return idle();
-        // The main window is studying: the same card would be graded twice
-        if (isMainSessionActive()) return idle();
+        // The main window or popup is studying: the same card would be graded twice
+        if (isMainSessionActive() || isPopupSessionActive()) return idle();
         // Night, today's goal done, or enough reminders for one day: wait until tomorrow.
         // The goal counts only once no review is due any more (S5)
         const goalMet = (getActivityLogs()[getLocalDateString()] || 0) >= getDailyGoal();
@@ -1050,8 +1057,10 @@ class SRSBackgroundWorker {
         });
 
         // The question needs schedules and meanings only: the whole collection without examples or stats
-        const [dueWords, allWords] = await Promise.all([getDueWordsFromDb(), getWordsLite()]);
-        microQuiz = selectMicroQuizQuestion(dueWords, allWords);
+        if (dueCount > 0) {
+          const [dueWords, allWords] = await Promise.all([getDueWordsFromDb(), getWordsLite()]);
+          microQuiz = selectMicroQuizQuestion(dueWords, allWords);
+        }
 
       } catch (err) {
         console.warn("Error preparing Duo motivation payload:", err);

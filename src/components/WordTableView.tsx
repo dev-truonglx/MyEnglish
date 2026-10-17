@@ -91,19 +91,19 @@ export default function WordTableView({
     });
   }, [words, sortField, sortOrder, scheduleOf]);
 
-  // Per-row derived data (due flag + relative review schedule info)
+  const visibleWords = useMemo(() => sortedWords.slice(0, visibleCount), [sortedWords, visibleCount]);
+  const remaining = sortedWords.length - visibleWords.length;
+
+  // Per-row derived data (due flag + relative review schedule info) computed only for visible rows
   const rowMeta = useMemo(() => {
     const now = new Date();
     const meta = new Map<string, { isDue: boolean; relative: ReviewTimeRelativeInfo }>();
-    for (const item of sortedWords) {
+    for (const item of visibleWords) {
       const s = scheduleOf.get(item.id) ?? librarySchedule(item, now);
       meta.set(item.id, { isDue: s.isDue, relative: s.info });
     }
     return meta;
-  }, [sortedWords, scheduleOf]);
-
-  const visibleWords = useMemo(() => sortedWords.slice(0, visibleCount), [sortedWords, visibleCount]);
-  const remaining = sortedWords.length - visibleWords.length;
+  }, [visibleWords, scheduleOf]);
 
   if (words.length === 0) {
     return null;
