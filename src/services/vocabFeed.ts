@@ -577,20 +577,86 @@ export async function nextUnstudiedEntries(level: StudyLevel, limit = 30): Promi
   return rowsToEntries(rows);
 }
 
+async function markCatalogWordsKnownInternal(entryIds: string[], now: Date): Promise<number> {
+  if (entryIds.length === 0) return 0;
+  const entries = await getCatalogEntries(entryIds);
+  const base = now.getTime() - entries.length;
+  const ids = await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
+  const wordIds = entries.map((e) => ids.get(e.id)).filter((id): id is string => Boolean(id));
+  return markWordsKnownBatch(wordIds, now);
+}
+
 /**
  * Words the learner already knows (skimming): added to `words` if needed, scheduled as Easy without a
  * quiz (see markWordKnown), then the buffer is refilled. Returns how many were marked.
  */
 export async function markCatalogWordsKnown(entryIds: string[], now: Date = new Date()): Promise<number> {
   if (entryIds.length === 0) return 0;
-  const entries = await getCatalogEntries(entryIds);
-  const base = now.getTime() - entries.length;
-  const ids = await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
-  const wordIds = entries.map((e) => ids.get(e.id)).filter((id): id is string => Boolean(id));
-  const marked = await markWordsKnownBatch(wordIds, now);
+  const marked = await markCatalogWordsKnownInternal(entryIds, now);
   if (marked > 0) notifyWordsChanged(); // once, not per word: every listener reloads the whole word list
   await topUpNewWords({ now });
   return marked;
+}
+
+/** All catalog ids of unstudied words for a given level */
+export async function getUnstudiedCatalogIdsForLevel(level: StudyLevel): Promise<string[]> {
+  await ensureCatalogSeeded();
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ id: string }>>(
+    `SELECT c.id FROM vocab_catalog c
+     LEFT JOIN words w ON w.catalog_id = c.id
+     LEFT JOIN srs_reviews s ON s.word_id = w.id
+     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0))
+       AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)
+     ORDER BY c.it DESC, c.study_order`,
+    [level]
+  );
+  return rows.map((r) => r.id);
+}
+
+/** Total count of unstudied words for a level */
+export async function countUnstudiedWordsForLevel(level: StudyLevel): Promise<number> {
+  await ensureCatalogSeeded();
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ n: number }>>(
+    `SELECT COUNT(*) AS n FROM vocab_catalog c
+     LEFT JOIN words w ON w.catalog_id = c.id
+     LEFT JOIN srs_reviews s ON s.word_id = w.id
+     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0))
+       AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)`,
+    [level]
+  );
+  return Number(rows[0]?.n ?? 0);
+}
+
+/**
+ * Mark all unstudied words of a level as known: processed in chunks, reports progress,
+ * notifies words changed and tops up new words once at the end.
+ */
+export async function markLevelWordsKnown(
+  level: StudyLevel,
+  onProgress?: (done: number, total: number) => void,
+  now: Date = new Date()
+): Promise<number> {
+  const ids = await getUnstudiedCatalogIdsForLevel(level);
+  if (ids.length === 0) {
+    onProgress?.(0, 0);
+    return 0;
+  }
+  const total = ids.length;
+  let totalMarked = 0;
+  const CHUNK_SIZE = 100;
+  for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+    const chunk = ids.slice(i, i + CHUNK_SIZE);
+    const marked = await markCatalogWordsKnownInternal(chunk, now);
+    totalMarked += marked;
+    onProgress?.(Math.min(i + CHUNK_SIZE, total), total);
+    // Yield to the event loop so UI can render progress updates
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  if (totalMarked > 0) notifyWordsChanged();
+  await topUpNewWords({ now });
+  return totalMarked;
 }
 
 const KNOWN_BATCH = 50;

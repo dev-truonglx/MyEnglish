@@ -198,6 +198,37 @@ describe("words the learner already knows", () => {
     expect(progress.find((p) => p.level === "A1")).toMatchObject({ met: 2, known: 2 });
     expect(progress.find((p) => p.level === "A2")).toMatchObject({ met: 1, known: 1 });
   });
+
+  it("can mark an entire level as known in one go with progress reporting", async () => {
+    const { feed } = await setup(4);
+    feed.setStudyLevels(["A1", "A2"]);
+    await feed.topUpNewWords();
+
+    // 10 A1 words in DECK
+    expect(await feed.countUnstudiedWordsForLevel("A1")).toBe(10);
+    const a1Ids = await feed.getUnstudiedCatalogIdsForLevel("A1");
+    expect(a1Ids).toHaveLength(10);
+
+    const progressReports: Array<{ done: number; total: number }> = [];
+    const marked = await feed.markLevelWordsKnown("A1", (done, total) => {
+      progressReports.push({ done, total });
+    });
+
+    expect(marked).toBe(10);
+    expect(progressReports.length).toBeGreaterThan(0);
+    expect(progressReports[progressReports.length - 1]).toEqual({ done: 10, total: 10 });
+
+    // Now A1 has 0 unstudied words left
+    expect(await feed.countUnstudiedWordsForLevel("A1")).toBe(0);
+    expect(await feed.getUnstudiedCatalogIdsForLevel("A1")).toEqual([]);
+
+    const progress = await feed.loadLevelProgress();
+    const a1 = progress.find((p) => p.level === "A1");
+    expect(a1).toMatchObject({ met: 10, known: 10 });
+
+    // Calling markLevelWordsKnown on an already exhausted level returns 0
+    expect(await feed.markLevelWordsKnown("A1")).toBe(0);
+  });
 });
 
 describe("switching to the deck", () => {

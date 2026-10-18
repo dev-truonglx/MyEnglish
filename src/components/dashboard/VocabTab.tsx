@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Eye, EyeOff, Layers, Loader2, Search, Sparkles, Volume2, Zap } from "lucide-react";
+import { Check, CheckCheck, Eye, EyeOff, Layers, Loader2, Search, Sparkles, Volume2, Zap } from "lucide-react";
+import MarkLevelKnownModal from "./MarkLevelKnownModal";
 import {
   CATALOG_LEVEL_COUNTS,
   STUDY_LEVELS,
@@ -150,11 +151,13 @@ function LevelRoadmap({
   progress,
   levels,
   onChange,
+  onMarkLevel,
   disabled,
 }: {
   progress: LevelProgress[];
   levels: StudyLevel[];
   onChange: (levels: StudyLevel[]) => void;
+  onMarkLevel?: (level: StudyLevel) => void;
   disabled?: boolean;
 }) {
   const top = levels.length - 1;
@@ -185,23 +188,48 @@ function LevelRoadmap({
               : { text: "Đang học", cls: "bg-cyan-100 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-300" };
         const action = i === top && i > 0 ? `Bấm để bỏ ${level}` : on ? `Bấm để chỉ học đến ${level}` : `Bấm để học thêm đến ${level}`;
         return (
-          <button
+          <div
             key={level}
-            type="button"
-            disabled={disabled}
-            onClick={() => onChange(STUDY_LEVELS.slice(0, i === top && i > 0 ? i : i + 1))}
+            role="button"
+            tabIndex={disabled ? -1 : 0}
+            onClick={() => !disabled && onChange(STUDY_LEVELS.slice(0, i === top && i > 0 ? i : i + 1))}
+            onKeyDown={(e) => {
+              if (!disabled && (e.key === "Enter" || e.key === " ")) {
+                e.preventDefault();
+                onChange(STUDY_LEVELS.slice(0, i === top && i > 0 ? i : i + 1));
+              }
+            }}
             aria-pressed={on}
             title={`${level} · ${LEVEL_NAMES[level]}: ${met}/${total} từ đã gặp, ${remembered} nhớ lâu${p?.known ? `, ${p.known} đã biết` : ""}. ${action}.`}
-            className={`group text-left p-3 rounded-xl border transition-all disabled:opacity-60 space-y-2 ${
+            className={`group cursor-pointer select-none text-left p-3 rounded-xl border transition-all space-y-2 focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
+              disabled ? "opacity-60 cursor-not-allowed" : ""
+            } ${
               on
                 ? "border-cyan-400 dark:border-cyan-600/70 bg-cyan-50/60 dark:bg-cyan-500/5 ring-1 ring-cyan-400/60 dark:ring-cyan-600/40"
                 : "border-dashed border-slate-300 dark:border-zinc-700 hover:border-slate-400 dark:hover:border-zinc-500 bg-white/50 dark:bg-zinc-900/40"
             }`}
           >
-            <span className="flex items-center justify-between gap-1">
+            <div className="flex items-center justify-between gap-1">
               <span className={`text-lg font-black leading-none ${on ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-zinc-500"}`}>{level}</span>
-              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>
-            </span>
+              <div className="flex items-center gap-1">
+                <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>
+                {!allMet && onMarkLevel && (
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onMarkLevel(level);
+                    }}
+                    title={`Đánh dấu toàn bộ từ ${level} là đã biết`}
+                    aria-label={`Đánh dấu toàn bộ từ ${level} là đã biết`}
+                    className="p-1 -mr-1 rounded-md text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 transition-colors"
+                  >
+                    <CheckCheck className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
             <span className={`block text-[11px] ${on ? "text-slate-600 dark:text-zinc-300" : "text-slate-400 dark:text-zinc-500"}`}>{LEVEL_NAMES[level]}</span>
             <span className="relative block h-1.5 rounded-full bg-slate-200/80 dark:bg-zinc-800 overflow-hidden">
               <span className="absolute inset-y-0 left-0 bg-cyan-300 dark:bg-cyan-700" style={{ width: pct(met) }} />
@@ -218,7 +246,7 @@ function LevelRoadmap({
                 <span className="opacity-0 group-hover:opacity-100 transition-opacity">+ Thêm vào lộ trình</span>
               )}
             </span>
-          </button>
+          </div>
         );
       })}
     </div>
@@ -304,7 +332,15 @@ export function TodayLevelCard({ onOpen }: { onOpen: () => void }) {
   );
 }
 
-function Skim({ levels, onChanged }: { levels: StudyLevel[]; onChanged: () => void }) {
+function Skim({
+  levels,
+  onChanged,
+  onMarkLevel,
+}: {
+  levels: StudyLevel[];
+  onChanged: () => void;
+  onMarkLevel?: (level: StudyLevel) => void;
+}) {
   const [level, setLevel] = useState<StudyLevel>(levels[0]);
   const [entries, setEntries] = useState<CatalogEntry[] | null>(null);
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -386,6 +422,17 @@ function Skim({ levels, onChanged }: { levels: StudyLevel[]; onChanged: () => vo
         <span className="text-xs text-slate-500 dark:text-zinc-400">
           {entries ? `${entries.length} từ ${level} sắp học tiếp theo` : ""}
         </span>
+        {entries && entries.length > 0 && onMarkLevel && (
+          <button
+            type="button"
+            onClick={() => onMarkLevel(level)}
+            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+            title={`Đánh dấu toàn bộ từ vựng cấp ${level} là đã biết`}
+          >
+            <CheckCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            Đánh dấu cả cấp {level} đã biết
+          </button>
+        )}
         {entries && entries.length > 0 && (
           <span className="ml-auto flex items-center gap-3">
             <button
@@ -475,6 +522,17 @@ function Skim({ levels, onChanged }: { levels: StudyLevel[]; onChanged: () => vo
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {picked.size > 0 ? `Đánh dấu ${picked.size} từ đã biết` : "Chọn từ bạn đã biết"}
           </button>
+          {onMarkLevel && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => onMarkLevel(level)}
+              className="px-3 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 hover:border-emerald-500 dark:hover:border-emerald-500 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+            >
+              <CheckCheck className="w-4 h-4 text-emerald-500" />
+              Đánh dấu cả cấp {level}
+            </button>
+          )}
           {message ? (
             <p className="text-xs text-emerald-700 dark:text-emerald-400 flex-1 min-w-[200px]">{message}</p>
           ) : (
@@ -590,6 +648,7 @@ export default function VocabTab() {
   const [levels, setLevels] = useState<StudyLevel[]>(getStudyLevels);
   const [saving, setSaving] = useState(false);
   const { progress, reload } = useLevelProgress();
+  const [modalLevel, setModalLevel] = useState<StudyLevel | null>(null);
 
   useEffect(() => {
     ensureCatalogSeeded().catch(() => {});
@@ -619,6 +678,23 @@ export default function VocabTab() {
 
   return (
     <div className={`${PAGE_CONTAINER} space-y-5`}>
+      {modalLevel && (
+        <MarkLevelKnownModal
+          level={modalLevel}
+          progress={progress?.find((p) => p.level === modalLevel) ?? null}
+          levels={levels}
+          onClose={() => setModalLevel(null)}
+          onDone={async (nextLevels?: StudyLevel[]) => {
+            setModalLevel(null);
+            if (nextLevels && nextLevels.length > levels.length) {
+              await choose(nextLevels);
+            } else {
+              onChanged();
+            }
+          }}
+        />
+      )}
+
       {/* Title and the whole path in numbers */}
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-1 min-w-0">
@@ -660,7 +736,13 @@ export default function VocabTab() {
           </span>
         </div>
         {progress ? (
-          <LevelRoadmap progress={progress} levels={levels} onChange={choose} disabled={saving} />
+          <LevelRoadmap
+            progress={progress}
+            levels={levels}
+            onChange={choose}
+            onMarkLevel={setModalLevel}
+            disabled={saving}
+          />
         ) : (
           <LevelPicker value={levels} onChange={choose} disabled={saving} />
         )}
@@ -679,7 +761,7 @@ export default function VocabTab() {
             </h3>
             <p className="text-xs text-slate-500 dark:text-zinc-400">Tích những từ sắp học mà bạn chắc chắn đã biết, để dành thời gian cho từ thật sự mới.</p>
           </div>
-          <Skim levels={levels} onChanged={onChanged} />
+          <Skim levels={levels} onChanged={onChanged} onMarkLevel={setModalLevel} />
         </section>
 
         <section className={`${card} p-5 space-y-3 order-first lg:order-none lg:sticky lg:top-4`}>

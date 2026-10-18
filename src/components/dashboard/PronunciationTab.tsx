@@ -27,14 +27,11 @@ import {
   type PronunciationLessonProgress,
   type PronunciationProgress,
 } from "@/services/pronunciation";
-import { handleSpeak, SLOW_RATE } from "../review/speech";
+import { handleSpeak, SLOW_RATE, AUTO_SPEAK_DELAY_MS } from "../review/speech";
 import { PAGE_CONTAINER } from "./shared";
 
 /** The three steps of a lesson, one on screen at a time so the exercise is never below the theory */
 type Step = "learn" | "say" | "quiz";
-
-/** A right answer moves on by itself after this long; a wrong one waits so the explanation can be read */
-const AUTO_NEXT_MS = 1200;
 
 /** Questions needed to pass a quiz of `total` questions */
 function passMark(total: number): number {
@@ -221,7 +218,7 @@ function SayAloud({ lessonId, items, onQuiz }: { lessonId: string; items: Pronun
 
   useEffect(() => {
     if (!item) return;
-    const t = setTimeout(() => handleSpeak(item.text), 250);
+    const t = setTimeout(() => handleSpeak(item.text), AUTO_SPEAK_DELAY_MS);
     return () => clearTimeout(t);
   }, [item, round]);
 
@@ -356,7 +353,7 @@ function Quiz({
 
   useEffect(() => {
     if (!q) return;
-    const t = setTimeout(() => handleSpeak(q.say), 250);
+    const t = setTimeout(() => handleSpeak(q.say), AUTO_SPEAK_DELAY_MS);
     return () => clearTimeout(t);
   }, [q]);
 
@@ -384,15 +381,6 @@ function Quiz({
       setPicked(null);
     }
   };
-  const nextRef = useRef(next);
-  nextRef.current = next;
-
-  // A right answer moves on by itself; a wrong one waits for "Câu tiếp"
-  useEffect(() => {
-    if (!q || !picked || picked !== q.answer) return;
-    const t = setTimeout(() => nextRef.current(), AUTO_NEXT_MS);
-    return () => clearTimeout(t);
-  }, [q, picked]);
 
   const primary = () => {
     if (!result) return;
@@ -561,13 +549,12 @@ function Quiz({
                 Từ vừa nghe: <span className="font-semibold text-slate-900 dark:text-white">{q.say}</span>
                 <PlayButton text={q.say} className="!p-1" />
               </span>
-              {answeredRight ? (
-                <span className="text-xs text-emerald-700 dark:text-emerald-400">Tự sang câu sau…</span>
-              ) : (
-                <button onClick={next} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5">
-                  {index + 1 >= total ? "Xem kết quả" : "Câu tiếp"} <Kbd>Enter</Kbd>
-                </button>
-              )}
+              <button
+                onClick={next}
+                className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
+              >
+                {index + 1 >= total ? "Xem kết quả" : "Câu tiếp"} <Kbd>Enter</Kbd>
+              </button>
             </div>
           </div>
         )}

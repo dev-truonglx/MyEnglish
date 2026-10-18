@@ -5,6 +5,7 @@ import type { WordDetail } from "@/types/database";
 import { generateMultipleChoiceQuestion, type MultipleChoiceOption } from "@/services/smartReview";
 import { samePronunciation } from "@/utils/exerciseHints";
 import { playWrongTry } from "@/services/sound";
+import { AUTO_SPEAK_DELAY_MS, SLOW_RATE } from "@/components/review/speech";
 
 interface ListeningDictationExerciseProps {
   word: WordDetail;
@@ -45,14 +46,15 @@ export default function ListeningDictationExercise({
   }, []);
 
   const playAudio = useCallback(
-    (rate: number = 0.9) => {
+    (rate?: number) => {
       setIsPlaying(true);
       onSpeak(word.word, rate);
       if (playingTimerRef.current) clearTimeout(playingTimerRef.current);
+      const duration = rate && rate < 0.7 ? 1600 : 900;
       playingTimerRef.current = setTimeout(() => {
         playingTimerRef.current = null;
         setIsPlaying(false);
-      }, 900);
+      }, duration);
     },
     [onSpeak, word.word]
   );
@@ -60,7 +62,7 @@ export default function ListeningDictationExercise({
   useEffect(() => {
     setWrongIds(new Set());
     setIsAnswered(false);
-    const timer = setTimeout(() => playAudio(0.9), 300);
+    const timer = setTimeout(() => playAudio(), AUTO_SPEAK_DELAY_MS);
     return () => clearTimeout(timer);
   }, [word.id]);
 
@@ -86,7 +88,8 @@ export default function ListeningDictationExercise({
       if (isAnswered || e.metaKey || e.ctrlKey || e.altKey) return;
       const idx = ["1", "2", "3", "4"].indexOf(e.key);
       if (idx >= 0 && question.options[idx]) handleSelect(question.options[idx]);
-      if (e.key === "r" || e.key === "R") playAudio(0.9);
+      if (e.key === "r" || e.key === "R") playAudio();
+      if (e.key === "s" || e.key === "S") playAudio(SLOW_RATE);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -102,13 +105,14 @@ export default function ListeningDictationExercise({
 
         <div className="flex justify-center">
           <button
-            onClick={() => playAudio(0.9)}
+            onClick={() => playAudio()}
             type="button"
-            className={`w-20 h-20 rounded-full flex flex-col items-center justify-center transition-all transform active:scale-95 shadow-md ${
+            className={`w-20 h-20 rounded-full flex flex-col items-center justify-center transition-all transform active:scale-95 shadow-md cursor-pointer ${
               isPlaying
                 ? "bg-gradient-to-tr from-cyan-500 to-blue-500 text-white scale-105 ring-4 ring-cyan-500/30 animate-pulse"
                 : "bg-slate-100 dark:bg-zinc-800 hover:bg-cyan-50 dark:hover:bg-zinc-700 text-cyan-600 dark:text-cyan-400 border border-slate-200 dark:border-zinc-700"
             }`}
+            title="Nghe tốc độ thường (Phím R)"
           >
             <Volume2 className="w-8 h-8 mb-0.5" />
             <span className="text-[10px] font-semibold uppercase tracking-wider">Nghe</span>
@@ -117,14 +121,15 @@ export default function ListeningDictationExercise({
 
         <div className="flex items-center justify-center gap-3">
           <button
-            onClick={() => playAudio(0.6)}
+            onClick={() => playAudio(SLOW_RATE)}
             type="button"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            title="Nghe chậm (Phím S)"
           >
             <Snail className="w-3.5 h-3.5 text-amber-500" />
             <span>Nghe chậm</span>
           </button>
-          <span className="text-[11px] text-slate-400 dark:text-zinc-500">Phím R: nghe lại · 1–4: chọn</span>
+          <span className="text-[11px] text-slate-400 dark:text-zinc-500">Phím R: nghe lại · S: nghe chậm · 1–4: chọn</span>
         </div>
 
         <div className="min-h-[28px] text-sm">

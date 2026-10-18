@@ -54,7 +54,7 @@ import { logLearningEvent } from "@/services/learningEvents";
 import { checkAndUnlockAchievements, recordFirstTryCorrect } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
 import { playAnswerSound, playSound, playWrongTry, resetSoundSession } from "@/services/sound";
-import { handleSpeak } from "@/components/review/speech";
+import { handleSpeak, AUTO_SPEAK_DELAY_MS } from "@/components/review/speech";
 
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
@@ -492,7 +492,8 @@ export function useReviewSession({
   useEffect(() => {
     if (isIntroCard && currentWord) {
       setIsFlipped(true);
-      handleSpeak(currentWord.word);
+      const t = setTimeout(() => handleSpeak(currentWord.word), AUTO_SPEAK_DELAY_MS);
+      return () => clearTimeout(t);
     }
   }, [currentIndex, isIntroCard]);
 

@@ -10,7 +10,7 @@ import {
 } from "@/services/placement";
 import { PLACEMENT_A0_VOCAB, PLACEMENT_GRAMMAR, PLACEMENT_LISTENING } from "@/data/placementBank";
 import type { LevelChoice } from "@/services/onboarding";
-import { handleSpeak, SLOW_RATE } from "./review/speech";
+import { handleSpeak, SLOW_RATE, AUTO_SPEAK_DELAY_MS } from "./review/speech";
 
 const DONT_KNOW = "Tôi không biết";
 const BANK = { grammar: PLACEMENT_GRAMMAR, listening: PLACEMENT_LISTENING, a0: PLACEMENT_A0_VOCAB };
@@ -40,7 +40,7 @@ export default function PlacementTest({ onDone, onClose }: { onDone: (level: Lev
 
   useEffect(() => {
     if (q?.kind === "listening" && q.say) {
-      const t = setTimeout(() => handleSpeak(q.say!), 300);
+      const t = setTimeout(() => handleSpeak(q.say!), AUTO_SPEAK_DELAY_MS);
       return () => clearTimeout(t);
     }
   }, [q]);

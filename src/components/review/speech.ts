@@ -43,12 +43,16 @@ export function englishVoices(): SpeechSynthesisVoice[] {
   }
 }
 
+let activeUtterance: SpeechSynthesisUtterance | null = null;
+
 export function handleSpeak(text: string, eOrRate?: React.MouseEvent | number) {
   const settings = getTtsSettings();
   let rate = settings.rate;
   if (typeof eOrRate === "number") {
-    // Callers pass rates relative to the old default (0.9 = normal, 0.6 = slow)
-    rate = Math.max(0.4, Math.min(1.2, eOrRate * (settings.rate / DEFAULT_RATE)));
+    // When slow rate is requested (e.g. SLOW_RATE = 0.45, exactly 50% of default 0.9), scale with
+    // user's rate setting but cap at SLOW_RATE so slow speech is never fast across any tab or exercise.
+    const scaled = eOrRate * (settings.rate / DEFAULT_RATE);
+    rate = eOrRate <= SLOW_RATE ? Math.min(SLOW_RATE, Math.max(0.35, scaled)) : Math.max(0.35, Math.min(1.2, scaled));
   } else if (eOrRate) {
     eOrRate.stopPropagation();
   }
@@ -61,6 +65,13 @@ export function handleSpeak(text: string, eOrRate?: React.MouseEvent | number) {
       if (voice) utterance.voice = voice;
       utterance.lang = voice?.lang ?? "en-US";
       utterance.rate = rate;
+      activeUtterance = utterance;
+      utterance.onend = () => {
+        if (activeUtterance === utterance) activeUtterance = null;
+      };
+      utterance.onerror = () => {
+        if (activeUtterance === utterance) activeUtterance = null;
+      };
       window.speechSynthesis.speak(utterance);
     }
   } catch (e) {
@@ -68,5 +79,8 @@ export function handleSpeak(text: string, eOrRate?: React.MouseEvent | number) {
   }
 }
 
-/** Slow speed for a word the learner wants to hear clearly */
-export const SLOW_RATE = 0.6;
+/** Slow speed for a word the learner wants to hear clearly (50% of normal) */
+export const SLOW_RATE = 0.45;
+
+/** Standardized delay before an exercise or card automatically plays audio (sweet spot for visual & cognitive orientation) */
+export const AUTO_SPEAK_DELAY_MS = 650;
