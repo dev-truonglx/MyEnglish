@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Bug, Check, ChevronRight, Gift, Lock, Mic, Snowflake, Sparkles, Target, Timer, type LucideIcon } from "lucide-react";
+import { BookOpen, Bug, Check, ChevronRight, Gift, Lock, Mic, Snowflake, Sparkles, Target, Timer, Zap, type LucideIcon } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import {
   allQuestsDone,
@@ -32,6 +32,7 @@ interface DailyQuestsCardProps {
   refreshKey?: number;
   onStartReview: () => void;
   onStartFocus?: () => void;
+  onStartReflex?: () => void;
   setActiveTab: (tab: DashboardTab) => void;
   /** Fixed clock for previews */
   now?: Date;
@@ -44,10 +45,18 @@ const ICONS: Record<QuestId, LucideIcon> = {
   forgotten: Bug,
   grammar: BookOpen,
   pronunciation: Mic,
+  reflex: Zap,
 };
 
 /** Events after which today's progress may have moved */
-const REFRESH_EVENTS = ["myenglish-activity-updated", "myenglish-grammar-updated", "myenglish-pronunciation-updated", "words-changed", QUESTS_EVENT];
+const REFRESH_EVENTS = [
+  "myenglish-activity-updated",
+  "myenglish-grammar-updated",
+  "myenglish-pronunciation-updated",
+  "myenglish-reflex-updated",
+  "words-changed",
+  QUESTS_EVENT,
+];
 
 /**
  * "Nhiệm vụ hôm nay": three quests with a progress bar each, then a chest opened by hand once all are done
@@ -62,6 +71,7 @@ export default function DailyQuestsCard({
   refreshKey = 0,
   onStartReview,
   onStartFocus,
+  onStartReflex,
   setActiveTab,
   now: fixedNow,
 }: DailyQuestsCardProps) {
@@ -93,6 +103,7 @@ export default function DailyQuestsCard({
             forgottenCount: data.forgottenCount,
             grammarAvailable: data.grammarAvailable,
             pronunciationAvailable: data.pronunciationAvailable,
+            reflexAvailable: true,
             lastDone: data.lastDone,
           });
           setFacts(data.facts);
@@ -126,6 +137,8 @@ export default function DailyQuestsCard({
         return onStartReview();
       case "focus":
         return onStartFocus ? onStartFocus() : onStartReview();
+      case "reflex":
+        return onStartReflex ? onStartReflex() : setActiveTab("leaderboard");
       default:
         return setActiveTab(q.id);
     }

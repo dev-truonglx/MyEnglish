@@ -1,6 +1,6 @@
 import { RankPanel, useRankPanelVisible } from "./RankWidgets";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpenText, Bug, ChevronRight, Flame, Layers, Target } from "lucide-react";
+import { BookOpenText, Bug, ChevronRight, Flame, Layers, Target, Zap } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import type { TodayWork } from "@/services/smartReview";
 import { getUnmasteredWords, youngWordCap } from "@/services/smartReview";
@@ -8,6 +8,7 @@ import { getLocalDateString, type StreakStats } from "@/services/streak";
 import { minutesFor, type ComebackStatus } from "@/services/comeback";
 import { loadCoverage, type Coverage } from "@/services/coverage";
 import { loadPronunciationLessons, nextPronunciationLesson, pronunciationPracticedToday } from "@/services/pronunciation";
+import { isReflexPracticedToday } from "@/services/reflexChallenge";
 import { getAllGrammarProgress, getDueGrammarLessons, initGrammarStorage } from "@/services/grammarService";
 import { getTodayGrammarPlan } from "@/services/grammarPath";
 import { countWordStatus, WORD_STATUS_LABELS } from "@/services/wordStatus";
@@ -50,6 +51,7 @@ interface TodayTabProps {
   onQuickStart: () => void;
   /** Timed focus session (minutes) */
   onStartFocus?: (minutes: number) => void;
+  onStartReflex?: () => void;
   /** Words often forgotten that are due now: a hint to review them apart from 3 on */
   forgottenDue?: number;
   setActiveTab: (tab: DashboardTab) => void;
@@ -90,6 +92,7 @@ export default function TodayTab({
   onStart,
   onQuickStart,
   onStartFocus,
+  onStartReflex,
   forgottenDue = 0,
   setActiveTab,
   loading = false,
@@ -105,6 +108,14 @@ export default function TodayTab({
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [pron, setPron] = useState<TodayTaskInput["pronunciation"]>(null);
   const [grammar, setGrammar] = useState<TodayTaskInput["grammar"]>(null);
+  const [reflexDone, setReflexDone] = useState(() => isReflexPracticedToday(now));
+
+  useEffect(() => {
+    const onReflexUpdate = () => setReflexDone(isReflexPracticedToday(fixedNow ?? new Date()));
+    window.addEventListener("myenglish-reflex-updated", onReflexUpdate);
+    return () => window.removeEventListener("myenglish-reflex-updated", onReflexUpdate);
+  }, [fixedNow]);
+
   // Length of a focus session, as last chosen on the focus card
   const [focusMinutes, setFocusMinutes] = useState(() => getFocusSettings().minutes);
   useEffect(() => {
@@ -187,6 +198,7 @@ export default function TodayTab({
     },
     grammar,
     pronunciation: pron,
+    reflex: onStartReflex ? { doneToday: reflexDone } : null,
   });
   const primary = primaryTask(tasks);
   // Nothing to do and nothing ever studied: no "done", but where words come from (U6)
@@ -200,7 +212,10 @@ export default function TodayTab({
 
   const run = (task: TodayTask) => {
     if (task.id === "vocab") onStart();
-    else setActiveTab(TASK_TAB[task.id]);
+    else if (task.id === "reflex") {
+      if (onStartReflex) onStartReflex();
+      else setActiveTab("leaderboard");
+    } else setActiveTab(TASK_TAB[task.id]);
   };
   const isCapped = unmasteredCount >= youngWordCap();
   const more = {
@@ -211,7 +226,7 @@ export default function TodayTab({
   const pathLabel = AI_VOCAB_ENABLED ? "Thêm từ bằng AI" : "Lộ trình từ vựng";
 
   const showQuests = !loading && !empty;
-  const twoColumns = showQuests || showRank;
+  const twoColumns = showQuests || showRank || !!onStartReflex;
   const statCard = "flex items-center gap-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 min-w-0";
 
   return (
@@ -364,11 +379,43 @@ export default function TodayTab({
                   refreshKey={streakStats.todayCount}
                   onStartReview={onStart}
                   onStartFocus={onStartFocus ? () => onStartFocus(focusMinutes) : undefined}
+                  onStartReflex={onStartReflex}
                   setActiveTab={setActiveTab}
                   now={fixedNow}
                 />
               )}
               {showRank && <RankPanel onNavigate={setActiveTab} />}
+
+              {/* ⚡ BANNER LUYỆN PHẢN XẠ NẰM NGAY DƯỚI CUỘC ĐUA TUẦN */}
+              {onStartReflex && (
+                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 p-4 text-white shadow-md shadow-orange-500/10 transition-all hover:shadow-lg hover:shadow-orange-500/15">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm shadow-inner">
+                      <Zap className="h-5 w-5 fill-white text-white" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded-full text-white">
+                          Ramp Up
+                        </span>
+                        <h4 className="font-extrabold text-sm text-white truncate">
+                          Luyện Phản Xạ
+                        </h4>
+                      </div>
+                      <p className="text-[11px] text-amber-100 mt-0.5 line-clamp-2">
+                        Tăng tốc phản xạ, nhận tới <strong className="text-white font-bold">+80 XP</strong> bứt phá bảng xếp hạng!
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={onStartReflex}
+                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-amber-400" />
+                    <span>Bắt đầu luyện phản xạ</span>
+                  </button>
+                </div>
+              )}
             </aside>
           )}
 

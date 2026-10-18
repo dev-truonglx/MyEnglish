@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Copy, Loader2, LogIn, Plus, RefreshCw, Trophy, Users, WifiOff, X } from "lucide-react";
+import { Copy, Loader2, LogIn, Plus, RefreshCw, Trophy, Users, WifiOff, X, Zap } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { effectiveScope, useStandingStore } from "@/stores/standingStore";
 import { accountErrorMessage } from "@/services/accountErrors";
@@ -76,7 +76,13 @@ const chip = (active: boolean) =>
   );
 
 /** XP race: weekly / monthly / all-time XP and streaks, among everyone or inside a friend group */
-export default function LeaderboardTab({ onOpenSettings }: { onOpenSettings?: () => void }) {
+export default function LeaderboardTab({
+  onOpenSettings,
+  onStartReflexChallenge,
+}: {
+  onOpenSettings?: () => void;
+  onStartReflexChallenge?: () => void;
+}) {
   const configured = useAuthStore((s) => s.configured);
   const user = useAuthStore((s) => s.user);
   const syncing = useAuthStore((s) => s.sync.status === "syncing");
@@ -218,6 +224,39 @@ export default function LeaderboardTab({ onOpenSettings }: { onOpenSettings?: ()
             <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Làm mới
           </button>
         </div>
+
+        {/* ⚡ DUOLINGO RAMP UP CHALLENGE BANNER */}
+        {onStartReflexChallenge && (
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 p-4 text-white shadow-md shadow-orange-500/10 transition-all hover:shadow-lg hover:shadow-orange-500/15">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm shadow-inner">
+                  <Zap className="h-6 w-6 fill-white text-white" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-white/20 px-2 py-0.5 rounded-full text-white">
+                      Ramp Up
+                    </span>
+                    <h3 className="font-extrabold text-base text-white">
+                      Thử Thách Phản Xạ 3 Chặng
+                    </h3>
+                  </div>
+                  <p className="text-xs text-amber-100 mt-0.5">
+                    Vượt 3 chặng phản xạ tính giờ để giành tới <strong className="text-white font-bold">+80 XP</strong> bứt phá bảng xếp hạng!
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={onStartReflexChallenge}
+                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95 shrink-0"
+              >
+                <Zap className="w-4 h-4 fill-amber-400" />
+                <span>Thử thách ngay</span>
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="flex flex-wrap gap-2">
           {BOARDS.map((b) => (

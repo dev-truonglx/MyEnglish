@@ -27,7 +27,7 @@ export function chosenDailyMinutes(dailyGoal: number): DailyMinutes {
 
 // ─── Today's list ────────────────────────────────────────────────────────────
 
-export type TodayTaskId = "vocab" | "grammar" | "pronunciation";
+export type TodayTaskId = "vocab" | "grammar" | "pronunciation" | "reflex";
 
 export interface TodayTask {
   id: TodayTaskId;
@@ -58,6 +58,8 @@ export interface TodayTaskInput {
   } | null;
   /** null: nothing to offer (every lesson passed and none practised today) */
   pronunciation: { doneToday: boolean; lessonTitle: string | null } | null;
+  /** null or undefined: reflex challenge not displayed as a task */
+  reflex?: { doneToday: boolean } | null;
 }
 
 export const GRAMMAR_TASK_MINUTES = 5;
@@ -115,7 +117,18 @@ export function buildTodayTasks(input: TodayTaskInput): TodayTask[] {
       done: p.doneToday,
     });
   }
-  return [...tasks, ...extras.slice(0, input.minutes >= 10 ? 2 : 1)];
+  const r = input.reflex;
+  if (r) {
+    extras.push({
+      id: "reflex",
+      title: "Luyện phản xạ",
+      detail: r.doneToday ? "Đã luyện hôm nay" : "Thử thách tính giờ · bứt phá XP",
+      minutes: 3,
+      done: r.doneToday,
+    });
+  }
+  const maxExtras = input.minutes >= 10 ? (r ? 3 : 2) : (r ? 2 : 1);
+  return [...tasks, ...extras.slice(0, maxExtras)];
 }
 
 /** The main button: the first thing not done yet (null = everything done) */
@@ -127,6 +140,7 @@ export function primaryTask(tasks: readonly TodayTask[]): TodayTask | null {
 export const TASK_TAB: Record<Exclude<TodayTaskId, "vocab">, DashboardTab> = {
   grammar: "grammar",
   pronunciation: "pronunciation",
+  reflex: "leaderboard",
 };
 
 // ─── "Chỉ 1 phút" and the day close ──────────────────────────────────────────

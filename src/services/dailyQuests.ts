@@ -15,6 +15,7 @@ import { loadForgottenWords } from "./forgottenWords";
 import { getAllGrammarProgress, initGrammarStorage } from "./grammarService";
 import { getTodayGrammarPlan } from "./grammarPath";
 import { loadPronunciationLessons } from "./pronunciation";
+import { isReflexPracticedToday } from "./reflexChallenge";
 
 export const QUESTS_KEY = "myenglish_daily_quests_v1";
 export const QUESTS_EVENT = "myenglish-quests-updated";
@@ -31,7 +32,7 @@ export const NEGLECT_MAX_DAYS = 14;
 /** Days of learning events read for "last practised" */
 const HISTORY_DAYS = 30;
 
-export type QuestId = "first_try" | "new_words" | "focus" | "forgotten" | "grammar" | "pronunciation";
+export type QuestId = "first_try" | "new_words" | "focus" | "forgotten" | "grammar" | "pronunciation" | "reflex";
 /** Skills whose last practice day steers the pick */
 export type SkillId = "focus" | "grammar" | "pronunciation";
 const SKILLS: readonly SkillId[] = ["focus", "grammar", "pronunciation"];
@@ -64,6 +65,7 @@ export interface QuestPickContext {
   forgottenCount: number;
   grammarAvailable: boolean;
   pronunciationAvailable: boolean;
+  reflexAvailable?: boolean;
   /** Last local day each skill was practised, if ever */
   lastDone: Partial<Record<SkillId, string>>;
 }
@@ -71,7 +73,7 @@ export interface QuestPickContext {
 /** Today's counts, one per quest */
 export type QuestFacts = Record<QuestId, number>;
 
-export const EMPTY_FACTS: QuestFacts = { first_try: 0, new_words: 0, focus: 0, forgotten: 0, grammar: 0, pronunciation: 0 };
+export const EMPTY_FACTS: QuestFacts = { first_try: 0, new_words: 0, focus: 0, forgotten: 0, grammar: 0, pronunciation: 0, reflex: 0 };
 
 // ─── Seeded randomness ───────────────────────────────────────────────────────
 
@@ -119,6 +121,7 @@ export function availableQuests(ctx: QuestPickContext): Quest[] {
   if (ctx.forgottenCount > 0) out.push({ id: "forgotten", target: Math.min(3, ctx.forgottenCount) });
   if (ctx.grammarAvailable) out.push({ id: "grammar", target: 1 });
   if (ctx.pronunciationAvailable) out.push({ id: "pronunciation", target: 1 });
+  if (ctx.reflexAvailable) out.push({ id: "reflex", target: 1 });
   return out;
 }
 
@@ -143,6 +146,7 @@ export function pickDailyQuests(day: string, ctx: QuestPickContext): Quest[] {
   const weight = (q: Quest): number => {
     if (isSkill(q.id)) return 1 + neglectDays(q.id, day, ctx.lastDone);
     if (q.id === "forgotten") return 1 + Math.min(NEGLECT_MAX_DAYS - 1, ctx.forgottenCount);
+    if (q.id === "reflex") return 2;
     return 1; // the other vocabulary quest
   };
 
@@ -184,6 +188,8 @@ export function questTitle(q: Quest): string {
       return "Làm 1 bài ngữ pháp";
     case "pronunciation":
       return "Làm 1 bài phát âm";
+    case "reflex":
+      return "Tham gia 1 lượt luyện phản xạ";
   }
 }
 
@@ -201,7 +207,7 @@ export function chestReward(day: string, freezesAvailable: number): ChestReward 
 
 // No reading quest any more (removed 2026-10-17): a stored "reading" quest is dropped when read, and
 // ensureQuestState fills its place
-const QUEST_IDS: readonly QuestId[] = ["first_try", "new_words", "focus", "forgotten", "grammar", "pronunciation"];
+const QUEST_IDS: readonly QuestId[] = ["first_try", "new_words", "focus", "forgotten", "grammar", "pronunciation", "reflex"];
 
 export function parseQuestState(raw: string | null): DailyQuestState | null {
   try {
@@ -341,6 +347,8 @@ export async function loadQuestData(words: readonly WordDetail[], now: Date = ne
     const ids = new Set([...forgotten.active, ...forgotten.recovered].map((e) => e.word.id));
     facts.forgotten = new Set(logs.filter((l) => l.rating > 1 && ids.has(l.wordId)).map((l) => l.wordId)).size;
   }
+
+  facts.reflex = isReflexPracticedToday(now) ? 1 : 0;
 
   return { facts, lastDone, forgottenCount, grammarAvailable, pronunciationAvailable };
 }

@@ -53,6 +53,7 @@ const AccountTab = lazy(() => import("./dashboard/AccountTab"));
 const VocabTab = lazy(() => import("./dashboard/VocabTab"));
 const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
 const GrammarTenseSetupModal = lazy(() => import("./grammar/GrammarTenseSetupModal"));
+const ReflexChallengeModal = lazy(() => import("./reflex/ReflexChallengeModal"));
 
 function TabFallback() {
   return (
@@ -154,6 +155,7 @@ export default function MainDashboard({
   // Focus session of the review on screen (null: a normal session)
   const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
   const focusing = !!focusPlan && isReviewing;
+  const [reflexChallengeOpen, setReflexChallengeOpen] = useState(false);
 
   const handleSelectTab = useCallback((tab: DashboardTab) => {
     setActiveTab((prev) => {
@@ -1186,6 +1188,7 @@ export default function MainDashboard({
               onStart={() => handleStartReview(true)}
               onQuickStart={() => handleStartReview(true, undefined, 3)}
               onStartFocus={handleStartFocus}
+              onStartReflex={() => setReflexChallengeOpen(true)}
               forgottenDue={forgottenDue}
               setActiveTab={handleSelectTab}
               loading={loading}
@@ -1320,7 +1323,12 @@ export default function MainDashboard({
         )}
 
         {/* LEADERBOARD: XP race (needs an account) */}
-        {activeTab === "leaderboard" && <LeaderboardTab onOpenSettings={() => handleSelectTab("account")} />}
+        {activeTab === "leaderboard" && (
+          <LeaderboardTab
+            onOpenSettings={() => handleSelectTab("account")}
+            onStartReflexChallenge={() => setReflexChallengeOpen(true)}
+          />
+        )}
 
         {/* ACCOUNT: sign-in and sync */}
         {activeTab === "account" && <AccountTab onOpenLeaderboard={() => handleSelectTab("leaderboard")} />}
@@ -1434,6 +1442,20 @@ export default function MainDashboard({
       {!showOnboarding && !vocabSetup && showTenseSetup && (
         <Suspense fallback={null}>
           <GrammarTenseSetupModal onDone={handleTenseSetupDone} />
+        </Suspense>
+      )}
+
+      {/* ⚡ DUOLINGO RAMP UP REFLEX CHALLENGE MODAL */}
+      {reflexChallengeOpen && (
+        <Suspense fallback={null}>
+          <ReflexChallengeModal
+            words={words}
+            isOpen={reflexChallengeOpen}
+            onClose={() => setReflexChallengeOpen(false)}
+            onXPUpdated={() => {
+              void refreshWords();
+            }}
+          />
         </Suspense>
       )}
 

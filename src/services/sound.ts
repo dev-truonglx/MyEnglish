@@ -10,7 +10,7 @@
  */
 import { persistKeyNow } from "./storageBackup";
 
-export type SoundKind = "correct" | "wrong" | "combo" | "complete";
+export type SoundKind = "correct" | "wrong" | "combo" | "complete" | "tick" | "tierUp" | "timeOut";
 
 export const SOUND_SETTINGS_KEY = "myenglish_sound_v1";
 /** A combo sound at every this many right answers in a row */
@@ -117,6 +117,17 @@ const SOUNDS: Record<SoundKind, Note[]> = {
     { freq: G5, at: 0.34, dur: 0.6, type: "triangle", gain: 0.6 },
     { freq: C6, at: 0.34, dur: 0.6, type: "sine", gain: 0.5 },
   ],
+  // Quick clock tick for low countdown time
+  tick: [{ freq: 1100, at: 0, dur: 0.025, type: "sine", gain: 0.35 }],
+  // Fast triumphant fanfare when completing a reflex tier
+  tierUp: [
+    { freq: C5, at: 0, dur: 0.08, type: "triangle", gain: 0.8 },
+    { freq: E5, at: 0.07, dur: 0.08, type: "triangle", gain: 0.85 },
+    { freq: G5, at: 0.14, dur: 0.08, type: "triangle", gain: 0.9 },
+    { freq: C6, at: 0.21, dur: 0.28, type: "triangle", gain: 1 },
+  ],
+  // Descending buzz when timer runs out
+  timeOut: [{ freq: 280, to: 160, at: 0, dur: 0.35, type: "sawtooth", gain: 0.45 }],
 };
 
 /** Loudest note at volume 1: keeps the tones well under speech and music */
