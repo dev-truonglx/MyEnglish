@@ -11,7 +11,7 @@ import {
   BasicLearningStepsStrategy,
   type Card,
 } from "ts-fsrs";
-import { getDatabase, getDueWordsFromDb, getWordsLite, SRS_COLUMNS } from "./db";
+import { getDatabase, getDueWordsFromDb, getDueWordsLite, getWordsLite, SRS_COLUMNS } from "./db";
 import { isWordDue, nextLocalDayStart } from "./cards";
 import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import { getStoredWeights } from "./fsrsOptimizer";
@@ -1023,7 +1023,7 @@ class SRSBackgroundWorker {
 
         // The question needs schedules and meanings only: the whole collection without examples or stats
         if (dueCount > 0) {
-          const [dueWords, allWords] = await Promise.all([getDueWordsFromDb(), getWordsLite()]);
+          const [dueWords, allWords] = await Promise.all([getDueWordsLite(), getWordsLite()]);
           microQuiz = selectMicroQuizQuestion(dueWords, allWords);
         }
 

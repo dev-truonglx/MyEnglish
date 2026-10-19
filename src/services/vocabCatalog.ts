@@ -231,6 +231,20 @@ export async function searchCatalog(prefix: string, limit = 40): Promise<Catalog
   return rowsToEntries(rows);
 }
 
+/** Sample up to `limit` entries directly from SQLite (avoids loading the 3.4MB JSON bundle into memory) */
+export async function getCatalogSample(limit = 60): Promise<CatalogEntry[]> {
+  try {
+    const db = await getDatabase();
+    const rows = await db.select<CatalogRow[]>(
+      `SELECT ${ENTRY_COLUMNS} FROM vocab_catalog ORDER BY study_order LIMIT $1`,
+      [Math.max(1, Math.min(200, limit))]
+    );
+    return rowsToEntries(rows);
+  } catch {
+    return [];
+  }
+}
+
 let meaningsLoading: Promise<number> | null = null;
 
 /**

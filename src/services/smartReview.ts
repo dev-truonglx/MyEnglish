@@ -182,20 +182,35 @@ const DEFAULT_LEECH_SETTINGS: LeechSettings = {
   enabled: true,
 };
 
+let cachedLeechRaw: string | null = null;
+let cachedLeechSettings: LeechSettings = DEFAULT_LEECH_SETTINGS;
+
 export function getLeechSettings(): LeechSettings {
   try {
     const raw = localStorage.getItem(LEECH_SETTINGS_KEY);
-    if (!raw) return { ...DEFAULT_LEECH_SETTINGS };
-    return { ...DEFAULT_LEECH_SETTINGS, ...JSON.parse(raw) };
+    if (raw === cachedLeechRaw) return cachedLeechSettings;
+    cachedLeechRaw = raw;
+    if (!raw) {
+      cachedLeechSettings = { ...DEFAULT_LEECH_SETTINGS };
+      return cachedLeechSettings;
+    }
+    cachedLeechSettings = { ...DEFAULT_LEECH_SETTINGS, ...JSON.parse(raw) };
+    return cachedLeechSettings;
   } catch {
-    return { ...DEFAULT_LEECH_SETTINGS };
+    cachedLeechRaw = null;
+    cachedLeechSettings = { ...DEFAULT_LEECH_SETTINGS };
+    return cachedLeechSettings;
   }
 }
 
 export function saveLeechSettings(settings: Partial<LeechSettings>): void {
   try {
     const current = getLeechSettings();
-    localStorage.setItem(LEECH_SETTINGS_KEY, JSON.stringify({ ...current, ...settings }));
+    const updated: LeechSettings = { ...current, ...settings };
+    const raw = JSON.stringify(updated);
+    cachedLeechRaw = raw;
+    cachedLeechSettings = updated;
+    localStorage.setItem(LEECH_SETTINGS_KEY, raw);
     persistKeyNow(LEECH_SETTINGS_KEY);
   } catch {}
 }

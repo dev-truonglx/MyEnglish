@@ -180,6 +180,12 @@ function schedule(audio: AudioContext, kind: SoundKind, volume: number): void {
     gain.gain.exponentialRampToValueAtTime(Math.max(peak, 0.0002), t0 + 0.012);
     gain.gain.exponentialRampToValueAtTime(0.0001, t1);
     osc.connect(gain).connect(audio.destination);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
     osc.start(t0);
     osc.stop(t1 + 0.02);
     end = Math.max(end, t1);

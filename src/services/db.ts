@@ -91,6 +91,9 @@ export async function getDatabase(): Promise<Database> {
  * Creates required tables and indexes if they don't exist.
  */
 export async function initSchema(db: Database): Promise<void> {
+  await db.execute(`PRAGMA journal_mode = WAL;`).catch(() => {});
+  await db.execute(`PRAGMA busy_timeout = 5000;`).catch(() => {});
+  await db.execute(`PRAGMA synchronous = NORMAL;`).catch(() => {});
   await db.execute(`PRAGMA foreign_keys = ON;`).catch(() => {});
   // Check current schema version
   const versionRows = await db.select<{ user_version: number }[]>(`PRAGMA user_version;`);
@@ -1294,7 +1297,39 @@ export async function getDueWordsFromDb(now: Date = new Date()): Promise<WordDet
     `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) AND COALESCE(suspended, 0) = 0 ORDER BY created_at DESC;`,
     params
   );
+  if (words.length === 0) return [];
+  if (words.length <= 500) {
+    const ids = words.map((w) => w.id);
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
+    return hydrateWords(db, words, placeholders, ids);
+  }
   return hydrateWords(db, words, dueFilter, params);
+}
+
+/**
+ * Words with a card due now, without examples and answer stats (lite mode).
+ * Skips querying the examples table and grouping all review_logs, saving significant I/O and RAM.
+ */
+export async function getDueWordsLite(now: Date = new Date()): Promise<WordDetail[]> {
+  const db = await getDatabase();
+  const params = [...dueParams(now), new Date(now.getTime() - INTRO_READY_MS).toISOString()];
+  const introduced = (alias: string) =>
+    `(COALESCE(${alias}.state, 0) = 0 AND COALESCE(${alias}.reps, 0) = 0 AND ${alias}.last_review IS NOT NULL
+      AND ${alias}.last_review <= $3)`;
+  const dueFilter = `SELECT s.word_id FROM srs_reviews s WHERE ${dueCardSql("s")} OR ${introduced("s")}
+    UNION SELECT p.word_id FROM srs_production p WHERE ${dueCardSql("p")} OR ${introduced("p")}
+    UNION SELECT id FROM words WHERE id NOT IN (SELECT word_id FROM srs_reviews)`;
+  const words = await db.select<Word[]>(
+    `SELECT ${WORD_COLUMNS} FROM words WHERE id IN (${dueFilter}) AND COALESCE(suspended, 0) = 0 ORDER BY created_at DESC;`,
+    params
+  );
+  if (words.length === 0) return [];
+  if (words.length <= 500) {
+    const ids = words.map((w) => w.id);
+    const placeholders = ids.map((_, i) => `$${i + 1}`).join(", ");
+    return hydrateWords(db, words, placeholders, ids, { lite: true });
+  }
+  return hydrateWords(db, words, dueFilter, params, { lite: true });
 }
 
 /**

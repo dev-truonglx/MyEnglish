@@ -111,21 +111,32 @@ export function getLocalDateString(d: Date = new Date()): string {
   return `${year}-${month}-${day}`;
 }
 
+let cachedActivityRaw: string | null = null;
+let cachedActivityLogs: DailyActivityLog = {};
+
 /**
  * Read activity logs from localStorage
  */
 export function getActivityLogs(): DailyActivityLog {
   try {
     const raw = localStorage.getItem(REVIEWS_STORAGE_KEY);
+    if (raw === cachedActivityRaw) return { ...cachedActivityLogs };
+    cachedActivityRaw = raw;
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     // A stored "null", an array or a number would break Object.entries / property access in render
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      cachedActivityLogs = {};
+      return {};
+    }
     const logs: DailyActivityLog = {};
     for (const [day, count] of Object.entries(parsed)) {
       if (typeof count === "number" && Number.isFinite(count)) logs[day] = count;
     }
-    return logs;
+    cachedActivityLogs = logs;
+    return { ...logs };
   } catch {
+    cachedActivityRaw = null;
+    cachedActivityLogs = {};
     return {};
   }
 }
@@ -138,7 +149,10 @@ export function recordDailyActivity(count: number = 1): void {
     const logs = getActivityLogs();
     const today = getLocalDateString();
     logs[today] = (logs[today] || 0) + count;
-    localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
+    const raw = JSON.stringify(logs);
+    cachedActivityRaw = raw;
+    cachedActivityLogs = logs;
+    localStorage.setItem(REVIEWS_STORAGE_KEY, raw);
     persistKeyNow(REVIEWS_STORAGE_KEY);
     window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
   } catch (err) {
@@ -196,6 +210,7 @@ function backfillActivityFromWordsOnce(words: WordDetail[], activityMap: Map<str
       logs[dateStr] = 1;
       activityMap.set(dateStr, (activityMap.get(dateStr) || 0) + 1);
     }
+    cachedActivityLogs = logs;
     localStorage.setItem(REVIEWS_STORAGE_KEY, JSON.stringify(logs));
     localStorage.setItem(CREATED_AT_BACKFILL_KEY, "1");
     persistKeyNow(REVIEWS_STORAGE_KEY);

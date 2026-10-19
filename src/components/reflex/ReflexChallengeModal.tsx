@@ -15,7 +15,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { WordDetail } from "@/types/database";
-import { loadCatalogFile, type CatalogEntry } from "@/services/vocabCatalog";
+import { getCatalogSample, type CatalogEntry } from "@/services/vocabCatalog";
 import {
   REFLEX_CONFIG,
   generateReflexQuestions,
@@ -85,12 +85,13 @@ export default function ReflexChallengeModal({
   // Pending timeout ref to prevent transition race conditions
   const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Load catalog for distractors/fallback on mount
+  // Load catalog for distractors/fallback on mount only when active word pool is small (< 40)
   useEffect(() => {
-    loadCatalogFile()
-      .then((f) => setCatalog(f.words || []))
+    if (words.length >= 40) return;
+    getCatalogSample(60)
+      .then((entries) => setCatalog(entries))
       .catch(() => {});
-  }, []);
+  }, [words.length]);
 
   const wordsRef = useRef(words);
   wordsRef.current = words;

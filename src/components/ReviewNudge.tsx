@@ -333,7 +333,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     <div className="w-screen h-screen flex items-start justify-end p-1.5 bg-transparent select-none font-sans">
       <div
         key={animationKey}
-        className="nudge-enter w-full rounded-2xl border border-slate-200/90 dark:border-zinc-700/90 bg-white/95 dark:bg-zinc-900/95 backdrop-blur-md shadow-2xl overflow-hidden flex flex-col justify-between"
+        className="nudge-enter w-full rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden flex flex-col justify-between"
         onMouseEnter={() => {
           hoverAtRef.current = Date.now();
           if (quizStartTimeRef.current === 0) quizStartTimeRef.current = Date.now();

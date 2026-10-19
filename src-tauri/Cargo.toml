@@ -1,6 +1,6 @@
 [package]
 name = "tauri-app"
-version = "0.3.2"
+version = "0.3.3"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -44,4 +44,8 @@ codegen-units = 1
 lto = true
 opt-level = 3
 panic = "unwind"
+strip = true
+
+# Don't strip proc-macros/build scripts to avoid mis-aligned LINKEDIT string pool bug on macOS
+[profile.release.build-override]
 strip = false
