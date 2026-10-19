@@ -65,6 +65,10 @@ describe("getConciseMeaning", () => {
     expect(getConciseMeaning(light, "light", { sentence_vn: "Cái túi này rất nhẹ." }))
       .toBe("Nhẹ");
   });
+
+  it("handles single-letter target words like 'I' correctly without stripping 'i' from 'tôi'", () => {
+    expect(getConciseMeaning("tôi", "I")).toBe("Tôi");
+  });
 });
 
 import { getPosLabel } from "@/components/FocusReviewModal";

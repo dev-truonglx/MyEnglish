@@ -149,6 +149,7 @@ export default function MainDashboard({
   // Listeners registered once read this instead of a stale isReviewing
   const isReviewingRef = useRef(false);
   isReviewingRef.current = isReviewing;
+  const sessionCompletedRef = useRef(false);
   // New key per session so FlashcardReview never reuses the previous queue
   const [sessionId, setSessionId] = useState(0);
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
@@ -157,16 +158,38 @@ export default function MainDashboard({
   const focusing = !!focusPlan && isReviewing;
   const [reflexChallengeOpen, setReflexChallengeOpen] = useState(false);
 
+  /**
+   * If a review session has already completed (reached SessionSummary), automatically finalize it
+   * when the user navigates away or tries to start another session without pressing "Hoàn tất".
+   */
+  const autoFinishCompletedReview = useCallback(() => {
+    if (sessionCompletedRef.current) {
+      sessionCompletedRef.current = false;
+      refreshDirtyRef.current = false;
+      isReviewingRef.current = false;
+      setIsReviewing(false);
+      setFocusPlan(null);
+      topUpNewWords().catch(() => {}).finally(() => refreshWords());
+      return true;
+    }
+    return false;
+  }, [refreshWords]);
+
   const handleSelectTab = useCallback((tab: DashboardTab) => {
-    setActiveTab((prev) => {
-      if (prev === "review" && tab === "review") {
-        setIsReviewing(false);
-      }
-      return tab;
-    });
+    if (isReviewingRef.current && sessionCompletedRef.current) {
+      autoFinishCompletedReview();
+    } else {
+      setActiveTab((prev) => {
+        if (prev === "review" && tab === "review") {
+          setIsReviewing(false);
+        }
+        return tab;
+      });
+    }
+    setActiveTab(tab);
     setTabResetKey((k) => k + 1);
     setGrammarLessonToOpen(null);
-  }, []);
+  }, [autoFinishCompletedReview]);
 
   // The word panel belongs to the screen it was opened from: a tab change closes it, unless the same click
   // picked the word (Capture's "Xem chi tiết" opens the library with it). A new session closes it too, so the
@@ -620,9 +643,11 @@ export default function MainDashboard({
   ): Promise<boolean> => {
     // A session is in progress (maybe kept behind another tab): show it instead of restarting from card 0
     if (isReviewingRef.current) {
-      setActiveTab("review");
-      if (focus) setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi bắt đầu phiên tập trung nhé." });
-      return false;
+      if (!autoFinishCompletedReview()) {
+        setActiveTab("review");
+        if (focus) setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi bắt đầu phiên tập trung nhé." });
+        return false;
+      }
     }
     if (startingRef.current) return false;
     startingRef.current = true;
@@ -638,9 +663,11 @@ export default function MainDashboard({
    */
   const startWordListSession = (list: WordDetail[], focus?: FocusPlan) => {
     if (isReviewingRef.current) {
-      setActiveTab("review");
-      setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi ôn nhóm từ này nhé." });
-      return false;
+      if (!autoFinishCompletedReview()) {
+        setActiveTab("review");
+        setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi ôn nhóm từ này nhé." });
+        return false;
+      }
     }
     const now = new Date();
     // The latest schedule of each word (the list may come from an older render)
@@ -660,6 +687,7 @@ export default function MainDashboard({
     setFocusPlan(focus ?? null);
     setReviewSet(session);
     setSessionId((id) => id + 1);
+    sessionCompletedRef.current = false;
     isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
@@ -776,7 +804,7 @@ export default function MainDashboard({
     setFocusPlan(focus ?? null);
     setReviewSet(session);
     setSessionId((id) => id + 1);
-    // Set now, not at the next render: a click right after this must find the session
+    sessionCompletedRef.current = false;
     isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
@@ -1353,7 +1381,11 @@ export default function MainDashboard({
                 practiceMode={isPracticeSession}
                 active={activeTab === "review"}
                 focus={focusPlan}
+                onSessionCompleted={(completed) => {
+                  sessionCompletedRef.current = completed;
+                }}
                 onStartFocus={(minutes) => {
+                  sessionCompletedRef.current = false;
                   // Five more minutes, or a first try after a normal session: a new queue (what is due now)
                   refreshDirtyRef.current = false;
                   isReviewingRef.current = false;
@@ -1367,6 +1399,7 @@ export default function MainDashboard({
                   );
                 }}
                 onNavigate={(tab) => {
+                  sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
                   setIsReviewing(false);
                   setFocusPlan(null);
@@ -1374,6 +1407,7 @@ export default function MainDashboard({
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
                 }}
                 onFinish={() => {
+                  sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false; // reloaded just below
                   setIsReviewing(false);
                   setFocusPlan(null);
@@ -1382,6 +1416,7 @@ export default function MainDashboard({
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
                 }}
                 onExit={() => {
+                  sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
                   setIsReviewing(false);
                   setFocusPlan(null);

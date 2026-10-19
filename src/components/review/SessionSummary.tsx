@@ -70,10 +70,11 @@ export default function SessionSummary({
       : "Những từ chưa nhớ sẽ quay lại sớm. Gặp lại vài lần là não tự ghi nhớ, đó chính là cách học này hoạt động.";
 
   return (
-    <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-8 max-w-xl mx-auto text-center space-y-5 animate-in zoom-in-95 duration-200">
-      <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-white shadow-xl shadow-emerald-500/20">
-        <Award className="w-8 h-8" />
-      </div>
+    <div className="w-full flex-1 min-h-0 overflow-y-auto flex flex-col">
+      <div className="flex flex-col items-center p-6 md:p-8 max-w-xl mx-auto text-center space-y-5 my-auto animate-in zoom-in-95 duration-200 w-full py-8">
+        <div className="w-16 h-16 rounded-3xl bg-gradient-to-tr from-emerald-500 to-cyan-500 flex items-center justify-center text-white shadow-xl shadow-emerald-500/20">
+          <Award className="w-8 h-8" />
+        </div>
 
       <div className="space-y-1">
         <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Xong phiên học! 🎉</h2>
@@ -213,5 +214,6 @@ export default function SessionSummary({
         )}
       </div>
     </div>
+  </div>
   );
 }

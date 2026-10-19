@@ -52,6 +52,8 @@ interface FlashcardReviewProps {
   onStartFocus?: (minutes: number) => void;
   /** Summary of a focus session that ran out of cards: go and use the minutes left elsewhere */
   onNavigate?: (tab: DashboardTab) => void;
+  /** Notifies parent when the session completion state changes */
+  onSessionCompleted?: (completed: boolean) => void;
 }
 
 export default function FlashcardReview({
@@ -64,6 +66,7 @@ export default function FlashcardReview({
   focus = null,
   onStartFocus,
   onNavigate,
+  onSessionCompleted,
 }: FlashcardReviewProps) {
   const focusSession = useFocusSession(focus);
   const {
@@ -129,7 +132,14 @@ export default function FlashcardReview({
   useEffect(() => {
     if (focus && sessionCompleted) focusSession.complete(focusCounts);
   }, [sessionCompleted]);
+  useEffect(() => {
+    onSessionCompleted?.(sessionCompleted);
+  }, [sessionCompleted, onSessionCompleted]);
   const leave = () => {
+    if (sessionCompleted) {
+      onFinish();
+      return;
+    }
     if (focus) focusSession.abandon(focusCounts);
     onExit();
   };

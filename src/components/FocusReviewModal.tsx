@@ -1463,7 +1463,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 )}
               </div>
               {summary.items.length > 0 && (
-                <ul className="rounded-2xl border border-slate-200 dark:border-zinc-800 divide-y divide-slate-100 dark:divide-zinc-800 text-xs">
+                <ul className="rounded-2xl border border-slate-200 dark:border-zinc-800 divide-y divide-slate-100 dark:divide-zinc-800 text-xs max-h-60 overflow-y-auto">
                   {summary.items.map((it) => (
                     <li key={it.key} className="px-3.5 py-2 flex items-center gap-2.5">
                       {it.correct ? (

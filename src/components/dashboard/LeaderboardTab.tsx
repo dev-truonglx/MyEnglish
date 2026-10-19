@@ -239,7 +239,7 @@ export default function LeaderboardTab({
                       Ramp Up
                     </span>
                     <h3 className="font-extrabold text-base text-white">
-                      Thử Thách Phản Xạ 3 Chặng
+                      Thử Thách Phản Xạ
                     </h3>
                   </div>
                   <p className="text-xs text-amber-100 mt-0.5">

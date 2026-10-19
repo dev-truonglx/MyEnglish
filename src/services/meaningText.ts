@@ -55,7 +55,7 @@ export function getConciseMeaning(
   if (targetWord) {
     const withoutTarget = text
       .replace(new RegExp(`['"‘“]${escapeRegExp(targetWord)}['"’”]?`, "gi"), "")
-      .replace(new RegExp(`\\b${escapeRegExp(targetWord)}(?:s|es|ed|ing|d)?\\b`, "gi"), "");
+      .replace(new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(targetWord)}(?:s|es|ed|ing|d)?(?![\\p{L}\\p{N}])`, "giu"), "");
     if (withoutTarget.replace(/[,:;\-–\s.()]+/g, "").length >= 2) {
       text = withoutTarget;
     }
