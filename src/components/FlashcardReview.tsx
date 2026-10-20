@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { parseTerms, type WordDetail, type ReviewCard } from "@/types/database";
 import LetterTilesExercise from "./exercises/LetterTilesExercise";
 import MultipleChoiceExercise from "./exercises/MultipleChoiceExercise";
@@ -135,13 +135,42 @@ export default function FlashcardReview({
   useEffect(() => {
     onSessionCompleted?.(sessionCompleted);
   }, [sessionCompleted, onSessionCompleted]);
+  const [confirmingExit, setConfirmingExit] = useState(false);
+  const confirmingExitRef = useRef(false);
+  confirmingExitRef.current = confirmingExit;
+
+  useEffect(() => {
+    if (focus) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (confirmingExitRef.current) {
+        e.stopPropagation();
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setConfirmingExit(false);
+        }
+        return;
+      }
+      if (e.key === "Escape" && active && !sessionCompleted) {
+        e.preventDefault();
+        e.stopPropagation();
+        setConfirmingExit(true);
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [focus, active, sessionCompleted]);
+
   const leave = () => {
     if (sessionCompleted) {
       onFinish();
       return;
     }
-    if (focus) focusSession.abandon(focusCounts);
-    onExit();
+    if (focus) {
+      focusSession.abandon(focusCounts);
+      onExit();
+      return;
+    }
+    setConfirmingExit(true);
   };
   const words = useWordsStore((s) => s.words);
   const nextReview = useMemo(() => (sessionCompleted ? nextReviewPeek(words) : null), [sessionCompleted, words]);
@@ -546,6 +575,44 @@ export default function FlashcardReview({
         onIntroDone={handleIntroDone}
         isPractice={practiceMode}
       />}
+
+      {confirmingExit && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Thoát bài đang học"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => setConfirmingExit(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-5 space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-bold text-slate-900 dark:text-white">Thoát bài đang học?</p>
+            <p className="text-xs text-slate-600 dark:text-zinc-300">
+              Bạn có muốn thoát phiên học đang diễn ra không? Các câu đã trả lời vẫn được lưu.
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                autoFocus
+                onClick={() => setConfirmingExit(false)}
+                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors"
+              >
+                Học tiếp
+              </button>
+              <button
+                onClick={() => {
+                  setConfirmingExit(false);
+                  onExit();
+                }}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                Thoát
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -157,6 +157,13 @@ export default function MainDashboard({
   const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
   const focusing = !!focusPlan && isReviewing;
   const [reflexChallengeOpen, setReflexChallengeOpen] = useState(false);
+  const [confirmExitNav, setConfirmExitNav] = useState<{
+    targetTab?: DashboardTab;
+    pendingStart?: () => void;
+    title?: string;
+    body?: string;
+    confirmText?: string;
+  } | null>(null);
 
   /**
    * If a review session has already completed (reached SessionSummary), automatically finalize it
@@ -175,21 +182,72 @@ export default function MainDashboard({
     return false;
   }, [refreshWords]);
 
-  const handleSelectTab = useCallback((tab: DashboardTab) => {
-    if (isReviewingRef.current && sessionCompletedRef.current) {
-      autoFinishCompletedReview();
-    } else {
-      setActiveTab((prev) => {
-        if (prev === "review" && tab === "review") {
-          setIsReviewing(false);
+  const handleSelectTab = useCallback(
+    (tab: DashboardTab) => {
+      // If the review session already finished (viewing SessionSummary), finalize and navigate
+      if (isReviewingRef.current && sessionCompletedRef.current) {
+        autoFinishCompletedReview();
+        setActiveTab(tab);
+        setTabResetKey((k) => k + 1);
+        setGrammarLessonToOpen(null);
+        return;
+      }
+
+      // If review is currently active and uncompleted, confirm before leaving
+      if (isReviewingRef.current && !sessionCompletedRef.current) {
+        if (activeTab === "review" && tab === "review") {
+          return;
         }
-        return tab;
-      });
+        setConfirmExitNav({
+          targetTab: tab,
+          title: "Thoát bài đang học?",
+          body: "Bạn có muốn thoát phiên học đang diễn ra không? Các câu đã trả lời vẫn được lưu.",
+          confirmText: "Thoát",
+        });
+        return;
+      }
+
+      setActiveTab(tab);
+      setTabResetKey((k) => k + 1);
+      setGrammarLessonToOpen(null);
+    },
+    [activeTab, autoFinishCompletedReview]
+  );
+
+  const handleConfirmExit = useCallback(() => {
+    const pending = confirmExitNav;
+    setConfirmExitNav(null);
+    if (!pending) return;
+
+    sessionCompletedRef.current = false;
+    refreshDirtyRef.current = false;
+    isReviewingRef.current = false;
+    setIsReviewing(false);
+    setFocusPlan(null);
+    topUpNewWords().catch(() => {}).finally(() => refreshWords());
+
+    if (pending.pendingStart) {
+      pending.pendingStart();
+    } else if (pending.targetTab) {
+      setActiveTab(pending.targetTab);
+      setTabResetKey((k) => k + 1);
+      setGrammarLessonToOpen(null);
     }
-    setActiveTab(tab);
-    setTabResetKey((k) => k + 1);
-    setGrammarLessonToOpen(null);
-  }, [autoFinishCompletedReview]);
+  }, [confirmExitNav, refreshWords]);
+
+  useEffect(() => {
+    if (!confirmExitNav) return;
+    const onKey = (e: KeyboardEvent) => {
+      e.stopPropagation();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setConfirmExitNav(null);
+        setActiveTab("review");
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [confirmExitNav]);
 
   // The word panel belongs to the screen it was opened from: a tab change closes it, unless the same click
   // picked the word (Capture's "Xem chi tiết" opens the library with it). A new session closes it too, so the
@@ -641,11 +699,19 @@ export default function MainDashboard({
     maxCards?: number,
     focus?: FocusPlan
   ): Promise<boolean> => {
-    // A session is in progress (maybe kept behind another tab): show it instead of restarting from card 0
+    // A session is in progress: confirm with user whether to exit the current session to start the new one
     if (isReviewingRef.current) {
       if (!autoFinishCompletedReview()) {
-        setActiveTab("review");
-        if (focus) setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi bắt đầu phiên tập trung nhé." });
+        setConfirmExitNav({
+          pendingStart: () => {
+            void prepareAndStartReview(onlyDue, topicFilter, maxCards, focus);
+          },
+          title: focus ? "Thoát bài đang học để bắt đầu phiên tập trung?" : "Thoát bài đang học để bắt đầu phiên mới?",
+          body: focus
+            ? "Bạn đang có một phiên học chưa hoàn thành. Bạn có muốn thoát bài đang học để bắt đầu phiên tập trung mới không? Các câu đã trả lời vẫn được lưu."
+            : "Bạn đang có một phiên học chưa hoàn thành. Bạn có muốn thoát bài đang học để bắt đầu phiên mới không? Các câu đã trả lời vẫn được lưu.",
+          confirmText: focus ? "Bắt đầu tập trung" : "Bắt đầu phiên mới",
+        });
         return false;
       }
     }
@@ -664,8 +730,14 @@ export default function MainDashboard({
   const startWordListSession = (list: WordDetail[], focus?: FocusPlan) => {
     if (isReviewingRef.current) {
       if (!autoFinishCompletedReview()) {
-        setActiveTab("review");
-        setGlobalToast({ title: "Đang có phiên ôn dở", body: "Làm xong phiên này rồi ôn nhóm từ này nhé." });
+        setConfirmExitNav({
+          pendingStart: () => {
+            startWordListSession(list, focus);
+          },
+          title: "Thoát bài đang học để ôn nhóm từ này?",
+          body: "Bạn đang có một phiên học chưa hoàn thành. Bạn có muốn thoát bài đang học để ôn nhóm từ này không? Các câu đã trả lời vẫn được lưu.",
+          confirmText: "Ôn nhóm từ này",
+        });
         return false;
       }
     }
@@ -1159,7 +1231,7 @@ export default function MainDashboard({
       {autoReplenishBanner && (
         <AutoReplenishBanner
           autoReplenishBanner={autoReplenishBanner}
-          setActiveTab={setActiveTab}
+          setActiveTab={handleSelectTab}
           setAutoReplenishBanner={setAutoReplenishBanner}
         />
       )}
@@ -1401,6 +1473,7 @@ export default function MainDashboard({
                 onNavigate={(tab) => {
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
+                  isReviewingRef.current = false;
                   setIsReviewing(false);
                   setFocusPlan(null);
                   handleSelectTab(tab);
@@ -1409,6 +1482,7 @@ export default function MainDashboard({
                 onFinish={() => {
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false; // reloaded just below
+                  isReviewingRef.current = false;
                   setIsReviewing(false);
                   setFocusPlan(null);
                   // Close the loop on the day: back to "Hôm nay" (what is left, the streak, the goal)
@@ -1418,6 +1492,7 @@ export default function MainDashboard({
                 onExit={() => {
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
+                  isReviewingRef.current = false;
                   setIsReviewing(false);
                   setFocusPlan(null);
                   setActiveTab("today");
@@ -1437,7 +1512,7 @@ export default function MainDashboard({
         toggleTermExpanded={toggleTermExpanded}
         copiedSnippet={copiedSnippet}
         handleCopyCode={handleCopyCode}
-        setActiveTab={setActiveTab}
+        setActiveTab={handleSelectTab}
         setMessage={setMessage}
       />
 
@@ -1496,6 +1571,50 @@ export default function MainDashboard({
 
       {/* LEVEL UP CELEBRATION & BADGE UNLOCK TOASTS */}
       <LevelUpModal />
+
+      {/* CONFIRM EXIT CURRENT REVIEW MODAL */}
+      {confirmExitNav && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={confirmExitNav.title || "Thoát bài đang học"}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4"
+          onClick={() => {
+            setConfirmExitNav(null);
+            setActiveTab("review");
+          }}
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 p-5 space-y-3 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="text-sm font-bold text-slate-900 dark:text-white">
+              {confirmExitNav.title || "Thoát bài đang học?"}
+            </p>
+            <p className="text-xs text-slate-600 dark:text-zinc-300">
+              {confirmExitNav.body || "Bạn có muốn thoát phiên học đang diễn ra không? Các câu đã trả lời vẫn được lưu."}
+            </p>
+            <div className="flex gap-2 justify-end">
+              <button
+                autoFocus
+                onClick={() => {
+                  setConfirmExitNav(null);
+                  setActiveTab("review");
+                }}
+                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors"
+              >
+                {confirmExitNav.pendingStart ? "Học tiếp bài cũ" : "Học tiếp"}
+              </button>
+              <button
+                onClick={handleConfirmExit}
+                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+              >
+                {confirmExitNav.confirmText || "Thoát"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
