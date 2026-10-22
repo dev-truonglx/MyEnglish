@@ -25,7 +25,12 @@ async function bootstrap() {
       }
       await restoreLocalStorageFromDb();
       // Windows share localStorage, so only the main window mirrors it back
-      if (getInitialWindowLabel() === "main") startLocalStorageBackup();
+      if (getInitialWindowLabel() === "main") {
+        startLocalStorageBackup();
+        // Words marked "Đã biết" under the old rules get the current ones (after restore: it reads the FSRS settings)
+        const { settleKnownWords } = await import("./services/reviewRecorder");
+        await settleKnownWords().catch((err) => console.warn("Known words not settled:", err));
+      }
     } catch (err) {
       console.warn("localStorage restore failed, backup disabled for this session:", err);
     }

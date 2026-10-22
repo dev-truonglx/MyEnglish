@@ -22,6 +22,8 @@ import {
   calculateReflexXP,
   speedRating,
   recordReflexCompletion,
+  reflexXpLeftToday,
+  REFLEX_DAILY_XP_MAX,
   WORD_CATEGORY_LABELS,
   type ReflexTier,
   type ReflexQuestion,
@@ -48,6 +50,9 @@ export default function ReflexChallengeModal({
   onXPUpdated,
 }: ReflexChallengeModalProps) {
   const [phase, setPhase] = useState<ModalPhase>("ready");
+  // XP really awarded by the last finished run (today's cap, REFLEX_DAILY_XP_MAX), and what is left today
+  const [awardedXP, setAwardedXP] = useState<number | null>(null);
+  const [xpLeftToday, setXpLeftToday] = useState(() => reflexXpLeftToday());
   const phaseRef = useRef<ModalPhase>("ready");
   phaseRef.current = phase;
 
@@ -408,12 +413,15 @@ export default function ReflexChallengeModal({
   useEffect(() => {
     if (phase === "game_over" && !recordedRef.current) {
       recordedRef.current = true;
-      recordReflexCompletion(summary);
-      if (onXPUpdated && summary.totalXP > 0) {
-        onXPUpdated(summary.totalXP);
+      const awarded = recordReflexCompletion(summary);
+      setAwardedXP(awarded);
+      setXpLeftToday(reflexXpLeftToday());
+      if (onXPUpdated && awarded > 0) {
+        onXPUpdated(awarded);
       }
     } else if (phase !== "game_over") {
       recordedRef.current = false;
+      setAwardedXP(null);
     }
   }, [phase, summary, onXPUpdated]);
 
@@ -525,6 +533,11 @@ export default function ReflexChallengeModal({
                 <span>🟡 Chặng 3: 15 câu chạm đỉnh</span>
                 <span>+40 XP</span>
               </div>
+              <p className="pt-1 text-[11px] text-slate-500">
+                {xpLeftToday > 0
+                  ? `XP luyện phản xạ: tối đa ${REFLEX_DAILY_XP_MAX} XP mỗi ngày (hôm nay còn ${xpLeftToday} XP).`
+                  : `Hôm nay đã nhận đủ ${REFLEX_DAILY_XP_MAX} XP luyện phản xạ: vẫn chơi để luyện được, mai nhận XP tiếp.`}
+              </p>
             </div>
           </div>
 
@@ -926,8 +939,13 @@ export default function ReflexChallengeModal({
                   Tổng XP Nhận Được
                 </span>
                 <span className="text-2xl font-black text-amber-400 flex items-center gap-1 mt-0.5">
-                  +{summary.totalXP} <span className="text-xs text-amber-500/80">XP</span>
+                  +{awardedXP ?? summary.totalXP} <span className="text-xs text-amber-500/80">XP</span>
                 </span>
+                {awardedXP != null && awardedXP < summary.totalXP && (
+                  <span className="text-[10px] text-slate-400 block mt-0.5">
+                    Đạt {summary.totalXP} XP · trần {REFLEX_DAILY_XP_MAX} XP/ngày
+                  </span>
+                )}
                 {summary.perfectBonus && (
                   <span className="text-[10px] text-emerald-400 font-bold block mt-0.5">
                     ✨ +10 XP Perfect!

@@ -57,6 +57,11 @@ export interface DailyQuestState {
 /** What decides which quests can be offered today */
 export interface QuestPickContext {
   dailyGoal: number;
+  /**
+   * Graded answers possible today: cards still to do (reviews + new cards) plus first-try answers already given.
+   * Unknown: the target only follows the daily goal.
+   */
+  gradableToday?: number;
   /** New words still allowed today */
   newAllowed: number;
   /** Anything ever studied (a focus session needs cards) */
@@ -113,9 +118,27 @@ export function neglectDays(skill: SkillId, day: string, lastDone: QuestPickCont
   return Math.max(0, Math.min(NEGLECT_MAX_DAYS, daysBetween(last, day)));
 }
 
+/** Least first-try answers worth a quest: fewer cards today and the quest is left out */
+export const FIRST_TRY_MIN_TARGET = 3;
+/** Share of today's gradable cards the first-try quest asks for (a few misses still let it be done) */
+export const FIRST_TRY_SHARE = 0.8;
+
+/**
+ * Target of "Đúng ngay lần đầu": the daily goal + 5 (8 to 20), but never more than FIRST_TRY_SHARE of the cards
+ * that can be graded today. Only graded answers count, so with few cards due a fixed 20 could not be done.
+ * Null when today has too few cards for the quest.
+ */
+export function firstTryTarget(ctx: Pick<QuestPickContext, "dailyGoal" | "gradableToday">): number | null {
+  const byGoal = Math.max(8, Math.min(20, ctx.dailyGoal + 5));
+  const target = ctx.gradableToday == null ? byGoal : Math.min(byGoal, Math.floor(ctx.gradableToday * FIRST_TRY_SHARE));
+  return target >= FIRST_TRY_MIN_TARGET ? target : null;
+}
+
 /** Every quest that makes sense today, with its target */
 export function availableQuests(ctx: QuestPickContext): Quest[] {
-  const out: Quest[] = [{ id: "first_try", target: Math.max(8, Math.min(20, ctx.dailyGoal + 5)) }];
+  const out: Quest[] = [];
+  const firstTry = firstTryTarget(ctx);
+  if (firstTry != null) out.push({ id: "first_try", target: firstTry });
   if (ctx.newAllowed >= 3) out.push({ id: "new_words", target: Math.min(5, ctx.newAllowed) });
   if (ctx.hasStudied) out.push({ id: "focus", target: 1 });
   if (ctx.forgottenCount > 0) out.push({ id: "forgotten", target: Math.min(3, ctx.forgottenCount) });
@@ -128,8 +151,8 @@ export function availableQuests(ctx: QuestPickContext): Quest[] {
 const isSkill = (id: QuestId): id is SkillId => (SKILLS as readonly QuestId[]).includes(id);
 
 /**
- * Today's quests: always one vocabulary quest, then the skill left alone longest (3+ days) for sure, then a
- * draw weighted by neglect. Same day and same context → same quests.
+ * Today's quests: one vocabulary quest (when today has enough cards for one), then the skill left alone longest
+ * (3+ days) for sure, then a draw weighted by neglect. Same day and same context → same quests.
  */
 export function pickDailyQuests(day: string, ctx: QuestPickContext): Quest[] {
   const rng = seededRandom(`quests:${day}`);
@@ -140,8 +163,9 @@ export function pickDailyQuests(day: string, ctx: QuestPickContext): Quest[] {
     pool.splice(pool.indexOf(q), 1);
   };
 
+  // A day with too few cards for either vocabulary quest takes the others
   const vocab = pool.filter((q) => q.id === "first_try" || q.id === "new_words");
-  take(vocab[Math.floor(rng() * vocab.length)]);
+  if (vocab.length > 0) take(vocab[Math.floor(rng() * vocab.length)]);
 
   const weight = (q: Quest): number => {
     if (isSkill(q.id)) return 1 + neglectDays(q.id, day, ctx.lastDone);

@@ -22,8 +22,15 @@ import {
   todayWorkFromCounts,
 } from "@/services/smartReview";
 import { isDueSrs, nextLocalDayStart, toCard } from "@/services/cards";
-import { KNOWN_CHECK_MAX_DAYS, KNOWN_CHECK_MIN_DAYS, knownCheckDays, schedulingDecision, wasGradedSince } from "@/services/reviewRecorder";
+import {
+  KNOWN_STABILITY_MAX_DAYS,
+  KNOWN_STABILITY_MIN_DAYS,
+  knownStabilityDays,
+  schedulingDecision,
+  wasGradedSince,
+} from "@/services/reviewRecorder";
 import { saveStudyLimits } from "@/services/srs";
+import { isRememberedLong } from "@/services/wordStatus";
 import type { SRSReview, WordDetail } from "@/types/database";
 import { freshServices, makeWord, reviewSrs, DAY_MS } from "./helpers";
 
@@ -47,19 +54,20 @@ const input = (word: string, meaning = "nghĩa của " + word) => ({
 
 const ex = (word: string) => [{ id: `e-${word}`, word_id: word, sentence_en: `We use the ${word} every day.`, grammar_analysis: "" }];
 
-describe("'Đã biết' starts with its own schedule, spread over 4-21 days (M6/P8)", () => {
-  it("knownCheckDays is deterministic and spreads a batch of words", () => {
-    const ids = Array.from({ length: 600 }, (_, i) => `word-${i}-${(i * 7919) % 1000}`);
-    const days = ids.map(knownCheckDays);
-    expect(days.every((d) => d >= KNOWN_CHECK_MIN_DAYS && d <= KNOWN_CHECK_MAX_DAYS)).toBe(true);
-    expect(ids.map(knownCheckDays)).toEqual(days);
+describe("'Đã biết' is 'Nhớ lâu' at once, checked once months later by FSRS (M6/P8)", () => {
+  it("knownStabilityDays is deterministic, at least 'Nhớ lâu', and spreads a batch of words", () => {
+    const ids = Array.from({ length: 3000 }, (_, i) => `word-${i}-${(i * 7919) % 1000}`);
+    const days = ids.map(knownStabilityDays);
+    expect(KNOWN_STABILITY_MIN_DAYS).toBeGreaterThanOrEqual(21);
+    expect(days.every((d) => d >= KNOWN_STABILITY_MIN_DAYS && d <= KNOWN_STABILITY_MAX_DAYS)).toBe(true);
+    expect(ids.map(knownStabilityDays)).toEqual(days);
     const perDay = new Map<number, number>();
     days.forEach((d) => perDay.set(d, (perDay.get(d) ?? 0) + 1));
-    expect(perDay.size).toBe(KNOWN_CHECK_MAX_DAYS - KNOWN_CHECK_MIN_DAYS + 1);
-    expect(Math.max(...perDay.values())).toBeLessThan(600 * 0.12);
+    expect(perDay.size).toBeGreaterThan((KNOWN_STABILITY_MAX_DAYS - KNOWN_STABILITY_MIN_DAYS + 1) * 0.9);
+    expect(Math.max(...perDay.values())).toBeLessThan(3000 * 0.02);
   });
 
-  it("puts the card in Review, difficulty 5, stability = the wait, without spending the budget", async () => {
+  it("puts the card in Review, difficulty 5, long stability, due at the FSRS interval, without spending the budget", async () => {
     const { db, smart } = await freshServices();
     const recorder = await import("@/services/reviewRecorder");
     const id = await db.insertEnrichedWord(input("server"));
@@ -68,7 +76,8 @@ describe("'Đã biết' starts with its own schedule, spread over 4-21 days (M6/
     expect(await recorder.markWordKnown(id, now)).toBe(false);
 
     const [w] = await db.getWordsByIds([id]);
-    const days = recorder.knownCheckDays(id);
+    const days = recorder.knownStabilityDays(id);
+    // At the default 90% retention FSRS's interval for a stability S is S days
     expect(w.srs).toMatchObject({ state: 2, reps: 1, lapses: 0, difficulty: 5, stability: days, scheduled_days: days });
     expect(new Date(w.srs.next_review_date).getTime()).toBe(now.getTime() + days * DAY_MS);
     expect(w.srsProduction ?? null).toBeNull();
@@ -81,16 +90,116 @@ describe("'Đã biết' starts with its own schedule, spread over 4-21 days (M6/
     );
     expect(logs).toEqual([{ exercise_type: "known", is_scheduled: 0 }]);
 
-    // Not remembered until a real review confirms it (S2)
+    // "Nhớ lâu" at once, still waiting for its check
     expect(smart.isKnownOnly(w.srs)).toBe(true);
-    expect(smart.isWordKnown(w)).toBe(false);
+    expect(isRememberedLong(w)).toBe(true);
     expect(smart.getUnmasteredWords([w])).toHaveLength(0);
-    // Its first real review (even the same day) keeps the stability and opens recall practice
+    // Its check answered right: FSRS only raises the stability, so it stays "Nhớ lâu"; no recall card, the
+    // learner can already write it
     const res = await (await import("@/services/srs")).recordReview(id, Rating.Good);
-    expect(res.stability).toBeGreaterThanOrEqual(KNOWN_CHECK_MIN_DAYS);
+    expect(res.stability).toBeGreaterThanOrEqual(days);
     const [after] = await db.getWordsByIds([id]);
     expect(smart.isKnownOnly(after.srs)).toBe(false);
-    expect(after.srsProduction).not.toBeNull();
+    expect(isRememberedLong(after)).toBe(true);
+    expect(after.srsProduction ?? null).toBeNull();
+  });
+
+  it("a word marked 'Đã biết' gets a recall card only once its check was missed (learned like any other)", async () => {
+    const { db } = await freshServices();
+    const srs = await import("@/services/srs");
+    const recorder = await import("@/services/reviewRecorder");
+    const conn = await db.getDatabase();
+    const id = await db.insertEnrichedWord(input("buffer"));
+    await recorder.markWordKnown(id);
+    // Later reviews of a confirmed word: still none
+    await conn.execute(`UPDATE srs_reviews SET reps = 3, stability = 60, next_review_date = $1 WHERE word_id = $2`, [new Date().toISOString(), id]);
+    await srs.recordReview(id, Rating.Good);
+    expect((await db.getWordsByIds([id]))[0].srsProduction ?? null).toBeNull();
+    // Forgotten once and relearned to Review: recall practice opens
+    await conn.execute(`UPDATE srs_reviews SET state = 2, lapses = 1, stability = 10, next_review_date = $1 WHERE word_id = $2`, [new Date().toISOString(), id]);
+    await srs.recordReview(id, Rating.Good);
+    expect((await db.getWordsByIds([id]))[0].srsProduction).not.toBeNull();
+  });
+
+  it("untouched recall cards of words marked 'Đã biết' are removed; answered ones and lapsed words keep theirs", async () => {
+    const { db } = await freshServices();
+    const recorder = await import("@/services/reviewRecorder");
+    const conn = await db.getDatabase();
+    const [fresh, answered, lapsed, normal] = await Promise.all(["fresh", "answered", "lapsed", "normal"].map((w) => db.insertEnrichedWord(input(w))));
+    for (const id of [fresh, answered, lapsed]) await recorder.markWordKnown(id);
+    await conn.execute(`UPDATE srs_reviews SET lapses = 1, state = 3 WHERE word_id = $1`, [lapsed]);
+    for (const [id, reps] of [[fresh, 0], [answered, 2], [lapsed, 0], [normal, 0]] as const) {
+      await conn.execute(
+        `INSERT OR REPLACE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
+         VALUES ($1, $2, $3, $4, 0, $5, 5, 0)`,
+        [id, new Date().toISOString(), reps > 0 ? 2 : 0, reps, reps > 0 ? 5 : 0]
+      );
+    }
+
+    expect(await recorder.removeKnownRecallCards()).toBe(1);
+    expect(await recorder.removeKnownRecallCards()).toBe(0);
+    const left = await conn.select<Array<{ word_id: string }>>(`SELECT word_id FROM srs_production ORDER BY word_id`);
+    expect(left.map((r) => r.word_id).sort()).toEqual([answered, lapsed, normal].sort());
+  });
+
+  it("a missed check is an FSRS lapse: the word goes back to learning", async () => {
+    const { db } = await freshServices();
+    const recorder = await import("@/services/reviewRecorder");
+    const id = await db.insertEnrichedWord(input("cache"));
+    await recorder.markWordKnown(id);
+    const res = await (await import("@/services/srs")).recordReview(id, Rating.Again);
+    expect(res).toMatchObject({ state: 3, lapses: 1 });
+    const [after] = await db.getWordsByIds([id]);
+    expect(isRememberedLong(after)).toBe(false);
+  });
+
+  it("the first check follows the learner's retention target (FSRS interval, not the raw stability)", async () => {
+    const { db } = await freshServices();
+    const srs = await import("@/services/srs");
+    const recorder = await import("@/services/reviewRecorder");
+    srs.saveFSRSSettings({ requestRetention: 0.95 });
+    const id = await db.insertEnrichedWord(input("queue"));
+    const now = new Date();
+    await recorder.markWordKnown(id, now);
+    const [w] = await db.getWordsByIds([id]);
+    const stability = recorder.knownStabilityDays(id);
+    const expected = Math.round(stability * srs.getFSRSScheduler().interval_modifier);
+    expect(w.srs.stability).toBe(stability);
+    expect(w.srs.scheduled_days).toBe(expected);
+    expect(expected).toBeLessThan(stability);
+    expect(new Date(w.srs.next_review_date).getTime()).toBe(now.getTime() + expected * DAY_MS);
+    // Recall predicted at the target on the due day
+    const r = srs.getCardRetrievability(w.srs, new Date(now.getTime() + expected * DAY_MS));
+    expect(r).toBeGreaterThan(0.94);
+    expect(r).toBeLessThan(0.96);
+  });
+
+  it("words marked on the old short schedule move to the long one, from when they were marked", async () => {
+    const { db } = await freshServices();
+    const recorder = await import("@/services/reviewRecorder");
+    const conn = await db.getDatabase();
+    const markedAt = new Date(Date.now() - 10 * DAY_MS);
+    const old = await db.insertEnrichedWord(input("legacy"));
+    const checked = await db.insertEnrichedWord(input("checked"));
+    for (const [id, reps, stability] of [[old, 1, 9], [checked, 2, 12]] as const) {
+      await conn.execute(
+        `UPDATE srs_reviews SET state = 2, reps = $1, lapses = 0, stability = $2, difficulty = 5, scheduled_days = $2, interval = $2,
+           last_review = $3, next_review_date = $4 WHERE word_id = $5`,
+        [reps, stability, markedAt.toISOString(), new Date(markedAt.getTime() + stability * DAY_MS).toISOString(), id]
+      );
+    }
+
+    expect(await recorder.rescheduleLegacyKnownCards()).toBe(1);
+    expect(await recorder.rescheduleLegacyKnownCards()).toBe(0);
+    const [moved] = await db.getWordsByIds([old]);
+    const expected = recorder.knownSchedule(old, markedAt);
+    expect(moved.srs).toMatchObject({ state: 2, reps: 1, lapses: 0, stability: expected.stability, scheduled_days: expected.scheduledDays });
+    expect(moved.srs.next_review_date).toBe(expected.due);
+    expect(moved.srs.last_review).toBe(markedAt.toISOString());
+    expect(isRememberedLong(moved)).toBe(true);
+    // A word whose check was already answered keeps the schedule FSRS gave it
+    const [kept] = await db.getWordsByIds([checked]);
+    expect(kept.srs.stability).toBe(12);
   });
 
   it("isKnownOnly: only the untouched 'known' schedule", () => {

@@ -20,10 +20,11 @@ import { hasChosenInitialTenses } from "@/services/grammarPath";
 import { needsVocabMigration } from "@/services/vocabReset";
 import { isSimpleMode } from "@/services/learnerProfile";
 import { countWordStatus } from "@/services/wordStatus";
+import { countResting, loadRecentRuns, pickPracticeWords, type RecentRun } from "@/services/practicePicker";
 import {
   getRetrievabilityInfo,
   getLeechWords,
-  smartSortReviewQueue,
+  interleaveTopics,
   buildReviewSession,
   getNewCardsIntroducedToday,
   summarizeTodayWork,
@@ -472,14 +473,15 @@ export default function MainDashboard({
     setActivityVersion((v) => v + 1);
   };
 
-  // Starting tense setup for users who have not chosen initial tenses (startup on new version)
+  // Starting tenses, asked the first time the Grammar tab is opened (not in the first run, nor at startup:
+  // until then the path simply starts with the book's first lesson)
   const [showTenseSetup, setShowTenseSetup] = useState(false);
   useEffect(() => {
     const onboarding = showOnboarding || shouldShowOnboarding(words.length, loading);
-    if (vocabSetupChecked && !loading && !onboarding && vocabSetup === null && !hasChosenInitialTenses()) {
+    if (activeTab === "grammar" && vocabSetupChecked && !loading && !onboarding && vocabSetup === null && !hasChosenInitialTenses()) {
       setShowTenseSetup(true);
     }
-  }, [vocabSetupChecked, loading, showOnboarding, vocabSetup, words.length]);
+  }, [activeTab, vocabSetupChecked, loading, showOnboarding, vocabSetup, words.length]);
   const handleTenseSetupDone = async () => {
     setShowTenseSetup(false);
     await refreshWords();
@@ -845,10 +847,26 @@ export default function MainDashboard({
       if (session.length > 0) {
         setIsPracticeSession(false);
       } else {
+        // Practice: words being learnt first (all studied words when none of them can be practised now), never
+        // the words just answered right several times in a row (practicePicker): practice answers do not move
+        // FSRS, so a fixed "weakest first" order asked the same words again and again
         const latestPool = useWordsStore.getState().words.filter(matchesTopic);
-        const unmastered = getUnmasteredWords(latestPool);
-        const studied = (unmastered.length > 0 ? unmastered : getStudiedWords(latestPool)).filter((w) => !isPlaceholderMeaning(w.meaning_vn));
-        session = practiceCards(smartSortReviewQueue(studied, now).slice(0, maxSessionSize));
+        const runs = await loadRecentRuns(now).catch(() => new Map<string, RecentRun>());
+        const fromUnmastered = pickPracticeWords(getUnmasteredWords(latestPool), runs, maxSessionSize, { now });
+        const picked =
+          fromUnmastered.length > 0 ? fromUnmastered : pickPracticeWords(getStudiedWords(latestPool), runs, maxSessionSize, { now });
+        session = practiceCards(interleaveTopics(picked));
+        if (session.length === 0) {
+          const resting = countResting(getStudiedWords(latestPool), runs, now);
+          if (resting > 0) {
+            setGlobalToast(null);
+            setStartNotice({
+              title: "Các từ đã học đang được nghỉ",
+              body: `${resting} từ bạn vừa trả lời đúng liên tiếp được nghỉ luyện thêm một thời gian: nghỉ giữa các lần nhớ lại giúp nhớ lâu hơn. Chúng vẫn quay lại đúng lịch ôn. Bạn có thể học từ mới hoặc làm bài ngữ pháp.`,
+            });
+            return false;
+          }
+        }
         setIsPracticeSession(true);
         if (extra.reason === "young" && session.length > 0) {
           setGlobalToast({
@@ -1455,6 +1473,11 @@ export default function MainDashboard({
                 focus={focusPlan}
                 onSessionCompleted={(completed) => {
                   sessionCompletedRef.current = completed;
+                }}
+                onRetryMissed={(ids) => {
+                  // The words just missed, right away: each is practice unless its own step has come due
+                  const byId = new Map(useWordsStore.getState().words.map((w) => [w.id, w]));
+                  startWordListSession(ids.map((id) => byId.get(id)).filter((w): w is WordDetail => !!w));
                 }}
                 onStartFocus={(minutes) => {
                   sessionCompletedRef.current = false;

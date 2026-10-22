@@ -146,7 +146,7 @@ export default function ReviewTab({
                 <button
                   onClick={() => handleStartReview(false)}
                   disabled={words.length === 0}
-                  title="Luyện thêm mọi từ, không ảnh hưởng lịch ôn"
+                  title="Luyện thêm các từ đã học (từ vừa trả lời đúng liên tiếp được nghỉ), không ảnh hưởng lịch ôn"
                   className="inline-flex items-center gap-1.5 py-3 px-4 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-sm font-medium disabled:opacity-40"
                 >
                   <Dumbbell className="w-4 h-4" /> Luyện tất cả

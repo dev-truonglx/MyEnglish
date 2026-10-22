@@ -25,6 +25,8 @@ interface DailyQuestsCardProps {
   words: WordDetail[];
   /** New cards a session may still introduce today */
   newToday: number;
+  /** Reviews due today (with newToday and the first-try answers given, what "Đúng ngay lần đầu" can ask for) */
+  reviewsToday?: number;
   dailyGoal: number;
   hasStudied: boolean;
   freezesAvailable: number;
@@ -65,6 +67,7 @@ const REFRESH_EVENTS = [
 export default function DailyQuestsCard({
   words,
   newToday,
+  reviewsToday,
   dailyGoal,
   hasStudied,
   freezesAvailable,
@@ -81,8 +84,8 @@ export default function DailyQuestsCard({
   const [justOpened, setJustOpened] = useState<ChestReward | null>(null);
   const wordsRef = useRef(words);
   wordsRef.current = words;
-  const ctxRef = useRef({ newToday, dailyGoal, hasStudied });
-  ctxRef.current = { newToday, dailyGoal, hasStudied };
+  const ctxRef = useRef({ newToday, reviewsToday, dailyGoal, hasStudied });
+  ctxRef.current = { newToday, reviewsToday, dailyGoal, hasStudied };
 
   useEffect(() => {
     let alive = true;
@@ -97,6 +100,7 @@ export default function DailyQuestsCard({
           const c = ctxRef.current;
           const s = ensureQuestState(day, {
             dailyGoal: c.dailyGoal,
+            gradableToday: c.reviewsToday == null ? undefined : c.reviewsToday + c.newToday + data.facts.first_try,
             // At least half of the new-card budget goes to new words (the rest may be recall cards)
             newAllowed: Math.ceil(c.newToday / 2),
             hasStudied: c.hasStudied,

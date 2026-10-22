@@ -41,7 +41,7 @@ describe("comeback plan", () => {
     expect(comebackQuota(12, 30, 10)).toBe(10);
   });
 
-  it("starts only after 3+ missed days with more due than one day's share", () => {
+  it("starts after 3+ missed days with more due than one session", () => {
     const input = { ...base, today: "2026-10-10", backlog: 90 };
     expect(nextComebackPlan(null, { ...input, activeDates: ["2026-10-06"] })).toMatchObject({
       startedOn: "2026-10-10",
@@ -49,7 +49,8 @@ describe("comeback plan", () => {
       backlogAtStart: 90,
       dailyQuota: 30,
     });
-    expect(nextComebackPlan(null, { ...input, activeDates: ["2026-10-07"] })).toBeNull(); // 2 missed days
+    // 2 missed days: only a pile of more than 1.5 sessions starts one (see comebackTrigger.test.ts)
+    expect(nextComebackPlan(null, { ...input, backlog: 40, activeDates: ["2026-10-07"] })).toBeNull();
     expect(nextComebackPlan(null, { ...input, backlog: 12, activeDates: ["2026-10-01"] })).toBeNull(); // small pile
     expect(nextComebackPlan(null, { ...input, activeDates: [] })).toBeNull(); // new learner
   });

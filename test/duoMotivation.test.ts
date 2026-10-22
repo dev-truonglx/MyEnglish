@@ -6,6 +6,12 @@ import {
   resetConsecutiveSkipCount,
   selectMicroQuizQuestion,
   evaluateMicroQuizAnswer,
+  copyVariantIndex,
+  localDayNumber,
+  reminderVariants,
+  REMINDER_BRANCHES,
+  type ReminderBranch,
+  type ReminderCopyFacts,
 } from "@/services/duoMotivation";
 import { Rating } from "ts-fsrs";
 import type { WordDetail } from "@/types/database";
@@ -29,6 +35,19 @@ vi.mock("@/services/streak", () => ({
   getDailyGoal: vi.fn().mockReturnValue(10),
 }));
 
+/** The facts evaluateMotivationState builds from its params (no personal extras) */
+const factsOf = (p: { dueCount: number; streak: number; todayCount: number; dailyGoal: number; freezes?: number }): ReminderCopyFacts => ({
+  dueCount: p.dueCount,
+  streak: p.streak,
+  freezes: p.freezes ?? 0,
+  todayCount: p.todayCount,
+  dailyGoal: p.dailyGoal,
+  fadingCount: 0,
+  newToday: 0,
+  questsLeft: 0,
+});
+const titlesOf = (branch: ReminderBranch, f: ReminderCopyFacts) => reminderVariants(branch, f).map((v) => v.title);
+
 describe("duoMotivation algorithm", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -48,7 +67,7 @@ describe("duoMotivation algorithm", () => {
       expect(state.tone).toBe("level_1_encouraging");
       expect(state.mascotMood).toBe("happy");
       expect(state.isMicroQuizPreferred).toBe(false);
-      expect(state.title).toContain("Đến giờ ôn tập");
+      expect(titlesOf("default", factsOf({ dueCount: 5, streak: 3, todayCount: 5, dailyGoal: 10 }))).toContain(state.title);
     });
 
     it("returns level 2 playful guilt when user skipped 1 or 2 times", () => {
@@ -87,7 +106,9 @@ describe("duoMotivation algorithm", () => {
       });
       expect(state.tone).toBe("level_3_streak_fomo");
       expect(state.mascotMood).toBe("alarm");
-      expect(state.title).toContain("Chuỗi 7 ngày");
+      const titles = titlesOf("evening", factsOf({ dueCount: 8, streak: 7, todayCount: 3, dailyGoal: 10 }));
+      expect(titles).toContain(state.title);
+      expect(titles.some((t) => t.includes("Chuỗi 7 ngày"))).toBe(true);
       expect(state.isMicroQuizPreferred).toBe(true);
     });
 
@@ -115,27 +136,36 @@ describe("duoMotivation algorithm", () => {
         dailyGoal: 10,
         hour: 10,
       });
-      expect(state.title).toBe("Ôn dần, mỗi lần vài từ");
-      expect(state.message).toContain("35 từ");
-      expect(state.message).toContain("không cần ôn hết một lúc");
+      const variants = reminderVariants("backlog", factsOf({ dueCount: 35, streak: 2, todayCount: 0, dailyGoal: 10 }));
+      expect(variants.map((v) => v.message)).toContain(state.message);
+      expect(variants[0].title).toBe("Ôn dần, mỗi lần vài từ");
+      expect(variants[0].message).toContain("không cần ôn hết một lúc");
+      // Every wording that gives a number gives the real one
+      for (const v of variants) if (/\d+ từ đang chờ/.test(v.message)) expect(v.message).toContain("35 từ");
       expect(state.mascotMood).toBe("happy");
     });
 
     it("never says the streak is 1 day when it is 0, nor promises a freeze the learner doesn't have", () => {
-      const base = { dueCount: 8, consecutiveSkips: 0, todayCount: 0, dailyGoal: 10, hour: 21 };
-      const noStreak = evaluateMotivationState({ ...base, streak: 0 });
-      expect(noStreak.title).toBe("Bắt đầu chuỗi hôm nay");
-      expect(noStreak.message).not.toContain("đóng băng");
-      const noFreeze = evaluateMotivationState({ ...base, streak: 3, freezes: 0 });
-      expect(noFreeze.message).not.toContain("đóng băng");
-      const withFreeze = evaluateMotivationState({ ...base, streak: 9, freezes: 1 });
-      expect(withFreeze.message).toContain("1 lượt đóng băng");
+      const base = { dueCount: 8, todayCount: 0, dailyGoal: 10 };
+      // Every wording of the evening branch, whichever the day picks
+      const noStreak = reminderVariants("evening", factsOf({ ...base, streak: 0 }));
+      expect(noStreak[0].title).toBe("Bắt đầu chuỗi hôm nay");
+      for (const v of noStreak) {
+        expect(`${v.title} ${v.message}`).not.toMatch(/Chuỗi 0|0 ngày|1 ngày/);
+        expect(v.message).not.toContain("đóng băng");
+      }
+      for (const v of reminderVariants("evening", factsOf({ ...base, streak: 3, freezes: 0 }))) expect(v.message).not.toContain("đóng băng");
+      expect(reminderVariants("evening", factsOf({ ...base, streak: 9, freezes: 1 })).some((v) => v.message.includes("1 lượt đóng băng"))).toBe(true);
+      const state = evaluateMotivationState({ ...base, consecutiveSkips: 0, hour: 21, streak: 0 });
+      expect(state.message).not.toContain("đóng băng");
     });
 
     it("gives an honest time estimate instead of '1 phút' for many cards", () => {
-      const state = evaluateMotivationState({ dueCount: 19, consecutiveSkips: 0, streak: 2, todayCount: 0, dailyGoal: 10, hour: 9 });
-      expect(state.message).not.toContain("1 phút là xong");
-      expect(state.message).toContain("phút");
+      for (const v of reminderVariants("default", factsOf({ dueCount: 19, streak: 2, todayCount: 0, dailyGoal: 10 }))) {
+        expect(v.message).not.toContain("1 phút là xong");
+        expect(v.message).not.toMatch(/khoảng 1 phút/);
+      }
+      expect(reminderVariants("default", factsOf({ dueCount: 19, streak: 2, todayCount: 0, dailyGoal: 10 }))[0].message).toContain("phút");
     });
 
     it("provides smart timing contextual message for lunchtime", () => {
@@ -147,7 +177,7 @@ describe("duoMotivation algorithm", () => {
         dailyGoal: 10,
         hour: 12, // 12 PM
       });
-      expect(state.title).toContain("Tráng miệng");
+      expect(titlesOf("lunch", factsOf({ dueCount: 4, streak: 2, todayCount: 2, dailyGoal: 10 }))).toContain(state.title);
     });
 
     it("provides smart timing contextual message for work end", () => {
@@ -159,7 +189,49 @@ describe("duoMotivation algorithm", () => {
         dailyGoal: 10,
         hour: 18, // 6 PM
       });
-      expect(state.title).toContain("Gập task xả hơi");
+      expect(titlesOf("work_end", factsOf({ dueCount: 4, streak: 2, todayCount: 2, dailyGoal: 10 }))).toContain(state.title);
+    });
+  });
+
+  describe("reminder wording (B12)", () => {
+    const facts = factsOf({ dueCount: 6, streak: 4, todayCount: 2, dailyGoal: 10 });
+
+    it("has 4 to 6 wordings in every branch", () => {
+      for (const b of REMINDER_BRANCHES) {
+        const n = reminderVariants(b, facts).length;
+        expect(n, b).toBeGreaterThanOrEqual(4);
+        expect(n, b).toBeLessThanOrEqual(6);
+      }
+    });
+
+    it("keeps a day's wording and never repeats it the next day", () => {
+      for (const b of REMINDER_BRANCHES) {
+        const n = reminderVariants(b, facts).length;
+        for (let day = 20000; day < 20120; day++) {
+          expect(copyVariantIndex(b, day, n)).toBe(copyVariantIndex(b, day, n));
+          expect(copyVariantIndex(b, day + 1, n), `${b} day ${day}`).not.toBe(copyVariantIndex(b, day, n));
+        }
+        // Every wording comes up
+        const seen = new Set(Array.from({ length: n * 3 }, (_, i) => copyVariantIndex(b, 20000 + i, n)));
+        expect(seen.size, b).toBe(n);
+      }
+      const params = { dueCount: 4, consecutiveSkips: 0, streak: 2, todayCount: 2, dailyGoal: 10, hour: 9 };
+      const morning = evaluateMotivationState({ ...params, now: new Date(2026, 9, 22, 9) });
+      expect(evaluateMotivationState({ ...params, now: new Date(2026, 9, 22, 16) }).title).toBe(morning.title);
+      expect(evaluateMotivationState({ ...params, now: new Date(2026, 9, 23, 9) }).title).not.toBe(morning.title);
+      expect(localDayNumber(new Date(2026, 9, 23, 0, 5)) - localDayNumber(new Date(2026, 9, 22, 23, 55))).toBe(1);
+    });
+
+    it("weaves in the learner's own numbers when they are known", () => {
+      const own = { ...facts, fadingCount: 4, newToday: 3, questsLeft: 2 };
+      const all = REMINDER_BRANCHES.flatMap((b) => reminderVariants(b, own)).map((v) => `${v.title} ${v.message}`);
+      expect(all.some((t) => t.includes("4 từ"))).toBe(true);
+      expect(all.some((t) => t.includes("Còn 2 nhiệm vụ"))).toBe(true);
+      expect(all.some((t) => t.includes("3 từ mới"))).toBe(true);
+      expect(all.some((t) => t.includes("Chuỗi 4 ngày") || t.includes("4 ngày"))).toBe(true);
+      // Unknown numbers are never shown as 0
+      const none = REMINDER_BRANCHES.flatMap((b) => reminderVariants(b, facts)).map((v) => `${v.title} ${v.message}`);
+      expect(none.some((t) => /\b0 từ sắp quên|Còn 0 nhiệm vụ|0 từ mới/.test(t))).toBe(false);
     });
   });
 

@@ -31,7 +31,8 @@ import { recordGrammarAnswer as recordBookGrammarAnswer, type SessionEntry } fro
 import { checkTask } from "@/services/grammarItems";
 import type { WordDetail, ReviewCard } from "@/types/database";
 import { isWordDue, practiceCards } from "@/services/cards";
-import { shuffle } from "@/lib/utils";
+import { loadRecentRuns, pickPracticeWords, type RecentRun } from "@/services/practicePicker";
+import { itemsLeft } from "@/lib/utils";
 import { BOOK_REVISION_KEY, clearBookCache } from "@/services/grammarBook";
 import { getRecentIntros } from "@/services/intros";
 import {
@@ -40,9 +41,19 @@ import {
   recordIntro,
   markWordKnown,
   schedulingDecision,
+  KNOWN_RECHECK_LABEL,
 } from "@/services/reviewRecorder";
 import { setPopupSessionActive } from "@/services/activeSession";
-import { buildPopupChoices, describeWrongChoice, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
+import {
+  buildPopupChoices,
+  describeWrongChoice,
+  needsIntro,
+  popupAnswerRating,
+  popupMcExercise,
+  popupMcVariant,
+  selectSmartPopupMode,
+  type PopupMcVariant,
+} from "@/services/popupSession";
 import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors, loadCatalogMeanings } from "@/services/vocabCatalog";
 import { parseTerms } from "@/types/database";
@@ -50,9 +61,9 @@ import { summarizeSession, type SessionResult, type SessionSummary } from "@/ser
 import { getStoredMnemonic } from "@/services/aiMnemonic";
 import { highlightWord } from "@/components/review/highlightWord";
 import { getConciseMeaning } from "@/services/meaningText";
-import { celebrationFor, type Celebration } from "@/services/celebrations";
+import { celebrationFor, praiseWord, type Celebration } from "@/services/celebrations";
 import { logLearningEvent } from "@/services/learningEvents";
-import { handleSpeak } from "@/components/review/speech";
+import { englishVoices, handleSpeak } from "@/components/review/speech";
 import PretestCard, { PretestFeedback } from "@/components/review/PretestCard";
 import { buildPretest, recordPretest, shouldPretest, type PretestResult } from "@/services/pretest";
 
@@ -75,8 +86,6 @@ import {
   maskAllWordForms,
   needsRelearnIntro,
   pickExample,
-  smartSortReviewQueue,
-  multipleChoiceDirection,
   type ExerciseType,
 } from "@/services/smartReview";
 import type { GrammarExercise, GrammarLesson } from "@/types/grammar";
@@ -98,6 +107,10 @@ interface ChoiceOption {
 export type FocusReviewItem =
   | { kind: "word"; word: ReviewCard }
   | { kind: "grammar"; exercise: GrammarExercise; lesson: GrammarLesson; entry?: SessionEntry };
+
+/** One item of the popup, whichever copy of it (a retry is the same item) */
+const itemKey = (item: FocusReviewItem): string =>
+  item.kind === "word" ? `w:${item.word.id}:${item.word.direction}` : `g:${item.exercise.id}`;
 
 /**
  * Words and grammar questions in a popup of `size` items (N16). Due words come first: while words are due,
@@ -202,7 +215,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   // Active question mode: multiple_choice (phím 1-4) or typing (nhập đáp án)
   const [activeMode, setActiveMode] = useState<"multiple_choice" | "typing" | "letter_tiles">("multiple_choice");
   // Vocabulary multiple choice: show the word and pick its meaning, or the other way round
-  const [mcDirection, setMcDirection] = useState<"en_to_vn" | "vn_to_en">("en_to_vn");
+  const [mcDirection, setMcDirection] = useState<PopupMcVariant>("en_to_vn");
 
   // Multiple choice state
   const [choices, setChoices] = useState<ChoiceOption[]>([]);
@@ -288,7 +301,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
   /** Put a wrong item back at the end of the queue (at most MAX_POPUP_RETRIES times) */
   const requeueItem = (item: FocusReviewItem): boolean => {
-    const key = item.kind === "word" ? `w:${item.word.id}:${item.word.direction}` : `g:${item.exercise.id}`;
+    const key = itemKey(item);
     const count = retryCountRef.current.get(key) ?? 0;
     if (count >= MAX_POPUP_RETRIES) return false;
     retryCountRef.current.set(key, count + 1);
@@ -440,7 +453,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       if (correct && rating >= Rating.Good) recordFirstTryCorrect();
     }
     const praise = celebrationFor({ ...recorded, direction: word.direction, word: word.word });
-    noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, praise?.kind ?? null, !gradedElsewhere);
+    // The summary marks long-term memory and rescues; an overnight win is only said on the spot
+    const milestone = praise?.kind === "mastered" || praise?.kind === "rescued" ? praise.kind : null;
+    noteFirstAnswer(`w:${cardKey}`, word.word, correct, nextReview, milestone, !gradedElsewhere);
 
     let reviewLabel: string;
     if (!correct) {
@@ -460,6 +475,8 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     return praise;
   };
   const praiseText = (p: Celebration | null) => (p ? `${p.title} ${p.detail} ` : "");
+  // "Chính xác!" every time read like a machine: the word varies with the item and the minute
+  const praiseNow = (index: number) => praiseWord(index + Math.floor(Date.now() / 60000));
   const currentWord = currentItem?.kind === "word" ? currentItem.word : null;
 
   // New words get an introduction card before their first question (once per popup session)
@@ -721,42 +738,38 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       const wordTarget = quota.words;
       const selectedGrammar = grammarCandidates.slice(0, quota.grammar);
 
-      // Nothing due: weakest studied words first (practice only). Practice only uses words already studied:
-      // a waiting word needs its introduction. Read (without examples) only when the due words do not fill
-      // the popup; the few picked are then read in full.
+      // Due cards first, in every mode: a due word asked as practice here would be asked again, graded, by the
+      // next session. The rest of the popup is practice on words already studied (a waiting word needs its
+      // introduction), picked by practicePicker: words missed lately or weakest ("Luôn nhắc ngẫu nhiên": at
+      // random), never the words just answered right several times in a row unless the popup would be empty.
+      // Read (without examples) only when the due words do not fill the popup; the few picked are then read in full.
       const allWordsMode = currentSettings.triggerCondition === "all_words";
-      const needsPractice = allWordsMode || dueCards.length < wordTarget;
-      const studiedWords = needsPractice
-        ? (await getWordsLite({ studiedOnly: true }).catch(() => [] as WordDetail[])).filter(
-            (w) => usable(w) && (w.srs?.reps ?? 0) > 0
-          )
-        : [];
+      const needsPractice = dueCards.length < wordTarget;
+      const [studiedWords, recentRuns] = needsPractice
+        ? await Promise.all([
+            getWordsLite({ studiedOnly: true })
+              .then((ws) => ws.filter((w) => usable(w) && (w.srs?.reps ?? 0) > 0))
+              .catch(() => [] as WordDetail[]),
+            loadRecentRuns(now).catch(() => new Map<string, RecentRun>()),
+          ])
+        : [[] as WordDetail[], new Map<string, RecentRun>()];
       const fullWords = async (picked: WordDetail[]): Promise<WordDetail[]> => {
         if (picked.length === 0) return [];
         const byId = new Map((await getWordsByIds(picked.map((w) => w.id)).catch(() => [])).map((w) => [w.id, w]));
         return picked.map((w) => byId.get(w.id) ?? w);
       };
-      let selectedWords: ReviewCard[] = [];
-
-      if (allWordsMode && studiedWords.length > 0) {
-        const shuffled = shuffle(studiedWords);
-        selectedWords = practiceCards(await fullWords(shuffled.slice(0, wordTarget)));
-      } else {
-        selectedWords = dueCards.slice(0, wordTarget);
-        if (selectedWords.length === 0) {
-          selectedWords = practiceCards(await fullWords(smartSortReviewQueue(studiedWords).slice(0, wordTarget)));
-        }
-      }
-
-      // Bổ sung thêm từ nếu chưa đủ wordTarget
+      let selectedWords: ReviewCard[] = dueCards.slice(0, wordTarget);
       if (selectedWords.length < wordTarget && studiedWords.length > 0) {
-        const selectedIds = new Set(selectedWords.map((w) => w.id));
-        // Never fill with brand-new words: that would bypass the daily new-card limit
-        const extra = shuffle(studiedWords.filter((w) => !selectedIds.has(w.id)));
-        selectedWords = [
-          ...selectedWords,
-          ...practiceCards(await fullWords(extra.slice(0, wordTarget - selectedWords.length))),
-        ];
+        const pick = (fillWithResting: boolean) =>
+          pickPracticeWords(studiedWords, recentRuns, wordTarget - selectedWords.length, {
+            now,
+            exclude: new Set(selectedWords.map((w) => w.id)),
+            order: allWordsMode ? "random" : "weakest",
+            fillWithResting,
+          });
+        let practice = pick(false);
+        if (practice.length === 0 && selectedWords.length === 0 && selectedGrammar.length === 0) practice = pick(true);
+        selectedWords = [...selectedWords, ...practiceCards(await fullWords(practice))];
       }
 
       // 4. Xen kẽ (Interleaving) Từ vựng và Ngữ pháp để tối ưu hóa khả năng ghi nhớ dài hạn
@@ -938,7 +951,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       // letter tiles to typing (see selectSmartPopupMode)
       const smartMode = selectSmartPopupMode(wordObj);
       setActiveMode(smartMode);
-      const direction = smartMode === "multiple_choice" ? multipleChoiceDirection(wordObj) : "vn_to_en";
+      const direction = smartMode === "multiple_choice" ? popupMcVariant(wordObj, englishVoices().length > 0) : "vn_to_en";
       setMcDirection(direction);
 
       const pool =
@@ -947,7 +960,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
           : loadCatalogDistractors(getStudyLevels(), 600).catch(() => [] as WordDetail[]);
       pool.then((all) => {
         if (cancelled) return;
-        setChoices(buildPopupChoices(wordObj, all.filter((w) => !isPlaceholderMeaning(w.meaning_vn)), direction));
+        setChoices(
+          buildPopupChoices(wordObj, all.filter((w) => !isPlaceholderMeaning(w.meaning_vn)), direction === "listen" ? "en_to_vn" : direction)
+        );
       });
     } else {
       // Bài tập ngữ pháp
@@ -1029,18 +1044,18 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
       if (item.kind === "word") {
         const wordObj = item.word;
         if (correct) {
-          const praise = await trackSave(gradeWord(wordObj, true, "multiple_choice"));
-          showFeedbackFor(item, index, praise ? `${praiseText(praise)}${NEXT_HINT}` : `Chính xác! ${NEXT_HINT}`);
+          const praise = await trackSave(gradeWord(wordObj, true, popupMcExercise(mcDirection)));
+          showFeedbackFor(item, index, praise ? `${praiseText(praise)}${NEXT_HINT}` : `${praiseNow(index)} ${NEXT_HINT}`);
         } else {
           // Cải tiến: Đẩy câu trả lời sai vào cuối hàng đợi để củng cố ngay
           requeueItem(item);
           const rightMeaning = choices.find((c) => c.isCorrect)?.word;
           setFeedbackMsg(
-            mcDirection === "en_to_vn" && rightMeaning
+            mcDirection !== "vn_to_en" && rightMeaning
               ? `Chưa chính xác! "${wordObj.word}" nghĩa là: ${rightMeaning}`
               : `Chưa chính xác! Từ đúng là: "${wordObj.word}"`
           );
-          await trackSave(gradeWord(wordObj, false, "multiple_choice"));
+          await trackSave(gradeWord(wordObj, false, popupMcExercise(mcDirection)));
         }
       } else {
         // Xử lý bài tập ngữ pháp
@@ -1048,7 +1063,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         if (correct) {
           setNextReviewText("đã ghi nhận tiến độ");
           await trackSave(recordGrammarAnswer(item, true, false, choice.word));
-          showFeedbackFor(item, index, `Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
+          showFeedbackFor(item, index, `${praiseNow(index)} Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           // Đẩy bài tập sai vào cuối hàng đợi
           requeueItem(item);
@@ -1161,7 +1176,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         if (correct) {
           setNextReviewText("đã ghi nhận tiến độ");
           await trackSave(recordGrammarAnswer(item, true, false, typedInput));
-          showFeedbackFor(item, index, `Chính xác! Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
+          showFeedbackFor(item, index, `${praiseNow(index)} Đáp án: ${formatAnswerForms(ex)}. ${NEXT_HINT}`);
         } else {
           requeueItem(item);
           setNextReviewText("ở cuối phiên này");
@@ -1318,8 +1333,9 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   // Typing with the example sentence shown is a cloze (as in flashcard sessions: its own slow threshold and
   // typical times), without one it is spelling
   const typingExercise: ExerciseType = maskedSentence ? "cloze" : "spelling";
-  // Recognition question: the English word is the prompt and the options are meanings
-  const wordPrompt = activeMode === "multiple_choice" && mcDirection === "en_to_vn";
+  // Recognition question: the English word is the prompt (read, or heard) and the options are meanings
+  const wordPrompt = activeMode === "multiple_choice" && mcDirection !== "vn_to_en";
+  const listenPrompt = activeMode === "multiple_choice" && mcDirection === "listen";
 
   // After a wrong answer: which word was picked instead, and the stored memory hook if any
   const wrongPick = useMemo(
@@ -1385,7 +1401,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
                 {queue.length > 0 && currentItem && (
                   <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-bold border border-slate-200 dark:border-zinc-700">
-                    Câu {currentIndex + 1} / {queue.length}
+                    Còn {itemsLeft(queue.length, currentIndex)} câu
                   </span>
                 )}
 
@@ -1574,7 +1590,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   onClick={markIntroKnown}
                   className="w-full py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                 >
-                  ✓ Đã biết từ này (hỏi lại sau khoảng một tuần)
+                  ✓ Đã biết từ này (hỏi lại sau khoảng {KNOWN_RECHECK_LABEL})
                 </button>
               )}
             </div>
@@ -1588,7 +1604,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 <div className="flex items-center justify-between gap-2 flex-wrap text-xs">
                   <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-cyan-600 dark:text-cyan-400">
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>{wordPrompt ? "Từ tiếng Anh:" : "Nghĩa tiếng Việt:"}</span>
+                    <span>{listenPrompt ? "Nghe từ tiếng Anh:" : wordPrompt ? "Từ tiếng Anh:" : "Nghĩa tiếng Việt:"}</span>
                   </div>
 
                   <div className="flex items-center gap-1.5 flex-wrap">
@@ -1602,7 +1618,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
                 {/* Từ tiếng Anh (trắc nghiệm chọn nghĩa) hoặc nghĩa tiếng Việt */}
                 <div className="p-4 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 text-center">
-                  {wordPrompt ? (
+                  {listenPrompt && !isAnswered ? (
+                    // By ear: the word is not written until the answer (the learner presses play, never automatic)
+                    <button
+                      type="button"
+                      onClick={() => currentWord && handleSpeak(currentWord.word)}
+                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold"
+                    >
+                      <Volume2 className="w-4 h-4" /> Nghe từ
+                    </button>
+                  ) : wordPrompt ? (
                     <div className="flex items-baseline justify-center gap-2.5 flex-wrap">
                       <h2 className="text-xl sm:text-2xl font-black text-slate-900 dark:text-white tracking-tight">
                         {currentWord?.word}
@@ -1621,7 +1646,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                 </div>
 
                 {/* Câu ví dụ có từ (không kèm bản dịch: bản dịch lộ nghĩa) */}
-                {wordPrompt && currentWord && primaryExample?.sentence_en && (
+                {wordPrompt && !(listenPrompt && !isAnswered) && currentWord && primaryExample?.sentence_en && (
                   <p className="px-1 text-xs italic text-slate-600 dark:text-zinc-300">
                     "{highlightWord(primaryExample.sentence_en, currentWord.word)}"
                   </p>
@@ -1849,7 +1874,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
 
                   {!isCorrect && wrongPick && (
                     <div className="text-[11px] text-slate-700 dark:text-zinc-300">
-                      {mcDirection === "en_to_vn" ? (
+                      {mcDirection !== "vn_to_en" ? (
                         <>
                           Bạn chọn "{wrongPick.meaning}", đó là nghĩa của từ <span className="font-bold">{wrongPick.word}</span>.
                         </>

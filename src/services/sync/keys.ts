@@ -67,6 +67,7 @@ export const SYNCED_KV: Record<string, KvStrategy> = {
   myenglish_daily_quests_v1: "lww",
   myenglish_weekly_challenges_v1: "lww",
   myenglish_bonus_freezes_v1: "arrayUnion",
+  myenglish_streak_repairs_v1: "arrayUnion",
 };
 
 export function isSyncedKvKey(key: string): boolean {

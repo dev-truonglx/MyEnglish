@@ -11,6 +11,7 @@ import {
   ensureWeeklyState,
   pickWeeklyChallenges,
   readWeeklyState,
+  roomFor,
   targetFor,
   weekFactsFrom,
   type PickContext,
@@ -19,13 +20,16 @@ import {
 import { getXPState } from "@/services/smartReview";
 
 const WEEK = "2026-10-12";
+// A roomy plan and plenty of near-mastered / forgotten words: the room never binds unless a test says so
 const ctx = (over: Partial<PickContext> = {}): PickContext => ({
   topic: "A1",
-  forgottenAvailable: true,
+  forgottenCount: 30,
   grammarAvailable: true,
   pronunciationAvailable: true,
   hasStudied: true,
   lastWeek: null,
+  plan: { newCardsPerDay: 20, dailyGoal: 60, focusMinutes: 5 },
+  nearMastered: 60,
   ...over,
 });
 const weeks = Array.from({ length: 40 }, (_, i) => `2026-${String(1 + (i % 12)).padStart(2, "0")}-${String(1 + i).padStart(2, "0")}`);
@@ -50,7 +54,7 @@ describe("picking the week's challenges", () => {
   });
 
   it("only offers what the learner can do", () => {
-    const c = ctx({ topic: null, forgottenAvailable: false, grammarAvailable: false, pronunciationAvailable: false, hasStudied: false });
+    const c = ctx({ topic: null, forgottenCount: 0, grammarAvailable: false, pronunciationAvailable: false, hasStudied: false });
     expect(availableKinds(c).sort()).toEqual(["active_days", "goal_days", "new_words", "review_correct"]);
     for (const w of weeks) expect(pickWeeklyChallenges(w, c)).toHaveLength(3);
   });
@@ -80,10 +84,11 @@ describe("difficulty: targets follow last week", () => {
     expect(targetFor("active_days", "hard", 7)).toBe(7);
   });
 
-  it("the pick uses last week's figures", () => {
+  it("the pick uses last week's figures, within the week's room", () => {
     const last: WeekFacts = { ...EMPTY_WEEK_FACTS, review_correct: 300, new_words: 50, focus: 10, mastered: 20 };
-    for (const c of pickWeeklyChallenges(WEEK, ctx({ lastWeek: last }))) {
-      expect(c.target).toBe(targetFor(c.kind, c.tier, last[c.kind]));
+    const c0 = ctx({ lastWeek: last });
+    for (const c of pickWeeklyChallenges(WEEK, c0)) {
+      expect(c.target).toBe(targetFor(c.kind, c.tier, last[c.kind], roomFor(c.kind, c0)));
     }
   });
 });

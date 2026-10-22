@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { PenLine, Sparkles, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { gradeSentenceWithAI, type SentenceGrade } from "@/services/ai";
+import { gradeSentenceWithAI, markAiCliUnavailable, type SentenceGrade } from "@/services/ai";
 import { ratingFromSentenceGrade, recordFreeWritingUse } from "@/services/smartReview";
 import { getConciseMeaning } from "@/services/meaningText";
 import { applyCorrections, saveMistakes } from "@/services/mistakes";
@@ -64,6 +64,8 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
       }
     } catch (err) {
       console.warn("AI sentence grading failed, falling back:", err);
+      // No free writing again until the AI is checked anew (see isAiCliReady)
+      markAiCliUnavailable();
       onFallback();
     } finally {
       setGrading(false);

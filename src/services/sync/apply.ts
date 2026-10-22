@@ -12,6 +12,7 @@
 import { deleteWordRows, getDatabase, insertCatalogWords } from "../db";
 import { getCatalogEntries } from "../vocabCatalog";
 import { toCatalogWordInput } from "../vocabFeed";
+import { settleKnownWords } from "../reviewRecorder";
 import { applySyncedGrammarProgress } from "../grammarService";
 import { ensureKeyColumn, mistakeKey } from "../mistakes";
 import type { GrammarProgress } from "@/types/grammar";
@@ -345,6 +346,7 @@ const KV_EVENTS: Record<string, string> = {
   myenglish_study_logs_v1: "myenglish-activity-updated",
   myenglish_daily_goal_v1: "myenglish-activity-updated",
   myenglish_bonus_freezes_v1: "myenglish-activity-updated",
+  myenglish_streak_repairs_v1: "myenglish-activity-updated",
   myenglish_daily_quests_v1: "myenglish-quests-updated",
   myenglish_weekly_challenges_v1: "myenglish-weekly-challenges-updated",
   myenglish_grammar_introduced_v1: "myenglish-grammar-updated",
@@ -430,5 +432,7 @@ export async function applyRows(rows: SyncRow[], ctx?: ApplyContext): Promise<Ap
   applied += await applyMistakes(db, by("mistake"), context);
   applied += await applyGrammar(by("grammar"));
   applied += await applyKv(by("kv"));
+  // Words marked "Đã biết" on a machine still on the old rules get the current ones (after logs: the mark is one)
+  if (applied > 0) await settleKnownWords().catch((err) => console.warn("Known words not settled:", err));
   return { applied, deferred };
 }

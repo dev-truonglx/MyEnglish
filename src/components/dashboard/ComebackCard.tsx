@@ -47,8 +47,8 @@ export default function ComebackCard({ comeback, onStart }: ComebackCardProps) {
             {dayNumber === 1 && todayDone === 0 ? "Chào mừng bạn quay lại 👋" : doneToday ? "Xong phần hôm nay" : "Tiếp tục phần hôm nay"}
           </h3>
           <p className="text-xs text-slate-600 dark:text-zinc-400 max-w-md">
-            Bạn đã nghỉ {plan.missedDays} ngày nên có {backlog} thẻ đang chờ. Không cần làm hết một lúc: những thẻ dễ
-            quên nhất đã được xếp lên trước, và mỗi ngày chỉ cần một phần.
+            Bạn đã nghỉ {plan.missedDays} ngày nên có {backlog} thẻ đang chờ. Không cần làm hết một lúc: mỗi ngày chỉ
+            cần một phần, gồm những thẻ dễ quên nhất và cả những thẻ đã chờ lâu nhất.
           </p>
         </div>
         <div className="w-12 h-12 shrink-0 rounded-2xl bg-amber-100 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 flex items-center justify-center text-amber-600 dark:text-amber-400">

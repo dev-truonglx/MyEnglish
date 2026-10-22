@@ -233,9 +233,9 @@ describe("pronunciation counts for the day, one definition of 'đã thuộc' in 
     expect(getActivityLogs()[getLocalDateString()]).toBe(9);
   });
 
-  it("reading's 'mastered' is 'Nhớ lâu': a word only marked 'Đã biết' is not", () => {
+  it("reading's 'mastered' is 'Nhớ lâu', words marked 'Đã biết' included", () => {
     expect(bankStatus(makeWord("deploy", { srs: { state: 2, stability: 40, reps: 6 } }))).toBe("mastered");
-    expect(bankStatus(makeWord("tap", { srs: { state: 2, stability: 30, reps: 1, lapses: 0 } }))).toBe("learning");
+    expect(bankStatus(makeWord("tap", { srs: { state: 2, stability: 30, reps: 1, lapses: 0 } }))).toBe("mastered");
     expect(bankStatus(makeWord("young", { srs: { state: 2, stability: 5, reps: 3 } }))).toBe("learning");
     expect(bankStatus(makeWord("new"))).toBe("new");
   });

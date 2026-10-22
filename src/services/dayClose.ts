@@ -64,7 +64,7 @@ export function dayCloseStatus(s: DayCloseInput): DayCloseStatus {
     };
   }
   if (s.todayCount === 0) {
-    return { done: false, title: "Hôm nay chưa có thẻ nào đến hạn", note: "Ôn nhanh 3 thẻ là đủ giữ chuỗi ngày học." };
+    return { done: false, title: "Hôm nay chưa có thẻ nào đến hạn", note: "Chỉ cần trả lời 1 câu là giữ được chuỗi ngày học, ví dụ ôn nhanh 3 thẻ." };
   }
   const left = Math.max(1, s.dailyGoal - s.todayCount);
   return { done: false, title: "Xong phần đến hạn", note: `Còn ${left} câu nữa là đạt mục tiêu hôm nay (${s.todayCount}/${s.dailyGoal}).` };

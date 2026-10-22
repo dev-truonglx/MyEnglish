@@ -45,7 +45,7 @@ export interface ReadingAnalysis {
   totalWords: number;
 }
 
-/** "mastered" is the shared "Nhớ lâu" (wordStatus.ts): a word only marked "Đã biết" is not, until reviewed */
+/** "mastered" is the shared "Nhớ lâu" (wordStatus.ts), words marked "Đã biết" included */
 export function bankStatus(word: WordDetail): BankStatus {
   if (isRememberedLong(word)) return "mastered";
   return (word.srs?.reps ?? 0) > 0 ? "learning" : "new";

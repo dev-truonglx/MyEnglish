@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { AlertTriangle, Layers, Loader2 } from "lucide-react";
 import type { StudyLevel } from "@/services/vocabCatalog";
-import { defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
+import { defaultHighFirst, defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { resetVocabulary } from "@/services/vocabReset";
 import { exportBackupJson } from "@/services/dataExport";
 import { getUserOverrideLevel } from "@/services/userProficiency";
@@ -51,7 +51,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
     setBusy(true);
     setError(null);
     try {
-      setStudyLevels(levels);
+      setStudyLevels(levels, { highFirst: defaultHighFirst(getUserOverrideLevel()) });
       await topUpNewWords();
       onDone();
     } catch (err) {
@@ -114,7 +114,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
               </p>
             </div>
             <LevelPicker value={levels} onChange={setLevels} disabled={busy} />
-            <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(levels)}</p>
+            <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(levels, defaultHighFirst(getUserOverrideLevel()))}</p>
             {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex justify-end">
               <button

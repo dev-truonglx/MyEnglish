@@ -2,7 +2,9 @@
  * Weekly challenges ("Thử thách tuần"): three goals a week, one per difficulty tier, picked once per week from
  * a pool of kinds with a seed of the week, then kept until Monday. A tier pays more XP for a bigger target, and
  * targets follow the learner: they start from last week's own figure for that kind (a fixed floor when there is
- * none), so "Khó" is hard for this learner, not for everyone. All three done adds a bonus.
+ * none), so "Khó" is hard for this learner, not for everyone. Targets also stay within what the week can hold
+ * for this learner (roomFor: the daily plan, the days left, the words near long-term memory...), so a 5-minute
+ * plan is never asked for a 15-minute week. All three done adds a bonus.
  * Progress is read from what the app already records: review logs, the daily activity log, learning events
  * (focus sessions, words reaching long-term memory, pronunciation lessons) and grammar progress.
  */
@@ -10,7 +12,9 @@ import type { WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
 import { getLearningEventsSince } from "./learningEvents";
 import { getReviewLogsSince, pickChallengeTopic, startOfWeek, weekKey, type ProgressLog } from "./progress";
-import { awardXP } from "./smartReview";
+import { awardXP, isSuspended, MATURE_STABILITY_DAYS } from "./smartReview";
+import { getStudyLimits } from "./srs";
+import { getFocusSettings } from "./focusSettings";
 import { getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
 import { persistKeyNow } from "./storageBackup";
 import { seededRandom } from "./dailyQuests";
@@ -95,35 +99,105 @@ export const EMPTY_WEEK_FACTS: WeekFacts = {
   pronunciation: 0,
 };
 
+/** The learner's daily plan (onboarding DAILY_PLANS or Settings), which bounds what a week can hold */
+export interface WeeklyPlan {
+  /** Daily new-card budget (getStudyLimits) */
+  newCardsPerDay: number;
+  /** Answers a day that make the daily goal */
+  dailyGoal: number;
+  /** Length of a focus session (minutes) */
+  focusMinutes: number;
+}
+
 export interface PickContext {
   /** Level of the level challenge (pickChallengeTopic), null: none possible */
   topic: string | null;
-  forgottenAvailable: boolean;
+  /** Words in "Từ hay quên" now (0: no forgotten challenge) */
+  forgottenCount: number;
   grammarAvailable: boolean;
   pronunciationAvailable: boolean;
   /** Anything studied ever (a focus session or words to master need cards) */
   hasStudied: boolean;
   /** Last week's figures, null for a learner without one */
   lastWeek: WeekFacts | null;
+  plan: WeeklyPlan;
+  /** Cards one right answer away from long-term memory and due this week (countNearMastered) */
+  nearMastered: number;
+  /** Days of the week left when picking, today included (Monday 7 ... Sunday 1); default 7 */
+  daysLeft?: number;
 }
 
 // ─── Targets and picking ─────────────────────────────────────────────────────
 
-/** The tier's target for this learner: last week's figure scaled by the tier, never under the floor */
-export function targetFor(kind: ChallengeKind, tier: Tier, lastWeek: number | null): number {
+/** Share of the new-card budget a week's new words may take: the budget is shared with new recall cards
+ *  (progress.estimateNewWordsPerDay), so about half to two thirds of it are new words */
+export const NEW_WORDS_SHARE = 0.6;
+/** Share of the daily goal's answers that are right first answers on due cards (the rest: wrong answers,
+ *  repeats in the same session, practice) */
+export const RIGHT_ANSWER_SHARE = 0.6;
+/** The plans set the daily goal at 3 answers per planned minute (onboarding DAILY_PLANS: 5 min = 15 answers) */
+const GOAL_ANSWERS_PER_MINUTE = 3;
+/** Share of the near-mastered cards one week can take over the line: a Hard answer or a lapse doesn't */
+export const MASTERED_SHARE = 0.7;
+/** From this stability (days) one right answer can carry a card past MATURE_STABILITY_DAYS */
+export const NEAR_MASTERED_STABILITY_DAYS = 10;
+
+/**
+ * The most this learner can do of `kind` in what is left of the week: the plan's daily budget times the days
+ * left, the words close to long-term memory, the words in "Từ hay quên"... Infinity: nothing limits it but
+ * the kind's cap. For the answer-based kinds last week's own figure still sets "Khó" as before when it beats
+ * the plan (the learner showed they have the time); not for new words: new words beyond the plan add reviews
+ * the plan has no time for.
+ */
+export function roomFor(kind: ChallengeKind, ctx: PickContext): number {
+  const days = Math.min(7, Math.max(1, Math.round(ctx.daysLeft ?? 7)));
+  // Rounded as targetFor rounds it, so "Khó" from last week is not cut by one
+  const proven = Math.round(Math.max(0, ctx.lastWeek?.[kind] ?? 0) * TIER_FACTOR.hard);
+  const { newCardsPerDay, dailyGoal, focusMinutes } = ctx.plan;
+  // Whole units, without a product like 35 × 0.6 landing just under 21
+  const whole = (x: number) => Math.floor(x + 1e-9);
+  const perWeek = (planned: number) => whole((Math.max(proven, planned) * days) / 7);
+  switch (kind) {
+    case "new_words":
+      return whole(Math.max(0, newCardsPerDay) * days * NEW_WORDS_SHARE);
+    case "review_correct":
+    case "level_correct":
+      return perWeek(dailyGoal * 7 * RIGHT_ANSWER_SHARE);
+    case "active_days":
+    case "goal_days":
+      return days;
+    case "focus":
+      return perWeek(((dailyGoal / GOAL_ANSWERS_PER_MINUTE) * 7) / Math.max(1, focusMinutes));
+    case "mastered":
+      return whole(Math.max(0, ctx.nearMastered) * MASTERED_SHARE);
+    case "forgotten":
+      return Math.max(0, ctx.forgottenCount);
+    default:
+      return Infinity;
+  }
+}
+
+/**
+ * The tier's target for this learner: last week's figure scaled by the tier, never under the floor, never over
+ * `room` (roomFor). A room smaller than the "Khó" floor shrinks all floors with it, so tiers stay apart.
+ */
+export function targetFor(kind: ChallengeKind, tier: Tier, lastWeek: number | null, room: number = Infinity): number {
   const def = KINDS[kind];
+  const ceiling = Math.min(def.cap, Math.max(1, Math.floor(room)));
+  const floor = Math.max(1, Math.round(def.floor[tier] * Math.min(1, ceiling / def.floor.hard)));
   const scaled = lastWeek && lastWeek > 0 ? Math.round(lastWeek * TIER_FACTOR[tier]) : 0;
-  return Math.min(def.cap, Math.max(def.floor[tier], scaled));
+  return Math.min(ceiling, Math.max(floor, scaled));
 }
 
 export function availableKinds(ctx: PickContext): ChallengeKind[] {
   const out: ChallengeKind[] = ["review_correct", "active_days", "goal_days", "new_words"];
   if (ctx.topic) out.push("level_correct");
   if (ctx.hasStudied) out.push("focus", "mastered");
-  if (ctx.forgottenAvailable) out.push("forgotten");
+  if (ctx.forgottenCount > 0) out.push("forgotten");
   if (ctx.grammarAvailable) out.push("grammar");
   if (ctx.pronunciationAvailable) out.push("pronunciation");
-  return out;
+  // Not even one possible this week (e.g. no word near long-term memory yet): not offered
+  return out.filter((k) => roomFor(k, ctx) >= 1);
 }
 
 /** Kinds that measure the same habit: never two of them in one week */
@@ -153,7 +227,7 @@ export function pickWeeklyChallenges(week: string, ctx: PickContext): WeeklyChal
     return {
       kind,
       tier,
-      target: targetFor(kind, tier, ctx.lastWeek ? ctx.lastWeek[kind] : null),
+      target: targetFor(kind, tier, ctx.lastWeek ? ctx.lastWeek[kind] : null, roomFor(kind, ctx)),
       ...(kind === "level_correct" && ctx.topic ? { topic: ctx.topic } : {}),
     };
   });
@@ -217,10 +291,21 @@ export function challengeHowTo(c: WeeklyChallenge, d: DescribeContext): string {
   }
 }
 
-/** Why the target is this size: the tier, and last week's figure it was scaled from */
+/** What made a target smaller than the usual one (roomFor), for the note */
+const ROOM_REASON: Partial<Record<ChallengeKind, string>> = {
+  new_words: "hạn mức từ mới mỗi ngày của bạn",
+  mastered: "số từ sắp đạt mốc \"Nhớ lâu\" trong tuần này",
+  forgotten: "số từ trong mục \"Từ hay quên\"",
+};
+
+/** Why the target is this size: the tier, and last week's figure it was scaled from (or what bounded it) */
 export function challengeDifficultyNote(c: WeeklyChallenge, d: DescribeContext): string {
   const pct = Math.round(TIER_FACTOR[c.tier] * 100);
   const tier = `Mức ${TIER_LABEL[c.tier]} (+${TIER_XP[c.tier]} XP)`;
+  // Below the usual target: roomFor bounded it when the week was picked
+  if (c.target < targetFor(c.kind, c.tier, d.lastWeek)) {
+    return `${tier}: vừa sức với ${ROOM_REASON[c.kind] ?? "gói học mỗi ngày và số ngày còn lại trong tuần"}.`;
+  }
   if (d.lastWeek == null || d.lastWeek <= 0) return `${tier}: chưa có kết quả tuần trước nên dùng mục tiêu mặc định.`;
   return `${tier}: khoảng ${pct}% kết quả tuần trước của bạn (${d.lastWeek}), không thấp hơn mức tối thiểu.`;
 }
@@ -343,6 +428,23 @@ export function weekFactsFrom(input: {
   return facts;
 }
 
+/**
+ * Cards (both directions) with a stability from NEAR_MASTERED_STABILITY_DAYS up to long-term memory, due before
+ * `weekEnd`: only a scheduled answer moves a schedule, so a card not due this week can't cross this week.
+ */
+export function countNearMastered(words: readonly WordDetail[], weekEnd: Date): number {
+  const end = weekEnd.getTime();
+  let n = 0;
+  for (const w of words) {
+    if (isSuspended(w)) continue;
+    for (const srs of [w.srs, w.srsProduction]) {
+      const s = srs?.stability ?? 0;
+      if (srs && s >= NEAR_MASTERED_STABILITY_DAYS && s < MATURE_STABILITY_DAYS && Date.parse(srs.next_review_date) < end) n++;
+    }
+  }
+  return n;
+}
+
 export interface WeeklyData {
   thisWeek: WeekFacts;
   lastWeek: WeekFacts | null;
@@ -390,7 +492,8 @@ export async function loadWeeklyData(words: readonly WordDetail[], now: Date = n
   const grammarAttempts = Object.values(getAllGrammarProgress())
     .map((p) => p.lastAttemptDate)
     .filter((d): d is string => !!d);
-  const common = { logs, topicWordIds, forgottenIds, activity: getActivityLogs(), dailyGoal: getDailyGoal(), events, grammarAttempts };
+  const dailyGoal = getDailyGoal();
+  const common = { logs, topicWordIds, forgottenIds, activity: getActivityLogs(), dailyGoal, events, grammarAttempts };
   const thisWeek = weekFactsFrom({ ...common, from: start, to: end, intros: introsNow });
   const prev = weekFactsFrom({ ...common, from: prevStart, to: start, intros: introsPrev });
   // A week with nothing done is no history: the floors apply
@@ -401,11 +504,14 @@ export async function loadWeeklyData(words: readonly WordDetail[], now: Date = n
     lastWeek,
     context: {
       topic,
-      forgottenAvailable: !!forgotten && forgotten.active.length > 0,
+      forgottenCount: forgotten ? forgotten.active.length : 0,
       grammarAvailable,
       pronunciationAvailable,
       hasStudied: words.some((w) => (w.srs?.reps ?? 0) > 0),
       lastWeek,
+      plan: { newCardsPerDay: getStudyLimits().newCardsPerDay, dailyGoal, focusMinutes: getFocusSettings().minutes },
+      nearMastered: countNearMastered(words, end),
+      daysLeft: 7 - ((now.getDay() + 6) % 7),
     },
   };
 }

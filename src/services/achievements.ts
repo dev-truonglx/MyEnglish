@@ -132,6 +132,34 @@ export const BADGE_DEFINITIONS: Array<{
     xpBonus: 600,
     targetValue: 30,
   },
+  // Long streaks: the same celebration as the shorter ones, so a habit past a month still has goals ahead
+  {
+    id: "streak_50",
+    title: "Nửa Trăm Ngày",
+    description: "Duy trì chuỗi học 50 ngày liên tiếp",
+    emoji: "🏅",
+    category: "streak",
+    xpBonus: 800,
+    targetValue: 50,
+  },
+  {
+    id: "streak_100",
+    title: "Trăm Ngày Kiên Trì",
+    description: "Duy trì chuỗi học 100 ngày liên tiếp",
+    emoji: "💯",
+    category: "streak",
+    xpBonus: 1500,
+    targetValue: 100,
+  },
+  {
+    id: "streak_365",
+    title: "Một Năm Không Bỏ Cuộc",
+    description: "Duy trì chuỗi học 365 ngày liên tiếp",
+    emoji: "👑",
+    category: "streak",
+    xpBonus: 3000,
+    targetValue: 365,
+  },
   {
     id: "early_bird",
     title: "Chim Sớm Cần Mẫn",
@@ -248,6 +276,9 @@ export function getAchievements(context?: {
         break;
       case "streak_7":
       case "streak_30":
+      case "streak_50":
+      case "streak_100":
+      case "streak_365":
         currentValue = ctx.currentStreak || 0;
         break;
       case "first_try_50":
@@ -379,6 +410,9 @@ export function checkAndUnlockAchievements(context: AchievementCheckContext = {}
     evaluateBadge("streak_3", context.currentStreak >= 3);
     evaluateBadge("streak_7", context.currentStreak >= 7);
     evaluateBadge("streak_30", context.currentStreak >= 30);
+    evaluateBadge("streak_50", context.currentStreak >= 50);
+    evaluateBadge("streak_100", context.currentStreak >= 100);
+    evaluateBadge("streak_365", context.currentStreak >= 365);
   }
 
   if (context.leechesSlain !== undefined) {

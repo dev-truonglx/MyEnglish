@@ -24,7 +24,7 @@ describe("#9 streak with freezes", () => {
   it("counts consecutive days and ignores a today without activity", () => {
     expect(computeStreak(range(today, 3, 0), today).current).toBe(4);
     expect(computeStreak(range(today, 3, 1), today).current).toBe(3);
-    expect(computeStreak([], today)).toEqual({ current: 0, longest: 0, freezes: 0, frozenDates: [] });
+    expect(computeStreak([], today)).toEqual({ current: 0, longest: 0, freezes: 0, frozenDates: [], repairedDates: [], repairable: null });
   });
 
   it("breaks on a missed day when no freeze was earned", () => {

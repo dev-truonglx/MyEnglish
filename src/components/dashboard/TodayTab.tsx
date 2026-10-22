@@ -1,14 +1,21 @@
 import { RankPanel, useRankPanelVisible } from "./RankWidgets";
 import { useEffect, useMemo, useState } from "react";
-import { BookOpenText, Bug, ChevronRight, Flame, Layers, Target, Zap } from "lucide-react";
+import { BookOpenText, Bug, ChevronRight, Flame, Layers, Target, X, Zap } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import type { TodayWork } from "@/services/smartReview";
 import { getUnmasteredWords, youngWordCap } from "@/services/smartReview";
-import { getLocalDateString, type StreakStats } from "@/services/streak";
+import {
+  FREEZE_EVERY_DAYS,
+  freezeNoticeText,
+  getLocalDateString,
+  markFreezeNoticeSeen,
+  unannouncedFrozenDays,
+  type StreakStats,
+} from "@/services/streak";
 import { minutesFor, type ComebackStatus } from "@/services/comeback";
 import { loadCoverage, type Coverage } from "@/services/coverage";
 import { loadPronunciationLessons, nextPronunciationLesson, pronunciationPracticedToday } from "@/services/pronunciation";
-import { isReflexPracticedToday } from "@/services/reflexChallenge";
+import { REFLEX_DAILY_XP_MAX } from "@/services/reflexChallenge";
 import { getAllGrammarProgress, getDueGrammarLessons, initGrammarStorage } from "@/services/grammarService";
 import { getTodayGrammarPlan } from "@/services/grammarPath";
 import { countWordStatus, WORD_STATUS_LABELS } from "@/services/wordStatus";
@@ -77,6 +84,85 @@ function todayMinutes(work: TodayWork): number {
 }
 
 /**
+ * What happened to the streak, in one line each: a freeze used on a missed day (computeStreak uses it silently,
+ * so it is told once per day frozen), a streak broken yesterday that today's answers can still repair, and the
+ * confirmation on the day it is repaired.
+ */
+function StreakNotices({ stats, now }: { stats: StreakStats; now: Date }) {
+  const today = getLocalDateString(now);
+  const yesterday = getLocalDateString(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1));
+  const unannounced = useMemo(() => unannouncedFrozenDays(stats.frozenDates, now), [stats.frozenDates, today]);
+  // Kept for this visit of the tab: the days are marked as told right away, so the next visit has no notice
+  const [frozenShown, setFrozenShown] = useState<string[]>([]);
+  const [closed, setClosed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    if (unannounced.length === 0) return;
+    setFrozenShown(unannounced);
+    markFreezeNoticeSeen(unannounced[unannounced.length - 1]);
+  }, [unannounced]);
+
+  const repair = stats.streakRepair ?? null;
+  const repaired = !!stats.repairedDates?.includes(yesterday);
+  const close = (key: string) => setClosed((c) => ({ ...c, [key]: true }));
+  const closeButton = (key: string) => (
+    <button onClick={() => close(key)} className="shrink-0 p-0.5 rounded opacity-60 hover:opacity-100" aria-label="Đóng">
+      <X className="w-4 h-4" />
+    </button>
+  );
+  const row = "w-full flex items-start gap-2 px-4 py-2.5 rounded-xl border text-sm";
+
+  return (
+    <>
+      {frozenShown.length > 0 && !closed.freeze && (
+        <div className={`${row} border-sky-200 dark:border-sky-900/50 bg-sky-50 dark:bg-sky-950/30 text-sky-900 dark:text-sky-100`} data-testid="freeze-notice">
+          <span className="flex-1">
+            <b>{freezeNoticeText(frozenShown, now)}</b>
+            <span className="block text-xs text-sky-700 dark:text-sky-300">
+              {stats.freezesAvailable > 0
+                ? `Còn ${stats.freezesAvailable} lượt đóng băng.`
+                : `Đã hết lượt đóng băng: cứ ${FREEZE_EVERY_DAYS} ngày học sẽ có thêm 1 lượt.`}
+            </span>
+          </span>
+          {closeButton("freeze")}
+        </div>
+      )}
+      {repair && !closed.repair && (
+        <div className={`${row} border-orange-200 dark:border-orange-900/50 bg-orange-50 dark:bg-orange-950/30 text-orange-900 dark:text-orange-100`} data-testid="streak-repair-hint">
+          <Flame className="w-4 h-4 mt-0.5 text-orange-500 shrink-0" />
+          <span className="flex-1 space-y-1.5">
+            <b className="block">
+              Làm gấp đôi mục tiêu hôm nay ({repair.target} câu) để giữ lại chuỗi {repair.streak} ngày
+            </b>
+            <span className="block text-xs text-orange-800/80 dark:text-orange-200/80">
+              Hôm qua bạn lỡ một ngày khi đã hết lượt đóng băng. Đã làm {Math.min(stats.todayCount, repair.target)}/{repair.target} câu.
+            </span>
+            <span className="block h-1.5 rounded-full bg-orange-100 dark:bg-orange-950 overflow-hidden">
+              <span
+                className="block h-full bg-orange-500 transition-all"
+                style={{ width: `${Math.min(100, Math.round((stats.todayCount / repair.target) * 100))}%` }}
+              />
+            </span>
+          </span>
+          {closeButton("repair")}
+        </div>
+      )}
+      {repaired && !closed.repaired && (
+        <div className={`${row} border-emerald-200 dark:border-emerald-900/50 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-900 dark:text-emerald-100`} data-testid="streak-repaired">
+          <Flame className="w-4 h-4 mt-0.5 text-orange-500 shrink-0" />
+          <span className="flex-1">
+            <b>Đã giữ lại chuỗi {stats.currentStreak} ngày!</b>
+            <span className="block text-xs text-emerald-700 dark:text-emerald-300">
+              Hôm nay bạn làm gấp đôi mục tiêu nên ngày hôm qua vẫn được tính.
+            </span>
+          </span>
+          {closeButton("repaired")}
+        </div>
+      )}
+    </>
+  );
+}
+
+/**
  * The opening screen, built to show as much as fits without scrolling. Top: the greeting and three compact numbers
  * (streak, words learnt in the sidebar's two tiers, how much of a real IT text the learner recognises). Then, on
  * wide windows, two columns: today as a short list (words, one grammar lesson, one pronunciation lesson, sized by
@@ -108,13 +194,6 @@ export default function TodayTab({
   const [coverage, setCoverage] = useState<Coverage | null>(null);
   const [pron, setPron] = useState<TodayTaskInput["pronunciation"]>(null);
   const [grammar, setGrammar] = useState<TodayTaskInput["grammar"]>(null);
-  const [reflexDone, setReflexDone] = useState(() => isReflexPracticedToday(now));
-
-  useEffect(() => {
-    const onReflexUpdate = () => setReflexDone(isReflexPracticedToday(fixedNow ?? new Date()));
-    window.addEventListener("myenglish-reflex-updated", onReflexUpdate);
-    return () => window.removeEventListener("myenglish-reflex-updated", onReflexUpdate);
-  }, [fixedNow]);
 
   // Length of a focus session, as last chosen on the focus card
   const [focusMinutes, setFocusMinutes] = useState(() => getFocusSettings().minutes);
@@ -198,7 +277,6 @@ export default function TodayTab({
     },
     grammar,
     pronunciation: pron,
-    reflex: onStartReflex ? { doneToday: reflexDone } : null,
   });
   const primary = primaryTask(tasks);
   // Nothing to do and nothing ever studied: no "done", but where words come from (U6)
@@ -212,10 +290,7 @@ export default function TodayTab({
 
   const run = (task: TodayTask) => {
     if (task.id === "vocab") onStart();
-    else if (task.id === "reflex") {
-      if (onStartReflex) onStartReflex();
-      else setActiveTab("leaderboard");
-    } else setActiveTab(TASK_TAB[task.id]);
+    else setActiveTab(TASK_TAB[task.id]);
   };
   const isCapped = unmasteredCount >= youngWordCap();
   const more = {
@@ -295,6 +370,8 @@ export default function TodayTab({
         */}
         <div className={twoColumns ? "grid gap-4 items-start min-[1000px]:grid-cols-[minmax(0,1fr)_320px] min-[1000px]:grid-rows-[auto_1fr]" : "max-w-3xl mx-auto space-y-4"}>
           <div className="min-w-0 space-y-4">
+            {!loading && !empty && <StreakNotices stats={streakStats} now={now} />}
+
             {/* The one thing to do now */}
             {loading ? (
               <div className="h-40 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 animate-pulse" />
@@ -373,6 +450,7 @@ export default function TodayTab({
                 <DailyQuestsCard
                   words={words}
                   newToday={todayWork.newToday}
+                  reviewsToday={todayWork.reviews}
                   dailyGoal={streakStats.dailyGoal}
                   hasStudied={hasStudied}
                   freezesAvailable={streakStats.freezesAvailable}
@@ -403,7 +481,7 @@ export default function TodayTab({
                         </h4>
                       </div>
                       <p className="text-[11px] text-amber-100 mt-0.5 line-clamp-2">
-                        Tăng tốc phản xạ, nhận tới <strong className="text-white font-bold">+80 XP</strong> bứt phá bảng xếp hạng!
+                        Ôn nhanh nghĩa các từ đã học, tính giờ. Nhận tới <strong className="text-white font-bold">+{REFLEX_DAILY_XP_MAX} XP</strong> mỗi ngày.
                       </p>
                     </div>
                   </div>

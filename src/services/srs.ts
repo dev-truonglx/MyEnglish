@@ -424,7 +424,9 @@ export async function recordReview(
   // card: FSRS sets its initial stability from the first recall grade, which is the real evidence of how
   // well the word can be produced (copying the recognition stability would overstate it, and a non-new
   // card would also bypass the daily limit of new cards).
-  // A word marked "already known" (options.unlockProduction false) waits for a real review first.
+  // A word marked "Đã biết" (its 'known' log) does not get one: the mark means the learner already masters it
+  // both ways (recognising it, writing it), so its recognition card alone keeps it on the FSRS schedule. Once
+  // that card lapses the claim was wrong: the word is learned like any other, recall included.
   if (
     options.unlockProduction !== false &&
     direction === "recognition" &&
@@ -434,8 +436,9 @@ export async function recordReview(
     const tomorrow = new Date(now.getTime() + 24 * 60 * 60 * 1000).toISOString();
     await db.execute(
       `INSERT OR IGNORE INTO srs_production (word_id, next_review_date, state, reps, lapses, stability, difficulty, learning_steps)
-       VALUES ($1, $2, 0, 0, 0, 0, 0, 0)`,
-      [wordId, tomorrow]
+       SELECT $1, $2, 0, 0, 0, 0, 0, 0
+       WHERE $3 > 0 OR NOT EXISTS (SELECT 1 FROM review_logs WHERE word_id = $1 AND exercise_type = 'known')`,
+      [wordId, tomorrow, updatedCard.lapses]
     );
   }
 
@@ -671,6 +674,7 @@ import {
 import { productionUnlockDays } from "./learnerProfile";
 import {
   evaluateMotivationState,
+  countFadingWords,
   selectMicroQuizQuestion,
   getConsecutiveSkipCount,
   sendDuoDesktopNotification,
@@ -997,11 +1001,15 @@ class SRSBackgroundWorker {
 
       // Gentle start: a small corner card that doesn't take focus; the user opens the review from it,
       // otherwise it snoozes itself after a countdown (triggerReviewNudge records the display time)
-      const { total: dueCount, comeback } = work ?? (await countTodayWork());
+      const todayWork = work ?? (await countTodayWork());
+      const { total: dueCount, comeback } = todayWork;
       let motivation = undefined;
       let microQuiz = undefined;
 
       try {
+        // The question needs schedules and meanings only: the whole collection without examples or stats. The due
+        // words also tell the wording how many are fading (countFadingWords).
+        const [dueWords, allWords] = dueCount > 0 ? await Promise.all([getDueWordsLite(), getWordsLite()]) : [[], []];
         const activityLogs = getActivityLogs();
         const streakRes = computeStreak(Object.keys(activityLogs));
         const todayStr = getLocalDateString();
@@ -1019,13 +1027,11 @@ class SRSBackgroundWorker {
           comeback,
           moment: this.activeMoment,
           freezes: streakRes.freezes,
+          fadingCount: countFadingWords(dueWords),
+          newToday: todayWork.newToday,
         });
 
-        // The question needs schedules and meanings only: the whole collection without examples or stats
-        if (dueCount > 0) {
-          const [dueWords, allWords] = await Promise.all([getDueWordsLite(), getWordsLite()]);
-          microQuiz = selectMicroQuizQuestion(dueWords, allWords);
-        }
+        if (dueCount > 0) microQuiz = selectMicroQuizQuestion(dueWords, allWords);
 
       } catch (err) {
         console.warn("Error preparing Duo motivation payload:", err);

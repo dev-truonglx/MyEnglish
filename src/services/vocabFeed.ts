@@ -22,7 +22,7 @@ import {
 import type { SRSReview, WordDetail } from "@/types/database";
 import { getStudyLimits } from "./srs";
 import { persistKeyNow } from "./storageBackup";
-import { KNOWN_DIFFICULTY, knownCheckDays, notifyWordsChanged } from "./reviewRecorder";
+import { KNOWN_DIFFICULTY, knownSchedule, notifyWordsChanged } from "./reviewRecorder";
 import { reviewLogBefore } from "./smartReview";
 import { MASTERED_STABILITY_DAYS } from "./progress";
 import {
@@ -48,6 +48,11 @@ interface LevelsSetting {
   levels: StudyLevel[];
   /** Words drawn per level since these levels were chosen (keeps the mix ratio across top-ups) */
   drawn: Partial<Record<StudyLevel, number>>;
+  /**
+   * The highest chosen level comes most often (weights 1…k instead of k…1). For a learner placed at B1 or
+   * above: with A1 first, 40% of a B2 learner's new words were A1 words to skip one by one with "Đã biết".
+   */
+  highFirst?: boolean;
 }
 
 /** Contiguous from A1 up to the highest level given ([] or unknown -> A1 only) */
@@ -64,7 +69,9 @@ export function defaultStudyLevelsFor(level: string | null | undefined): StudyLe
 function readSetting(): LevelsSetting | null {
   try {
     const raw = JSON.parse(localStorage.getItem(LEVELS_KEY) || "null");
-    if (raw && Array.isArray(raw.levels)) return { levels: normalizeStudyLevels(raw.levels), drawn: raw.drawn ?? {} };
+    if (raw && Array.isArray(raw.levels)) {
+      return { levels: normalizeStudyLevels(raw.levels), drawn: raw.drawn ?? {}, ...(raw.highFirst ? { highFirst: true } : {}) };
+    }
   } catch {}
   return null;
 }
@@ -107,39 +114,59 @@ export function getStudyLevels(): StudyLevel[] {
   return readSetting()?.levels ?? ["A1"];
 }
 
-/** Save the levels; a different choice restarts the mix count. Returns the normalized levels. */
-export function setStudyLevels(levels: readonly string[]): StudyLevel[] {
+/** The mix favours the highest chosen level (see LevelsSetting.highFirst) */
+export function isHighFirstMix(): boolean {
+  return readSetting()?.highFirst === true;
+}
+
+/** Placement levels from which the mix favours the highest level by default */
+export const HIGH_FIRST_FROM: StudyLevel = "B1";
+
+/** Whether a learner placed at `level` gets the high-first mix by default */
+export function defaultHighFirst(level: string | null | undefined): boolean {
+  return !!level && STUDY_LEVELS.indexOf(level as StudyLevel) >= STUDY_LEVELS.indexOf(HIGH_FIRST_FROM);
+}
+
+/**
+ * Save the levels (and the mix order, kept as it was when not given); a different choice restarts the mix
+ * count. Returns the normalized levels.
+ */
+export function setStudyLevels(levels: readonly string[], options: { highFirst?: boolean } = {}): StudyLevel[] {
   const next = normalizeStudyLevels(levels);
   const current = readSetting();
-  const same = current && current.levels.join() === next.join();
-  writeSetting({ levels: next, drawn: same ? current.drawn : {} });
+  const highFirst = options.highFirst ?? current?.highFirst ?? false;
+  const same = current && current.levels.join() === next.join() && !!current.highFirst === highFirst;
+  writeSetting({ levels: next, drawn: same ? current.drawn : {}, ...(highFirst ? { highFirst: true } : {}) });
   try {
     window.dispatchEvent(new CustomEvent("myenglish-study-levels-changed"));
   } catch {}
   return next;
 }
 
-/** Mix weights: the lowest chosen level k, the next k-1, … the highest 1 */
-export function levelWeights(levels: readonly StudyLevel[]): Map<StudyLevel, number> {
-  return new Map(levels.map((l, i) => [l, levels.length - i]));
+/** Mix weights: the lowest chosen level k, the next k-1, … the highest 1 (reversed with `highFirst`) */
+export function levelWeights(levels: readonly StudyLevel[], highFirst: boolean = isHighFirstMix()): Map<StudyLevel, number> {
+  return new Map(levels.map((l, i) => [l, highFirst ? i + 1 : levels.length - i]));
 }
 
 /**
- * The levels of the next `n` words: each time the level furthest below its share (drawn / weight),
- * lower level on ties, skipping levels with nothing left. `drawn` and `available` are updated.
+ * The levels of the next `n` words: each time the level furthest below its share (drawn / weight), the
+ * favoured end on ties (lower level, or higher with `highFirst`), skipping levels with nothing left. `drawn`
+ * and `available` are updated.
  */
 export function pickLevelSequence(
   levels: readonly StudyLevel[],
   drawn: Partial<Record<StudyLevel, number>>,
   available: Partial<Record<StudyLevel, number>>,
-  n: number
+  n: number,
+  highFirst: boolean = isHighFirstMix()
 ): StudyLevel[] {
-  const weights = levelWeights(levels);
+  const weights = levelWeights(levels, highFirst);
+  const order = highFirst ? [...levels].reverse() : levels;
   const out: StudyLevel[] = [];
   for (let i = 0; i < n; i++) {
     let best: StudyLevel | null = null;
     let bestScore = Infinity;
-    for (const l of levels) {
+    for (const l of order) {
       if ((available[l] ?? 0) <= 0) continue;
       const score = (drawn[l] ?? 0) / (weights.get(l) ?? 1);
       if (score < bestScore) {
@@ -587,7 +614,7 @@ async function markCatalogWordsKnownInternal(entryIds: string[], now: Date): Pro
 }
 
 /**
- * Words the learner already knows (skimming): added to `words` if needed, scheduled as Easy without a
+ * Words the learner already knows (skimming): added to `words` if needed, scheduled as "Nhớ lâu" without a
  * quiz (see markWordKnown), then the buffer is refilled. Returns how many were marked.
  */
 export async function markCatalogWordsKnown(entryIds: string[], now: Date = new Date()): Promise<number> {
@@ -690,8 +717,8 @@ async function markWordsKnownBatch(wordIds: string[], now: Date): Promise<number
     const logParams: unknown[] = [];
     const eventParams: unknown[] = [];
     for (const { id, before } of chunk) {
-      const days = knownCheckDays(id);
-      srsParams.push(id, days, new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString());
+      const known = knownSchedule(id, now);
+      srsParams.push(id, known.scheduledDays, known.due, known.stability);
       logParams.push(
         crypto.randomUUID(), id, before ? before.state : null, round(before?.stability, 4), round(before?.difficulty, 4),
         round(before?.retrievability, 4), round(before?.elapsedDays, 3)
@@ -703,7 +730,7 @@ async function markWordsKnownBatch(wordIds: string[], now: Date): Promise<number
          word_id, ease_factor, interval, repetitions, next_review_date,
          stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
        )
-       VALUES ${rowsSql(chunk.length, 3, (o) => `($${o + 1}, 2.5, $${o + 2}, 1, $${o + 3}, $${o + 2}, ${KNOWN_DIFFICULTY}, 0, $${o + 2}, 1, 0, 2, '${stamp}', 0)`)}
+       VALUES ${rowsSql(chunk.length, 4, (o) => `($${o + 1}, 2.5, $${o + 2}, 1, $${o + 3}, $${o + 4}, ${KNOWN_DIFFICULTY}, 0, $${o + 2}, 1, 0, 2, '${stamp}', 0)`)}
        ON CONFLICT(word_id) DO UPDATE SET
          ease_factor = excluded.ease_factor,
          interval = excluded.interval,

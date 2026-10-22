@@ -8,8 +8,8 @@
  *  - "pronunciation_quiz": a pronunciation lesson's listening quiz finished (meta.lessonId, correct, total)
  *  - "say_aloud": the learner repeated a word aloud and rated themselves (meta.ok), never graded
  *  - "grammar_intro": first meeting with a grammar point in the popup (meta.lessonId, correct)
- *  - "known": a new word the learner said they already know (a Review card due in KNOWN_CHECK_MIN_DAYS to
- *    KNOWN_CHECK_MAX_DAYS days, no quiz; it counts as known only after a real review confirms it)
+ *  - "known": a new word the learner said they already know (a Review card with a stability of
+ *    KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS days, no quiz; "Nhớ lâu" until its one check says otherwise)
  *  - focus session: "focus_started" (meta.id, plannedMin, day), then "focus_completed" (meta.endedBy, activeSec,
  *    cards, firstTry, xp) or "focus_abandoned". A start with no end (app quit) counts as abandoned.
  * Used to celebrate progress that matters and to show when the learner actually studies.

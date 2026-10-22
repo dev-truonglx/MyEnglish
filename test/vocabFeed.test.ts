@@ -148,7 +148,7 @@ describe("feeding words from the deck", () => {
 });
 
 describe("words the learner already knows", () => {
-  it("are scheduled as Easy outside the new-word budget, recall only after a real review", async () => {
+  it("are 'Nhớ lâu' outside the new-word budget, and never get a recall card", async () => {
     const { feed, db, smart, srs, recorder } = await setup(4);
     feed.setStudyLevels(["A1"]);
     await feed.topUpNewWords();
@@ -158,30 +158,15 @@ describe("words the learner already knows", () => {
     expect(await recorder.markWordKnown(first.id)).toBe(false); // already scheduled
     const known = (await db.getWordsByIds([first.id]))[0];
     expect(known.srs.state).toBe(2);
-    // Stability = the wait before its first check, spread over 4-21 days by word id (P8)
-    expect(known.srs.stability).toBeGreaterThanOrEqual(4);
+    // A long stability, spread over 30-180 days by word id: "Nhớ lâu" at once
+    expect(known.srs.stability).toBeGreaterThanOrEqual(30);
     expect(known.srsProduction ?? null).toBeNull();
     expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 0, production: 0 });
 
-    // Its first real review (here: answered now) opens recall practice; recognition stays outside the budget
+    // Its check answered right: still no recall card (the learner can already write it), nothing from the budget
     await srs.recordReview(first.id, Rating.Good);
-    expect((await db.getWordsByIds([first.id]))[0].srsProduction).not.toBeNull();
-    expect((await smart.getNewCardsIntroducedToday()).recognition).toBe(0);
-    // …but its recall card is a new card that uses the budget like any other
-    await srs.recordReview(first.id, Rating.Good, "production");
-    await smart.saveReviewLog({
-      wordId: first.id,
-      exerciseType: "spelling",
-      responseTimeMs: 3000,
-      isCorrect: true,
-      wrongAttempts: 0,
-      rating: Rating.Good,
-      xpEarned: 0,
-      timestamp: new Date().toISOString(),
-      isScheduled: true,
-      direction: "production",
-    });
-    expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 0, production: 1 });
+    expect((await db.getWordsByIds([first.id]))[0].srsProduction ?? null).toBeNull();
+    expect(await smart.getNewCardsIntroducedToday()).toEqual({ recognition: 0, production: 0 });
   });
 
   it("can be skimmed in bulk; progress counts them per level", async () => {
@@ -200,7 +185,7 @@ describe("words the learner already knows", () => {
   });
 
   it("can mark an entire level as known in one go with progress reporting", async () => {
-    const { feed } = await setup(4);
+    const { feed, db, recorder } = await setup(4);
     feed.setStudyLevels(["A1", "A2"]);
     await feed.topUpNewWords();
 
@@ -225,6 +210,19 @@ describe("words the learner already knows", () => {
     const progress = await feed.loadLevelProgress();
     const a1 = progress.find((p) => p.level === "A1");
     expect(a1).toMatchObject({ met: 10, known: 10 });
+
+    // Each word gets the long "Đã biết" schedule: "Nhớ lâu" at once, not due for a month or more
+    const conn = await db.getDatabase();
+    const cards = await conn.select<Array<{ word_id: string; stability: number; scheduled_days: number; next_review_date: string; last_review: string }>>(
+      `SELECT s.word_id, s.stability, s.scheduled_days, s.next_review_date, s.last_review
+       FROM srs_reviews s JOIN words w ON w.id = s.word_id JOIN vocab_catalog c ON c.id = w.catalog_id WHERE c.cefr = 'A1'`
+    );
+    expect(cards).toHaveLength(10);
+    for (const c of cards) {
+      const expected = recorder.knownSchedule(c.word_id, new Date(c.last_review));
+      expect(c).toMatchObject({ stability: expected.stability, scheduled_days: expected.scheduledDays, next_review_date: expected.due });
+      expect(c.stability).toBeGreaterThanOrEqual(recorder.KNOWN_STABILITY_MIN_DAYS);
+    }
 
     // Calling markLevelWordsKnown on an already exhausted level returns 0
     expect(await feed.markLevelWordsKnown("A1")).toBe(0);

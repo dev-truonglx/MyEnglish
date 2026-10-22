@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { Fragment, useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, RotateCcw, Link2, AlertCircle, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
@@ -20,11 +20,8 @@ interface ContextMatchExerciseProps {
 const MIN_PAIRS = 3;
 const BLANK = "______";
 
+// One color per pair (by word); cyan is kept for the item picked and waiting for its other half
 const PAIR_COLORS = [
-  {
-    badge: "bg-cyan-500 text-white",
-    border: "border-cyan-500 bg-cyan-50/50 dark:bg-cyan-950/40",
-  },
   {
     badge: "bg-purple-500 text-white",
     border: "border-purple-500 bg-purple-50/50 dark:bg-purple-950/40",
@@ -32,6 +29,10 @@ const PAIR_COLORS = [
   {
     badge: "bg-amber-500 text-white",
     border: "border-amber-500 bg-amber-50/50 dark:bg-amber-950/40",
+  },
+  {
+    badge: "bg-emerald-500 text-white",
+    border: "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/40",
   },
 ];
 
@@ -50,7 +51,8 @@ export default function ContextMatchExercise({
   }, [word.id]);
 
   const [shuffledSentences, setShuffledSentences] = useState<ContextMatchPair[]>([]);
-  const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
+  // One side picked, waiting for the other: words are numbered 1..n, sentences n+1..2n (keyboard or click)
+  const [selected, setSelected] = useState<{ side: "word" | "sentence"; id: string } | null>(null);
   // Map wordId -> sentence wordId
   const [matches, setMatches] = useState<Record<string, string>>({});
   const [isAnswered, setIsAnswered] = useState(false);
@@ -81,49 +83,61 @@ export default function ContextMatchExercise({
     }
     // Shuffle right-hand column sentences
     setShuffledSentences(shuffle(pairs));
-    setSelectedWordId(null);
+    setSelected(null);
     setMatches({});
     setIsAnswered(false);
     setIsCorrect(null);
     setWrongAttempts(0);
   }, [pairs]);
 
+  // Number keys pick (words 1..n, sentences n+1..2n), Enter checks. Set below on every render, so the listener
+  // registered once always sees the current state.
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (!pairs || pairs.length < MIN_PAIRS) return null;
 
-  // Click on a word
-  const handleWordClick = (wordId: string) => {
-    if (isAnswered) return;
-    if (selectedWordId === wordId) {
-      setSelectedWordId(null);
-    } else {
-      setSelectedWordId(wordId);
-    }
+  // Pair a word with a sentence; whatever either was paired with before is released
+  const pair = (wordId: string, sentenceId: string) => {
+    lastPairedRef.current = wordId;
+    setMatches((prev) => {
+      const next: Record<string, string> = {};
+      for (const [w, sId] of Object.entries(prev)) if (w !== wordId && sId !== sentenceId) next[w] = sId;
+      next[wordId] = sentenceId;
+      return next;
+    });
+    setSelected(null);
   };
 
-  // Click on a sentence
-  const handleSentenceClick = (sentencePair: ContextMatchPair) => {
+  // Pick one side (number key or click): the same item again drops the pick, the other side completes a pair.
+  // A paired sentence picked with nothing waiting is unpaired, as before.
+  const pick = (side: "word" | "sentence", id: string) => {
     if (isAnswered) return;
-
-    if (!selectedWordId) {
-      // If this sentence was already matched, unmatch it
-      const existingWord = Object.keys(matches).find((wId) => matches[wId] === sentencePair.wordId);
+    if (selected?.side === side && selected.id === id) {
+      setSelected(null);
+      return;
+    }
+    if (selected && selected.side !== side) {
+      if (side === "word") pair(id, selected.id);
+      else pair(selected.id, id);
+      return;
+    }
+    if (!selected && side === "sentence") {
+      const existingWord = Object.keys(matches).find((wId) => matches[wId] === id);
       if (existingWord) {
         setMatches((prev) => {
           const next = { ...prev };
           delete next[existingWord];
           return next;
         });
+        return;
       }
-      return;
     }
-
-    // Match selected word to this sentence
-    lastPairedRef.current = selectedWordId;
-    setMatches((prev) => ({
-      ...prev,
-      [selectedWordId]: sentencePair.wordId,
-    }));
-    setSelectedWordId(null);
+    setSelected({ side, id });
   };
 
   // Check correctness
@@ -170,7 +184,7 @@ export default function ContextMatchExercise({
   const handleReset = () => {
     if (isAnswered) return;
     setMatches({});
-    setSelectedWordId(null);
+    setSelected(null);
     setIsCorrect(null);
   };
 
@@ -190,6 +204,28 @@ export default function ContextMatchExercise({
   };
 
   const allMatched = pairs.length > 0 && pairs.every((p) => matches[p.wordId] !== undefined);
+  const wordNumber = (wordId: string) => pairs.findIndex((p) => p.wordId === wordId) + 1;
+  const sentenceNumber = (sentenceId: string) => pairs.length + shuffledSentences.findIndex((x) => x.wordId === sentenceId) + 1;
+
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    if (isAnswered || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.key === "Enter") {
+      if (!allMatched) return;
+      e.preventDefault();
+      handleCheck();
+      return;
+    }
+    if (!/^[1-9]$/.test(e.key)) return;
+    const n = Number(e.key);
+    if (n <= pairs.length) {
+      e.preventDefault();
+      pick("word", pairs[n - 1].wordId);
+    } else if (n <= pairs.length + shuffledSentences.length) {
+      e.preventDefault();
+      pick("sentence", shuffledSentences[n - pairs.length - 1].wordId);
+    }
+  };
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
@@ -200,100 +236,45 @@ export default function ContextMatchExercise({
           <span>Ghép từ vào ngữ cảnh câu thích hợp</span>
         </div>
         <p className="text-xs text-slate-500 dark:text-zinc-400">
-          Chọn một từ ở cột trái rồi chọn câu có chỗ trống tương ứng ở cột phải.
+          Nhấn số của một từ rồi số của câu tương ứng (hoặc bấm chuột) để ghép thành cặp.
         </p>
       </div>
 
-      {/* Matching Columns Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-        {/* Left Column: Words */}
-        <div className="md:col-span-5 space-y-2.5">
-          <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">
-            Từ vựng
-          </h4>
-          {pairs.map((p, idx) => {
-            const isSelected = selectedWordId === p.wordId;
-            const matchedSentenceId = matches[p.wordId];
-            const colorConfig = PAIR_COLORS[idx % PAIR_COLORS.length];
-
-            return (
-              <button
-                key={p.wordId}
-                onClick={() => handleWordClick(p.wordId)}
+      {/* Matching grid: row i holds word i and sentence i, so both columns line up */}
+      <div className="grid grid-cols-[minmax(max-content,2fr)_minmax(0,5fr)] gap-x-3 gap-y-2.5">
+        <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
+        <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Câu có chỗ trống</h4>
+        {pairs.map((p, idx) => {
+          const s = shuffledSentences[idx];
+          const pairedWordId = s ? Object.keys(matches).find((w) => matches[w] === s.wordId) : undefined;
+          const pairedIdx = pairedWordId ? wordNumber(pairedWordId) - 1 : -1;
+          return (
+            <Fragment key={p.wordId}>
+              <WordCell
+                number={idx + 1}
+                word={p.word}
+                color={PAIR_COLORS[idx % PAIR_COLORS.length]}
+                isSelected={selected?.side === "word" && selected.id === p.wordId}
+                pairedWith={matches[p.wordId] ? sentenceNumber(matches[p.wordId]) : null}
                 disabled={isAnswered}
-                className={`w-full p-3.5 rounded-xl border text-left transition-all flex items-center justify-between shadow-sm ${
-                  isSelected
-                    ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
-                    : matchedSentenceId
-                    ? `${colorConfig.border} text-slate-900 dark:text-white`
-                    : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-slate-300 text-slate-800 dark:text-zinc-200"
-                }`}
-              >
-                <div>
-                  <p className="text-sm font-bold font-mono">{p.word}</p>
-                  <p className="text-[11px] text-slate-400 dark:text-zinc-500 line-clamp-1">
-                    {p.meaningVN}
-                  </p>
-                </div>
-                {matchedSentenceId && (
-                  <span
-                    className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold ${colorConfig.badge}`}
-                  >
-                    ✓
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right Column: Sentences */}
-        <div className="md:col-span-7 space-y-2.5">
-          <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">
-            Câu ngữ cảnh (Chỗ trống)
-          </h4>
-          {shuffledSentences.map((s) => {
-            // Find which word is matched with this sentence
-            const matchedWordId = Object.keys(matches).find((wId) => matches[wId] === s.wordId);
-            const matchedWordPair = matchedWordId ? pairs.find((p) => p.wordId === matchedWordId) : null;
-            const wordIdx = matchedWordPair ? pairs.findIndex((p) => p.wordId === matchedWordPair.wordId) : -1;
-            const colorConfig = wordIdx >= 0 ? PAIR_COLORS[wordIdx % PAIR_COLORS.length] : null;
-
-            return (
-              <button
-                key={s.wordId}
-                onClick={() => handleSentenceClick(s)}
-                disabled={isAnswered}
-                className={`w-full p-3.5 rounded-xl border text-left transition-all space-y-1.5 shadow-sm ${
-                  colorConfig
-                    ? `${colorConfig.border} text-slate-900 dark:text-white`
-                    : selectedWordId
-                    ? "border-dashed border-cyan-300 dark:border-cyan-700 bg-cyan-50/20 dark:bg-cyan-950/20 hover:border-cyan-400"
-                    : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-slate-800 dark:text-zinc-200 hover:border-slate-300"
-                }`}
-              >
-                <p className="text-xs font-medium leading-relaxed">
-                  {matchedWordPair && s.maskedSentence.includes(BLANK) ? (
-                    <span>
-                      {s.maskedSentence.slice(0, s.maskedSentence.indexOf(BLANK))}
-                      <span className="font-bold underline text-cyan-600 dark:text-cyan-400 mx-1">
-                        {matchedWordPair.word}
-                      </span>
-                      {s.maskedSentence.slice(s.maskedSentence.indexOf(BLANK) + BLANK.length)}
-                    </span>
-                  ) : (
-                    <span>{s.maskedSentence}</span>
-                  )}
-                </p>
-                {matchedWordPair && (
-                  <span className="inline-block text-[10px] text-slate-400 dark:text-zinc-500 italic">
-                    Ghép với: <strong>{matchedWordPair.word}</strong> (bấm để gỡ)
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
+                onClick={() => pick("word", p.wordId)}
+              />
+              {s ? (
+                <SentenceCell
+                  number={pairs.length + idx + 1}
+                  sentence={s.maskedSentence}
+                  paired={pairedIdx >= 0 ? { word: pairs[pairedIdx].word, number: pairedIdx + 1, color: PAIR_COLORS[pairedIdx % PAIR_COLORS.length] } : null}
+                  isSelected={selected?.side === "sentence" && selected.id === s.wordId}
+                  awaitingSentence={selected?.side === "word"}
+                  disabled={isAnswered}
+                  onClick={() => pick("sentence", s.wordId)}
+                />
+              ) : (
+                <div />
+              )}
+            </Fragment>
+          );
+        })}
       </div>
 
       {/* Action Bar */}
@@ -375,10 +356,131 @@ export default function ContextMatchExercise({
           </div>
         ) : (
           <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
-            <span>Chọn 1 từ ở cột trái rồi chọn câu có chỗ trống tương ứng ở cột phải</span>
+            <span>
+              Gõ số của từ ({1}–{pairs.length}) rồi số của câu ({pairs.length + 1}–{pairs.length * 2}) để ghép cặp, Enter để kiểm tra
+            </span>
           </div>
         )}
       </div>
     </div>
+  );
+}
+
+type PairColor = (typeof PAIR_COLORS)[number];
+
+/** Number badge: the key that picks this item */
+function KeyBadge({ number, className }: { number: number; className: string }) {
+  return (
+    <kbd className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-sm font-bold font-mono border ${className}`}>
+      {number}
+    </kbd>
+  );
+}
+
+function WordCell({
+  number,
+  word,
+  color,
+  isSelected,
+  pairedWith,
+  disabled,
+  onClick,
+}: {
+  number: number;
+  word: string;
+  color: PairColor;
+  isSelected: boolean;
+  /** Number of the sentence it is paired with */
+  pairedWith: number | null;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+        isSelected
+          ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
+          : pairedWith
+          ? `${color.border} text-slate-900 dark:text-white`
+          : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-slate-300 text-slate-800 dark:text-zinc-200"
+      }`}
+    >
+      <KeyBadge
+        number={number}
+        className={
+          isSelected
+            ? "bg-cyan-500 text-white border-transparent"
+            : pairedWith
+            ? `${color.badge} border-transparent`
+            : "bg-slate-50 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300"
+        }
+      />
+      <span className="flex-1 text-sm font-bold whitespace-nowrap">{word}</span>
+      {pairedWith && <span className="shrink-0 text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">→ {pairedWith}</span>}
+    </button>
+  );
+}
+
+function SentenceCell({
+  number,
+  sentence,
+  paired,
+  isSelected,
+  awaitingSentence,
+  disabled,
+  onClick,
+}: {
+  number: number;
+  sentence: string;
+  /** The word put in its blank: its text, number and pair color */
+  paired: { word: string; number: number; color: PairColor } | null;
+  isSelected: boolean;
+  /** A word is picked: this sentence can complete the pair */
+  awaitingSentence: boolean;
+  disabled: boolean;
+  onClick: () => void;
+}) {
+  const blankAt = sentence.indexOf(BLANK);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+        isSelected
+          ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
+          : paired
+          ? `${paired.color.border} text-slate-900 dark:text-white`
+          : awaitingSentence
+          ? "border-dashed border-cyan-300 dark:border-cyan-700 bg-cyan-50/20 dark:bg-cyan-950/20 hover:border-cyan-400 text-slate-800 dark:text-zinc-200"
+          : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-slate-800 dark:text-zinc-200 hover:border-slate-300"
+      }`}
+    >
+      <KeyBadge
+        number={number}
+        className={
+          isSelected
+            ? "bg-cyan-500 text-white border-transparent"
+            : paired
+            ? `${paired.color.badge} border-transparent`
+            : "bg-slate-50 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300"
+        }
+      />
+      <span className="flex-1 min-w-0 text-[13px] font-medium leading-relaxed">
+        {paired && blankAt >= 0 ? (
+          <>
+            {sentence.slice(0, blankAt)}
+            <span className="font-bold underline text-cyan-600 dark:text-cyan-400 mx-0.5">{paired.word}</span>
+            {sentence.slice(blankAt + BLANK.length)}
+          </>
+        ) : (
+          sentence
+        )}
+      </span>
+      {paired && <span className="shrink-0 text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">← {paired.number}</span>}
+    </button>
   );
 }

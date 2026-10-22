@@ -1,9 +1,10 @@
 /**
  * "Đã biết": words the learner said they already know when they first met them (markWordKnown, or the
- * vocabulary path's markCatalogWordsKnown). Such a word gets a Review card due in KNOWN_CHECK_MIN_DAYS to
- * KNOWN_CHECK_MAX_DAYS days and one real review then confirms the claim:
+ * vocabulary path's markCatalogWordsKnown). Such a word counts as "Nhớ lâu" at once: it gets a Review card with
+ * a stability of KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS (knownSchedule), and one real review when
+ * it falls due confirms the claim:
  *  - waiting: not checked yet (isKnownOnly)
- *  - confirmed: the check was answered right; the word is learned like any other (Nhớ lâu once stable)
+ *  - confirmed: the check was answered right; FSRS only raised its stability, so it stays Nhớ lâu
  *  - failed: the check was missed (a lapse): the word is learned again like a normal one
  * "Kiểm tra ngay" moves the check to now. Undoing the mark is not offered: sync keeps the card with more
  * reviews, so a card put back to New would come back from another machine.

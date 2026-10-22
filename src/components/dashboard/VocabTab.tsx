@@ -14,18 +14,21 @@ import {
   UNLOCK_REMEMBERED_SHARE,
   changeStudyLevels,
   getStudyLevels,
+  isHighFirstMix,
   learnEarly,
   levelReadyToAdvance,
   levelWeights,
   loadLevelProgress,
   markCatalogWordsKnown,
   nextUnstudiedEntries,
+  setStudyLevels,
   suggestNextLevel,
   type LevelProgress,
 } from "@/services/vocabFeed";
 import { estimateNewWordsPerDay, levelEtaDays } from "@/services/progress";
 import { getStudyLimits } from "@/services/srs";
 import { useWordsStore } from "@/stores/wordsStore";
+import { KNOWN_RECHECK_LABEL } from "@/services/reviewRecorder";
 import { PAGE_CONTAINER, handleSpeak } from "./shared";
 
 const LEVEL_NAMES: Record<StudyLevel, string> = {
@@ -71,10 +74,42 @@ export function LevelPicker({ value, onChange, disabled }: { value: StudyLevel[]
   );
 }
 
-export function mixDescription(levels: StudyLevel[]): string {
+export function mixDescription(levels: StudyLevel[], highFirst: boolean = isHighFirstMix()): string {
   if (levels.length === 1) return "Học các từ A1, từ IT trước, rồi theo độ phổ biến.";
-  const ratio = levels.map((_, i) => levels.length - i).join(":");
-  return `Từ mới trộn các cấp ${levels.join(", ")} theo tỉ lệ ${ratio} (cấp thấp nhiều hơn). Trong mỗi cấp, từ IT học trước.`;
+  const ratio = levels.map((_, i) => (highFirst ? i + 1 : levels.length - i)).join(":");
+  return highFirst
+    ? `Từ mới trộn các cấp ${levels.join(", ")} theo tỉ lệ ${ratio} (cấp ${levels[levels.length - 1]} nhiều nhất; từ cấp thấp đã biết thì bấm "Đã biết" để bỏ qua). Trong mỗi cấp, từ IT học trước.`
+    : `Từ mới trộn các cấp ${levels.join(", ")} theo tỉ lệ ${ratio} (cấp thấp nhiều hơn). Trong mỗi cấp, từ IT học trước.`;
+}
+
+/**
+ * Which end of the chosen levels comes most often. Shown only with several levels; the learner placed at B1 or
+ * above starts with the highest level first.
+ */
+export function MixOrderToggle({
+  levels,
+  value,
+  onChange,
+  disabled,
+}: {
+  levels: StudyLevel[];
+  value: boolean;
+  onChange: (highFirst: boolean) => void;
+  disabled?: boolean;
+}) {
+  if (levels.length < 2) return null;
+  return (
+    <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-zinc-300 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        checked={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="accent-cyan-600"
+      />
+      Ưu tiên từ cấp {levels[levels.length - 1]} (bạn đã vững các cấp thấp hơn)
+    </label>
+  );
 }
 
 function useLevelProgress() {
@@ -385,7 +420,7 @@ function Skim({
     setBusy(true);
     try {
       const n = await markCatalogWordsKnown([...picked]);
-      setMessage(`Đã đánh dấu ${n} từ là đã biết. Mỗi từ sẽ được hỏi lại một lần sau khoảng một tuần để chắc chắn.`);
+      setMessage(`Đã đánh dấu ${n} từ là đã biết. Mỗi từ sẽ được hỏi lại một lần sau khoảng ${KNOWN_RECHECK_LABEL} để chắc chắn.`);
       onChanged();
       load();
     } catch (err) {
@@ -537,7 +572,7 @@ function Skim({
             <p className="text-xs text-emerald-700 dark:text-emerald-400 flex-1 min-w-[200px]">{message}</p>
           ) : (
             <p className="text-xs text-slate-500 dark:text-zinc-400 flex-1 min-w-[200px]">
-              Từ đã biết được bỏ qua phần học mới, chỉ hỏi lại một lần sau khoảng một tuần.
+              Từ đã biết được bỏ qua phần học mới, chỉ hỏi lại một lần sau khoảng {KNOWN_RECHECK_LABEL}.
             </p>
           )}
         </div>
@@ -646,6 +681,7 @@ function CatalogSearch({ onChanged }: { onChanged: () => void }) {
 export default function VocabTab() {
   const refreshWords = useWordsStore((s) => s.refreshWords);
   const [levels, setLevels] = useState<StudyLevel[]>(getStudyLevels);
+  const [highFirst, setHighFirst] = useState(isHighFirstMix);
   const [saving, setSaving] = useState(false);
   const { progress, reload } = useLevelProgress();
   const [modalLevel, setModalLevel] = useState<StudyLevel | null>(null);
@@ -746,7 +782,16 @@ export default function VocabTab() {
         ) : (
           <LevelPicker value={levels} onChange={choose} disabled={saving} />
         )}
-        <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(levels)}</p>
+        <MixOrderToggle
+          levels={levels}
+          value={highFirst}
+          disabled={saving}
+          onChange={(on) => {
+            setStudyLevels(levels, { highFirst: on });
+            setHighFirst(on);
+          }}
+        />
+        <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(levels, highFirst)}</p>
         {progress && (
           <NextLevelNotice progress={progress} levels={levels} onOpen={(next) => choose([...levels, next])} busy={saving} />
         )}

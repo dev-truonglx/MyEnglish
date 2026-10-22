@@ -21,7 +21,6 @@ import {
   getWordStatsSummary,
   getXPState,
   getReviewAnalytics,
-  isKnownOnly,
   type WordStatsSummary,
   type XPState,
   type ReviewAnalyticsData,
@@ -133,8 +132,8 @@ export default function AnalyticsView({
       const topic = w.topic || "General Tech";
       if (!map[topic]) map[topic] = { total: 0, mastered: 0, learning: 0 };
       map[topic].total++;
-      // A word only marked "Đã biết" is not mastered until a real review confirms it
-      if ((w.srs.stability || 0) >= 21 && !isKnownOnly(w.srs)) {
+      // Words marked "Đã biết" count too: they start with a long stability (knownSchedule)
+      if ((w.srs.stability || 0) >= 21) {
         map[topic].mastered++;
       } else if ((w.srs.state || 0) > 0) {
         map[topic].learning++;

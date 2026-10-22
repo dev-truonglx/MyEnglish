@@ -14,11 +14,11 @@ describe("one definition of 'đã thuộc': Đang học / Nhớ lâu (U9)", () =
   const long = makeWord("long", { srs: reviewSrs(21, 10) });
   const tapOnly = makeWord("tap-only", { srs: knownOnlySrs });
 
-  it("isRememberedLong: recognition card in Review with stability >= 21 days, confirmed by a real review", () => {
+  it("isRememberedLong: recognition card in Review with stability >= 21 days, words marked 'Đã biết' included", () => {
     expect(isRememberedLong(long)).toBe(true);
     expect(isRememberedLong(young)).toBe(false);
     expect(isRememberedLong(relearning)).toBe(false); // forgotten: back to learning, whatever its stability
-    expect(isRememberedLong(tapOnly)).toBe(false);
+    expect(isRememberedLong(tapOnly)).toBe(true);
     expect(isRememberedLong(unseen)).toBe(false);
   });
 
@@ -44,7 +44,7 @@ describe("one definition of 'đã thuộc': Đang học / Nhớ lâu (U9)", () =
   });
 
   it("countWordStatus puts every word in at most one tier", () => {
-    expect(countWordStatus([unseen, learning, young, relearning, long, tapOnly])).toEqual({ learning: 3, rememberedLong: 1 });
+    expect(countWordStatus([unseen, learning, young, relearning, long, tapOnly])).toEqual({ learning: 3, rememberedLong: 2 });
     expect(countWordStatus([])).toEqual({ learning: 0, rememberedLong: 0 });
   });
 });

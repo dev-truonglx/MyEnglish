@@ -1,17 +1,16 @@
-import { AlarmClock, AudioLines, BookOpen, Check, CheckCircle2, ChevronRight, Circle, Crosshair, Flame, GraduationCap, Play, Timer, Zap } from "lucide-react";
+import { AlarmClock, AudioLines, BookOpen, Check, CheckCircle2, ChevronRight, Circle, Crosshair, Flame, GraduationCap, Play, Timer } from "lucide-react";
 import type { TodayTask, TodayTaskId } from "./todayPlan";
 
 const TASK_ICON: Record<TodayTaskId, typeof BookOpen> = {
   vocab: BookOpen,
   grammar: GraduationCap,
   pronunciation: AudioLines,
-  reflex: Zap,
 };
 
 /** What the main button says for the first thing not done yet */
 function primaryLabel(task: TodayTask, first: boolean): string {
   if (task.id === "vocab") return `Học hôm nay (~${task.minutes} phút)`;
-  const what = task.id === "grammar" ? "1 bài ngữ pháp" : task.id === "pronunciation" ? "Phát âm" : "Luyện phản xạ";
+  const what = task.id === "grammar" ? "1 bài ngữ pháp" : "Phát âm";
   return `${first ? "" : "Tiếp: "}${what} (~${task.minutes} phút)`;
 }
 

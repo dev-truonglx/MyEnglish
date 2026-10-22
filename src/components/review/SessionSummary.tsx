@@ -17,6 +17,8 @@ interface SessionSummaryProps {
   xpState: XPState;
   lastResult: FSRSResult | null;
   onFinish: () => void;
+  /** "Ôn lại N từ vừa sai": practise the words missed in this session right away (absent: no button) */
+  onRetryMissed?: (wordIds: string[]) => void;
   /** Shown under the title (the focus session's own results) */
   header?: ReactNode;
   /** XP earned outside the answers (focus session bonus), added to the total shown */
@@ -24,6 +26,15 @@ interface SessionSummaryProps {
   /** When the next card comes due (undefined: the header already says it, e.g. a focus session) */
   nextReview?: NextReview | null;
 }
+
+const HEADLINES = {
+  high: ["Rất tốt! Bạn nhớ được gần hết 🌟", "Phiên học rất chắc tay 🌟", "Gần như không sót từ nào 👏"],
+  mid: ["Tốt lắm, bạn đang tiến bộ đều 🎯", "Hơn một nửa đã nhớ được, cứ thế mà tiến 🎯", "Đều tay lắm, trí nhớ đang chắc dần 💡"],
+  low: ["Phiên này hơi khó, và như vậy là bình thường 💪", "Từ khó thì cần gặp thêm vài lần 💪", "Học từ khó là lúc não làm việc nhiều nhất 💪"],
+};
+
+/** Missed words listed by name on the summary (the count says the rest) */
+const MISSED_SHOWN = 8;
 
 /**
  * End of a session. Starts with what went well (remembered, new words met, words now in long-term
@@ -38,6 +49,7 @@ export default function SessionSummary({
   xpState,
   lastResult,
   onFinish,
+  onRetryMissed,
   header,
   bonusXp = 0,
   nextReview,
@@ -55,15 +67,13 @@ export default function SessionSummary({
   const remembered = sessionStats.firstTryCorrect + sessionStats.retryCorrect;
   const newWords = wordsToReview.filter((w) => (w.srs?.reps ?? 0) === 0).length;
   const comingBack = sessionStats.revealedCount + sessionStats.skippedCount;
+  const missed = sessionStats.missedWords ?? [];
   const totalWords = wordsToReview.length || 1;
   const rememberedShare = remembered / totalWords;
 
-  const headline =
-    rememberedShare >= 0.8
-      ? "Rất tốt! Bạn nhớ được gần hết 🌟"
-      : rememberedShare >= 0.5
-        ? "Tốt lắm, bạn đang tiến bộ đều 🎯"
-        : "Phiên này hơi khó, và như vậy là bình thường 💪";
+  // A few wordings per tier, picked by the session's size: the same three lines every time read like a template
+  const tier = rememberedShare >= 0.8 ? HEADLINES.high : rememberedShare >= 0.5 ? HEADLINES.mid : HEADLINES.low;
+  const headline = tier[reviewCount % tier.length];
   const headlineNote =
     rememberedShare >= 0.5
       ? "Mỗi lần nhớ lại được là trí nhớ chắc thêm một chút."
@@ -77,9 +87,16 @@ export default function SessionSummary({
         </div>
 
       <div className="space-y-1">
-        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">Xong phiên học! 🎉</h2>
+        <h2 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
+          {sessionStats.endedEarly ? "Tạm dừng phiên học" : "Xong phiên học! 🎉"}
+        </h2>
         <p className="text-sm text-slate-600 dark:text-zinc-400">
           Bạn vừa học <span className="text-emerald-600 dark:text-emerald-400 font-bold">{reviewCount}</span> câu.
+          {sessionStats.endedEarly && sessionStats.endedEarly.cardsLeft > 0 && (
+            <span className="block text-xs mt-0.5">
+              Các câu đã trả lời đều được lưu. {sessionStats.endedEarly.cardsLeft} thẻ còn lại vẫn chờ ở lần ôn tới.
+            </span>
+          )}
         </p>
         {sessionStats.day && (
           <p className="text-sm font-semibold text-orange-700 dark:text-orange-300">
@@ -148,6 +165,35 @@ export default function SessionSummary({
           </div>
         )}
       </div>
+
+      {/* The words missed: read them once more now, or practise them right away */}
+      {missed.length > 0 && (
+        <div className="w-full p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-sm font-bold text-slate-900 dark:text-white">Từ cần xem lại</span>
+            <span className="text-xs text-slate-500 dark:text-zinc-400">sẽ quay lại sớm</span>
+          </div>
+          <ul className="space-y-1.5">
+            {missed.slice(0, MISSED_SHOWN).map((m) => (
+              <li key={m.id} className="flex items-baseline gap-2 text-sm min-w-0">
+                <span className="font-semibold text-slate-900 dark:text-white shrink-0">{m.word}</span>
+                <span className="text-slate-500 dark:text-zinc-400 truncate">{m.meaning}</span>
+              </li>
+            ))}
+          </ul>
+          {missed.length > MISSED_SHOWN && (
+            <p className="text-xs text-slate-500 dark:text-zinc-400">và {missed.length - MISSED_SHOWN} từ khác</p>
+          )}
+          {onRetryMissed && (
+            <button
+              onClick={() => onRetryMissed(missed.map((m) => m.id))}
+              className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-xl border border-cyan-300 dark:border-cyan-700 bg-cyan-50 dark:bg-cyan-500/10 text-cyan-800 dark:text-cyan-200 text-sm font-semibold hover:bg-cyan-100 dark:hover:bg-cyan-500/20"
+            >
+              <RotateCcw className="w-4 h-4" /> Ôn lại {missed.length} từ này ngay (luyện thêm)
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Close the day */}
       <div className="w-full p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-left flex items-start gap-3">

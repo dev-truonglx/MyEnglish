@@ -8,8 +8,11 @@ import {
   cleanMeaningForOption,
   deriveRating,
   generateMultipleChoiceQuestion,
+  isLeech,
   isNewCard,
+  multipleChoiceDirection,
   selectExerciseType,
+  YOUNG_STABILITY_DAYS,
   type ExerciseType,
 } from "./smartReview";
 
@@ -23,6 +26,37 @@ import {
 export function selectSmartPopupMode(card: ReviewCard): "multiple_choice" | "letter_tiles" | "typing" {
   if (card.direction !== "production") return "multiple_choice";
   return selectExerciseType(card) === "letter_tiles" ? "letter_tiles" : "typing";
+}
+
+/**
+ * How the popup asks a recognition card in multiple choice: the English word (pick its meaning), the meaning
+ * with the sentence blanked (pick the word), or the word heard, not read (pick its meaning).
+ */
+export type PopupMcVariant = "en_to_vn" | "vn_to_en" | "listen";
+
+/** Stability (days) from which a card may also be asked by ear in the popup */
+export const POPUP_LISTEN_STABILITY_DAYS = 7;
+
+/**
+ * The popup shows up to 8 times a day, all multiple choice, and 2 known words in 3 came as the same English →
+ * Vietnamese question. Young cards (and leeches) keep English → Vietnamese, the easiest step. Known cards
+ * rotate with their review count: English → Vietnamese, Vietnamese → English, and from
+ * POPUP_LISTEN_STABILITY_DAYS by ear, when this computer has an English voice (`canSpeak`). Every variant
+ * tests recognition.
+ */
+export function popupMcVariant(card: ReviewCard, canSpeak: boolean): PopupMcVariant {
+  const { state = 0, stability = 0, reps = 0 } = card.srs || {};
+  if (card.direction !== "recognition" || state !== 2 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs)) {
+    return multipleChoiceDirection(card);
+  }
+  const variants: PopupMcVariant[] =
+    canSpeak && stability >= POPUP_LISTEN_STABILITY_DAYS ? ["en_to_vn", "vn_to_en", "listen"] : ["en_to_vn", "vn_to_en"];
+  return variants[reps % variants.length];
+}
+
+/** The exercise a popup multiple-choice answer is logged as */
+export function popupMcExercise(variant: PopupMcVariant): ExerciseType {
+  return variant === "listen" ? "listening" : "multiple_choice";
 }
 
 export interface PopupChoice {

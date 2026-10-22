@@ -36,6 +36,8 @@ import VocabSetupScreen from "@/components/VocabSetupScreen";
 import { setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
+import ContextMatchExercise from "@/components/exercises/ContextMatchExercise";
+import type { WordDetail } from "@/types/database";
 import PlacementTest from "@/components/PlacementTest";
 import AccountSettings from "@/components/dashboard/AccountSettings";
 import LeaderboardTab from "@/components/dashboard/LeaderboardTab";
@@ -455,6 +457,7 @@ function SummaryView() {
   const at = new Date(Date.now() + 25 * 60e3);
   const stats = {
     firstTryCorrect: 6, retryCorrect: 2, revealedCount: 1, skippedCount: 0, totalWrongAttempts: 2, totalXPEarned: 48, leechesSlain: 0,
+    missedWords: [{ id: "w-rollback", word: "rollback", meaning: "Hoàn tác phiên bản" }],
     rescuedCount: 1, masteredWords: [], day: { streak: 6, todayCount: reached ? 12 : 7, dailyGoal: 10, goalReachedNow: reached, goalReached: reached, dueLeft: 0 },
   } as any;
   return (
@@ -465,6 +468,7 @@ function SummaryView() {
       xpState={xpStateNow()}
       lastResult={null}
       onFinish={() => ((window as any).__finished = true)}
+      onRetryMissed={(ids) => ((window as any).__retry = ids)}
       nextReview={q.has("none") ? null : { at, count: 6 }}
     />
   );
@@ -708,6 +712,37 @@ function Tiles() {
   ) : null;
 }
 
+// ?contextmatch: "Nối từ với câu" on three words already met; the result is exposed on window.__match
+const MATCH_WORDS: Array<[string, string, string]> = [
+  ["deploy", "triển khai", "We deploy the new version every Friday."],
+  ["cache", "bộ nhớ đệm", "The browser keeps a cache of images to load pages faster."],
+  ["queue", "hàng đợi", "Each job waits in the queue until a worker is free."],
+];
+function ContextMatch() {
+  const words = React.useMemo(
+    () =>
+      MATCH_WORDS.map(([word, meaning, sentence]) => ({
+        id: word,
+        word,
+        meaning_vn: meaning,
+        examples: [{ id: `e-${word}`, word_id: word, sentence_en: sentence, grammar_analysis: "" }],
+        srs: { word_id: word, state: 2, reps: 3, stability: 10, last_review: new Date().toISOString() },
+      })) as unknown as WordDetail[],
+    []
+  );
+  return (
+    <div className="p-6">
+      <ContextMatchExercise
+        word={words[0]}
+        allWords={words}
+        onSpeak={() => {}}
+        onFallback={() => ((window as any).__matchFallback = true)}
+        onComplete={(ok, attempts, rating) => ((window as any).__match = { ok, attempts, rating })}
+      />
+    </div>
+  );
+}
+
 // ?reading: the reading tab with a sample text already pasted
 function Reading() {
   const [ready, setReady] = useState(false);
@@ -772,6 +807,16 @@ function App() {
           const db = await getDatabase();
           await db.execute(`UPDATE srs_reviews SET stability = 15, difficulty = 4, reps = 5, state = 2, last_review = $1, next_review_date = $2 WHERE word_id = 'w-deploy'`, [iso(-80 * DAY), iso(-65 * DAY)]);
         }
+        // ?rested: release, rollback and pipeline were answered right twice in a row (resting from practice), banana
+        // once an hour ago: the popup's practice slot goes to apple, the only word not seen lately
+        if (params.has("rested")) {
+          const base = { exerciseType: "multiple_choice" as const, responseTimeMs: 1000, wrongAttempts: 0, xpEarned: 0, direction: "recognition" as const, isCorrect: true, rating: 3, isScheduled: false };
+          for (const id of ["w-release", "w-rollback", "w-pipeline"]) {
+            await saveReviewLog({ ...base, wordId: id, timestamp: iso(-10 * 3600e3) });
+            await saveReviewLog({ ...base, wordId: id, timestamp: iso(-5 * 3600e3) });
+          }
+          await saveReviewLog({ ...base, wordId: "w-banana", timestamp: iso(-3600e3) });
+        }
       })
       .then(() => setReady(true));
   }, []);
@@ -804,6 +849,7 @@ function App() {
   if (q.has("lesson")) return <GrammarHub initialLessonId={q.get("lesson") || "ch01-l01"} />;
   if (q.has("grammarhub")) return <GrammarHub />;
   if (q.has("tiles")) return <Tiles />;
+  if (q.has("contextmatch")) return <ContextMatch />;
   if (q.has("placement"))
     return <PlacementTest onClose={() => {}} onDone={(level) => ((window as any).__placement = level)} />;
   if (q.has("nudge") && (q.has("quiz") || q.has("card"))) {

@@ -406,6 +406,32 @@ export function estimateNewWordsPerDay(newCardsPerDay: number): number {
   return Math.max(1, Math.ceil(Math.max(0, newCardsPerDay) / 2));
 }
 
+/** Word counts the Today card counts down to: a near goal, where "every word of A1" is months away */
+export const MET_MILESTONES = [10, 25, 50, 100, 150, 200, 300, 400, 500, 750, 1000];
+
+/** The next count of words met to aim for (beyond 1000: every 250), at most the level's size; null once all met */
+export function nextMetMilestone(met: number, total: number): number | null {
+  if (met >= total) return null;
+  const next = MET_MILESTONES.find((m) => m > met) ?? (Math.floor(met / 250) + 1) * 250;
+  return Math.min(next, total);
+}
+
+/** Words introduced for the first time since `from` (introduction cards of brand-new words; "Đã biết" marks excluded) */
+export async function countNewWordsSince(from: Date): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ n: number }>>(
+    `SELECT COUNT(DISTINCT word_id) AS n FROM review_logs
+     WHERE exercise_type = 'intro' AND timestamp >= $1 AND COALESCE(state_before, 0) = 0`,
+    [from.toISOString()]
+  );
+  return Number(rows[0]?.n) || 0;
+}
+
+/** Monday 00:00 (local) of the week of `now` */
+export function startOfLocalWeek(now: Date = new Date()): Date {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+}
+
 /**
  * Days until every word of a level has been met, at `wordsPerDay` new words a day of which the level gets
  * `share` (its part of the level mix). 0 = every word met.

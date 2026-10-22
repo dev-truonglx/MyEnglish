@@ -105,13 +105,26 @@ export interface ReflexSummary {
 
 export interface ReflexStats {
   timesPlayed: number;
+  /** Best score of one run (the run's XP before the daily cap) */
   bestXP: number;
   bestTier: number;
   fastestAvgMs: number;
   lastPlayedAt: string | null;
+  /** Local day of xpToday */
+  xpDay: string | null;
+  /** XP the challenge awarded on xpDay (at most REFLEX_DAILY_XP_MAX) */
+  xpToday: number;
 }
 
 const STATS_STORAGE_KEY = "myenglish_reflex_stats_v1";
+
+/**
+ * XP the challenge can award per local day, all runs together. It drills meanings without touching the
+ * schedule: unlimited replays (up to 90 XP each) out-earned a day of real reviews on the leaderboard.
+ */
+export const REFLEX_DAILY_XP_MAX = 40;
+
+const EMPTY_STATS: ReflexStats = { timesPlayed: 0, bestXP: 0, bestTier: 0, fastestAvgMs: 0, lastPlayedAt: null, xpDay: null, xpToday: 0 };
 
 /**
  * Calculates XP earned based on completed tiers and whether second chance was used.
@@ -186,6 +199,11 @@ export function classifyWord(w: WordDetail): WordCategory {
   return (w.srs?.stability ?? 0) >= 21 ? "remembered_long" : "learning";
 }
 
+/** The word was introduced or answered at least once */
+function wasMet(w: WordDetail): boolean {
+  return (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || !!w.srs?.last_review || (w.srsProduction?.reps ?? 0) > 0;
+}
+
 /**
  * Normalizes words from user database and optional catalog fallback into a unified candidate pool.
  */
@@ -210,7 +228,8 @@ export function buildCandidatePool(
       meaning,
       phonetic: w.phonetic,
       pos: w.part_of_speech,
-      category: classifyWord(w),
+      // A word still waiting in the deck (never introduced) is not being learnt: it only fills, like deck words
+      category: wasMet(w) ? classifyWord(w) : "catalog",
     });
   }
 
@@ -537,9 +556,7 @@ export function generateReflexQuestions(
 export function getReflexStats(): ReflexStats {
   try {
     const raw = localStorage.getItem(STATS_STORAGE_KEY);
-    if (!raw) {
-      return { timesPlayed: 0, bestXP: 0, bestTier: 0, fastestAvgMs: 0, lastPlayedAt: null };
-    }
+    if (!raw) return { ...EMPTY_STATS };
     const parsed = JSON.parse(raw);
     return {
       timesPlayed: Number(parsed.timesPlayed) || 0,
@@ -547,20 +564,30 @@ export function getReflexStats(): ReflexStats {
       bestTier: Number(parsed.bestTier) || 0,
       fastestAvgMs: Number(parsed.fastestAvgMs) || 0,
       lastPlayedAt: parsed.lastPlayedAt || null,
+      xpDay: typeof parsed.xpDay === "string" ? parsed.xpDay : null,
+      xpToday: Number(parsed.xpToday) || 0,
     };
   } catch {
-    return { timesPlayed: 0, bestXP: 0, bestTier: 0, fastestAvgMs: 0, lastPlayedAt: null };
+    return { ...EMPTY_STATS };
   }
 }
 
+/** XP the challenge can still award today (see REFLEX_DAILY_XP_MAX) */
+export function reflexXpLeftToday(now: Date = new Date(), stats: ReflexStats = getReflexStats()): number {
+  const used = stats.xpDay === getLocalDateString(now) ? stats.xpToday : 0;
+  return Math.max(0, REFLEX_DAILY_XP_MAX - used);
+}
+
 /**
- * Saves completed reflex session, updates personal bests, awards XP and logs event.
- * Absolutely NO FSRS recalculation or scheduling is performed.
+ * Saves completed reflex session, updates personal bests, awards XP (within today's cap) and logs event.
+ * Absolutely NO FSRS recalculation or scheduling is performed. Returns the XP actually awarded.
  */
-export function recordReflexCompletion(summary: ReflexSummary): void {
-  // 1. Award XP if any was earned
-  if (summary.totalXP > 0) {
-    awardXP(summary.totalXP);
+export function recordReflexCompletion(summary: ReflexSummary, now: Date = new Date()): number {
+  // 1. Award XP if any was earned, within what today still allows
+  const current = getReflexStats();
+  const awarded = Math.min(Math.max(0, summary.totalXP), reflexXpLeftToday(now, current));
+  if (awarded > 0) {
+    awardXP(awarded);
   }
 
   // 2. Log learning event
@@ -569,6 +596,7 @@ export function recordReflexCompletion(summary: ReflexSummary): void {
       reflex: true,
       tiersCleared: summary.tiersCleared,
       totalXP: summary.totalXP,
+      awardedXP: awarded,
       accuracy: summary.accuracy,
       avgResponseTimeMs: summary.avgResponseTimeMs,
       secondChanceUsed: summary.secondChanceUsed,
@@ -577,7 +605,7 @@ export function recordReflexCompletion(summary: ReflexSummary): void {
 
   // 3. Persist stats
   try {
-    const current = getReflexStats();
+    const today = getLocalDateString(now);
     const updated: ReflexStats = {
       timesPlayed: current.timesPlayed + 1,
       bestXP: Math.max(current.bestXP, summary.totalXP),
@@ -588,13 +616,16 @@ export function recordReflexCompletion(summary: ReflexSummary): void {
             ? Math.min(current.fastestAvgMs, summary.avgResponseTimeMs)
             : summary.avgResponseTimeMs
           : current.fastestAvgMs,
-      lastPlayedAt: new Date().toISOString(),
+      lastPlayedAt: now.toISOString(),
+      xpDay: today,
+      xpToday: (current.xpDay === today ? current.xpToday : 0) + awarded,
     };
     localStorage.setItem(STATS_STORAGE_KEY, JSON.stringify(updated));
     window.dispatchEvent(new CustomEvent("myenglish-reflex-updated"));
     window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));
     window.dispatchEvent(new CustomEvent("myenglish-quests-updated"));
   } catch {}
+  return awarded;
 }
 
 /**

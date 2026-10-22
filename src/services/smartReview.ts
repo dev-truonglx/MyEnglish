@@ -281,7 +281,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  *  - review cards by how much memory is lost if the review waits one more day: R(now) - R(now + 1 day).
  *    A card just reaching its due date with low stability loses the most; a card with high stability
  *    loses little; a card overdue for weeks is already mostly forgotten and loses little more.
- *    When the backlog is larger than a session, this keeps the most memory per review.
+ *    When the backlog is larger than a session, this keeps the most memory per review (buildReviewSession
+ *    still keeps about a quarter of the slots for the cards longest past due, see pickReviewCards).
  *  - cards that are not due are pushed far behind due cards (used by practice / micro-quiz fallbacks).
  * Leeches get no bonus: drilling them first makes sessions heavy, they are spread and capped instead.
  */
@@ -691,12 +692,64 @@ export function newCardAllowance(dueReviewCount: number, maxSessionSize: number)
   return 0;
 }
 
+/** Share of a session's review slots kept for the cards longest past due, when more reviews are due than fit */
+export const OVERDUE_RESERVE_SHARE = 0.25;
+
+/** `extra` placed evenly between the items of `base` (both orders kept) */
+function insertEvenly<T>(base: T[], extra: T[]): T[] {
+  if (extra.length === 0) return base;
+  if (base.length === 0) return extra;
+  const result: T[] = [];
+  const gap = base.length / extra.length;
+  let nextAt = gap / 2;
+  let j = 0;
+  for (let i = 0; i < base.length; i++) {
+    result.push(base[i]);
+    while (j < extra.length && i + 1 >= nextAt) {
+      result.push(extra[j++]);
+      nextAt += gap;
+    }
+  }
+  while (j < extra.length) result.push(extra[j++]);
+  return result;
+}
+
+/**
+ * The review cards a session takes, `room` at most, from cards in priority order. When they all fit, all of
+ * them, unchanged. Otherwise about a quarter of the slots (OVERDUE_RESERVE_SHARE) go first to the Review cards
+ * longest past their due date, and the rest by priority. calculateUrgencyScore ranks by the memory one more day
+ * of waiting would lose, which is small for a card overdue for weeks (already mostly forgotten), so such cards
+ * always came last and were never reached while a backlog lasted (after a break, in a comeback plan).
+ * Overdue cards priority would have taken anyway keep their place; the ones added for the reserve are spread
+ * through the session rather than left at its end, where a session stopped early would never reach them.
+ */
+function pickReviewCards(byPriority: ReviewCard[], room: number, now: Date): ReviewCard[] {
+  if (byPriority.length <= room) return byPriority;
+  const top = byPriority.slice(0, room);
+  const reserve = Math.floor(room * OVERDUE_RESERVE_SHARE);
+  if (reserve === 0) return top;
+  const overdue = byPriority
+    .map((c, i) => ({ c, i, late: now.getTime() - new Date(c.srs.next_review_date).getTime() }))
+    .filter((x) => (x.c.srs.state ?? 0) === 2 && Number.isFinite(x.late))
+    .sort((a, b) => b.late - a.late || a.i - b.i)
+    .slice(0, reserve)
+    .map((x) => x.c);
+  const reserved = new Set(overdue);
+  const inTop = new Set(top);
+  const rest = byPriority.filter((c) => !reserved.has(c)).slice(0, room - overdue.length);
+  const restSet = new Set(rest);
+  // Everything priority alone would also have taken stays in priority order; the reserve's additions are spread
+  const base = byPriority.filter((c) => restSet.has(c) || (reserved.has(c) && inTop.has(c)));
+  return insertEvenly(base, overdue.filter((c) => !inTop.has(c)));
+}
+
 /**
  * Build a study session from due words:
  *  - every word contributes at most one due card per session (the higher-priority one); a review card
  *    whose sibling was reviewed today waits until tomorrow
  *  - due review/learning cards ordered by FSRS priority (see calculateUrgencyScore), at most
- *    MAX_LEECHES_PER_SESSION leeches, spread through the session
+ *    MAX_LEECHES_PER_SESSION leeches, spread through the session; when more are due than the session holds,
+ *    about a quarter of the review slots go to the cards longest past due (pickReviewCards)
  *  - cards never reviewed are a separate, budgeted stage: one daily budget for both directions
  *    (splitNewCardBudget), limited further by the review backlog (newCardAllowance), oldest first,
  *    new words and new recall cards alternating, spread evenly through the session; cards introduced
@@ -775,7 +828,7 @@ export function buildReviewSession(
       ? newCards.slice(0, stored.maxSessionSize)
       : newCards.slice(0, Math.min(limits.maxSessionSize, newCardAllowance(reviewCards.length, limits.maxSessionSize)));
   const reviewRoom = comebackNew != null ? limits.maxSessionSize : limits.maxSessionSize - newSlice.length;
-  const reviewSlice = interleaveTopics(spreadLeeches(reviewCards.slice(0, reviewRoom), leechSettings));
+  const reviewSlice = interleaveTopics(spreadLeeches(pickReviewCards(reviewCards, reviewRoom, now), leechSettings));
   if (newSlice.length === 0) return reviewSlice;
   if (reviewSlice.length === 0) return newSlice;
 
@@ -800,6 +853,37 @@ export function buildReviewSession(
  */
 export function requeuePosition(queueLength: number, currentIndex: number, gap: number): number {
   return Math.max(currentIndex + 1, Math.min(queueLength, currentIndex + 1 + gap));
+}
+
+/** Cards looked at past a new word's quiz that comes too soon (see bringReadyCardForward) */
+export const READY_CARD_LOOKAHEAD = 6;
+
+/**
+ * Before the session moves to `index`: a new word's first quiz less than INTRO_READY_MS after its introduction
+ * would only be practice (short-term memory), and the word was then asked again at the end of the session to
+ * be graded, so the learner answered the same new word twice within minutes. The first card after it that is
+ * ready (another word, within `lookahead`) comes first instead, and the quiz moves back one place; the quiz is
+ * asked as it is when no such card is near. Returns the same array when nothing moves.
+ */
+export function bringReadyCardForward(
+  queue: ReviewCard[],
+  index: number,
+  introducedAt: ReadonlyMap<string, number>,
+  now: number,
+  lookahead: number = READY_CARD_LOOKAHEAD
+): ReviewCard[] {
+  const tooSoon = (c: ReviewCard) => {
+    const at = isNewCard(c) ? introducedAt.get(cardKey(c)) : undefined;
+    return at != null && now - at < INTRO_READY_MS;
+  };
+  const card = queue[index];
+  if (!card || !tooSoon(card)) return queue;
+  const end = Math.min(queue.length, index + 1 + lookahead);
+  for (let j = index + 1; j < end; j++) {
+    if (queue[j].id === card.id || tooSoon(queue[j])) continue;
+    return [...queue.slice(0, index), queue[j], ...queue.slice(index, j), ...queue.slice(j + 1)];
+  }
+  return queue;
 }
 
 /** Keep the priority order but move leeches so they are evenly spaced instead of bunched together */

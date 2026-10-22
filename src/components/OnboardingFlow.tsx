@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import type { StudyLevel } from "@/services/vocabCatalog";
-import { defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
+import { defaultHighFirst, defaultStudyLevelsFor, setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import {
   applyDailyPlan,
   applyLevelChoice,
@@ -12,10 +12,8 @@ import {
 } from "@/services/onboarding";
 import { ANCHOR_TIMES, type ReminderAnchor } from "@/services/reminderMoments";
 import type { ReminderTrigger } from "@/services/reminderSettings";
-import { DEFAULT_INITIAL_TENSE_IDS, saveInitialTenses } from "@/services/grammarPath";
-import TenseSelectionPicker from "./grammar/TenseSelectionPicker";
 import PlacementTest from "./PlacementTest";
-import { LevelPicker, mixDescription } from "./dashboard/VocabTab";
+import { LevelPicker, MixOrderToggle, mixDescription } from "./dashboard/VocabTab";
 
 const LEVELS: Array<{ level: LevelChoice; label: string; hint: string }> = [
   { level: "A0", label: "Mất gốc", hint: "Quên gần hết, muốn học lại từ đầu" },
@@ -34,10 +32,11 @@ interface OnboardingFlowProps {
 /**
  * First run, in the order a teacher would ask:
  *  1. level (quick adaptive test, or pick one; "mất gốc" = A0)
- *  2. vocabulary levels: the Oxford deck from A1, mixed with the next levels up to the learner's own
- *  3. starting tenses: choose which tenses to learn first (default: Present Simple)
- *  4. minutes per day and WHEN to study
- * then the first session right away.
+ *  2. vocabulary levels: the Oxford deck from A1, mixed with the next levels up to the learner's own (from B1,
+ *     the learner's own level comes most often)
+ *  3. minutes per day and WHEN to study
+ * then the first session right away. The starting tenses are asked the first time the Grammar tab is opened:
+ * a fourth question before any word was learnt made the first run long for little.
  */
 export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const [step, setStep] = useState(1);
@@ -45,7 +44,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const [level, setLevel] = useState<LevelChoice | null>(null);
   const [placementOpen, setPlacementOpen] = useState(false);
   const [placementDone, setPlacementDone] = useState(false);
-  const [selectedTenses, setSelectedTenses] = useState<string[]>([...DEFAULT_INITIAL_TENSE_IDS]);
+  const [highFirst, setHighFirst] = useState(false);
   const [minutes, setMinutes] = useState<DailyMinutes>(10);
   const [reminders, setReminders] = useState(true);
   const [triggerCondition, setTriggerCondition] = useState<ReminderTrigger>("due_only");
@@ -60,6 +59,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   const goToLevels = () => {
     // Up to the learner's own level (A0 = A1): words they may know are skipped with "Đã biết"
     setStudyLevelsState(defaultStudyLevelsFor(level === "A0" ? "A1" : level));
+    setHighFirst(defaultHighFirst(level));
     setStep(2);
   };
 
@@ -69,8 +69,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
     try {
       if (level) applyLevelChoice(level);
       applyDailyPlan(minutes, reminders, { anchors, transitions }, triggerCondition);
-      setStudyLevels(studyLevels);
-      saveInitialTenses(selectedTenses);
+      setStudyLevels(studyLevels, { highFirst });
       await topUpNewWords();
       markOnboardingDone();
       onFinish(startNow);
@@ -81,10 +80,9 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   };
 
   const skipAll = async () => {
-    // Defaults: A1 words, 10 minutes a day, Present Simple tense
+    // Defaults: A1 words, 10 minutes a day (the tenses are asked in the Grammar tab)
     setStudyLevels(["A1"]);
     applyDailyPlan(10, reminders, { anchors, transitions });
-    saveInitialTenses([...DEFAULT_INITIAL_TENSE_IDS]);
     await topUpNewWords().catch(() => {});
     markOnboardingDone();
     onFinish(false);
@@ -95,13 +93,13 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
       <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
-            {[1, 2, 3, 4].map((s) => (
+            {[1, 2, 3].map((s) => (
               <span
                 key={s}
                 className={`h-1.5 rounded-full transition-all ${s === step ? "w-8 bg-cyan-500" : s < step ? "w-4 bg-cyan-300 dark:bg-cyan-700" : "w-4 bg-slate-200 dark:bg-zinc-700"}`}
               />
             ))}
-            <span className="ml-2 text-xs text-slate-500 dark:text-zinc-500">Bước {step}/4</span>
+            <span className="ml-2 text-xs text-slate-500 dark:text-zinc-500">Bước {step}/3</span>
           </div>
           <button onClick={skipAll} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
             Bỏ qua phần thiết lập
@@ -170,7 +168,8 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
               </p>
             </div>
             <LevelPicker value={studyLevels} onChange={setStudyLevelsState} />
-            <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(studyLevels)}</p>
+            <MixOrderToggle levels={studyLevels} value={highFirst} onChange={setHighFirst} />
+            <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(studyLevels, highFirst)}</p>
             <div className="flex items-center justify-between pt-1">
               <button onClick={() => setStep(1)} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                 Quay lại
@@ -186,35 +185,6 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
         )}
 
         {step === 3 && (
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">Chọn thì bạn muốn bắt đầu học</h2>
-              <p className="text-sm text-slate-500 dark:text-zinc-400">
-                Mặc định là <b>Thì hiện tại đơn</b> — khởi đầu lý tưởng cho người mất gốc để xây chắc nền tảng mà không bị ngợp. Bạn có thể tích chọn thêm nhiều thì nếu muốn, và luôn có thể đổi lại trong tab Ngữ pháp sau này.
-              </p>
-            </div>
-
-            <TenseSelectionPicker value={selectedTenses} onChange={setSelectedTenses} />
-
-            <div className="flex items-center justify-between pt-1">
-              <button
-                onClick={() => setStep(2)}
-                className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
-              >
-                Quay lại
-              </button>
-              <button
-                onClick={() => setStep(4)}
-                disabled={selectedTenses.length === 0}
-                className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-40"
-              >
-                Tiếp
-              </button>
-            </div>
-          </div>
-        )}
-
-        {step === 4 && (
           <div className="space-y-4">
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Mỗi ngày bạn học bao lâu, vào lúc nào?</h2>
@@ -271,7 +241,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
                         }`}
                       >
                         <span className="text-xs font-bold">Chỉ khi có từ đến hạn</span>
-                        <span className="text-[10px] opacity-75">Tôn trọng chu kỳ FSRS, hết từ thì dừng nhắc</span>
+                        <span className="text-[10px] opacity-75">Chỉ nhắc khi có từ cần ôn, ôn xong thì thôi</span>
                       </button>
 
                       <button
@@ -310,7 +280,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             </div>
             {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex items-center justify-between pt-1">
-              <button onClick={() => setStep(3)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+              <button onClick={() => setStep(2)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                 Quay lại
               </button>
               <div className="flex items-center gap-3">

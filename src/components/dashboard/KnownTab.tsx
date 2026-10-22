@@ -15,7 +15,7 @@ import {
   type KnownSort,
   type KnownStatus,
 } from "@/services/knownWords";
-import { KNOWN_CHECK_MAX_DAYS, KNOWN_CHECK_MIN_DAYS } from "@/services/reviewRecorder";
+import { KNOWN_STABILITY_MAX_DAYS, KNOWN_STABILITY_MIN_DAYS } from "@/services/reviewRecorder";
 import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 import { handleSpeak, PAGE_CONTAINER } from "./shared";
 
@@ -105,8 +105,8 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
           <div className="min-w-0">
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Đã biết</h2>
             <p className="text-sm text-slate-600 dark:text-zinc-300">
-              Những từ bạn đánh dấu "Đã biết" khi gặp lần đầu. App hỏi lại mỗi từ một lần sau {KNOWN_CHECK_MIN_DAYS}–{KNOWN_CHECK_MAX_DAYS} ngày để
-              xác nhận: trả lời đúng thì từ được tính là đã học, sai thì học lại như từ thường.
+              Những từ bạn đã thành thạo (nghe, đọc, viết được) và đánh dấu "Đã biết". Chúng được tính là Nhớ lâu ngay, không có bài
+              luyện gõ từ, và app chỉ hỏi lại mỗi từ một lần sau khoảng {Math.round(KNOWN_STABILITY_MIN_DAYS / 30)}–{Math.round(KNOWN_STABILITY_MAX_DAYS / 30)} tháng: trả lời đúng thì từ ở lại Nhớ lâu và còn lâu mới gặp lại, sai thì học lại như từ thường.
             </p>
           </div>
         </div>

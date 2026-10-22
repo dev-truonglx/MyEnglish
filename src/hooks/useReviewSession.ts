@@ -18,6 +18,7 @@ import {
   isNewCard,
   needsRelearnIntro,
   requeuePosition,
+  bringReadyCardForward,
   getXPState,
   selectExerciseType,
   deriveRating,
@@ -34,6 +35,8 @@ import {
   type XPState,
 } from "@/services/smartReview";
 import { getRecentIntros } from "@/services/intros";
+import { getConciseMeaning } from "@/services/meaningText";
+import { isAiCliReady } from "@/services/ai";
 import {
   cardWithResult,
   INTRO_MIN_GAP_MS,
@@ -49,12 +52,13 @@ import { loadCatalogMeanings } from "@/services/vocabCatalog";
 import { setMainSessionActive } from "@/services/activeSession";
 import { needsIntro } from "@/services/popupSession";
 import { buildPretest, recordPretest, shouldPretest, type PretestResult } from "@/services/pretest";
-import { celebrationFor, type Celebration } from "@/services/celebrations";
+import { celebrationFor, praiseWord, type Celebration } from "@/services/celebrations";
 import { logLearningEvent } from "@/services/learningEvents";
 import { checkAndUnlockAchievements, recordFirstTryCorrect } from "@/services/achievements";
 import { triggerConfetti } from "@/utils/confetti";
 import { playAnswerSound, playSound, playWrongTry, resetSoundSession } from "@/services/sound";
-import { handleSpeak, AUTO_SPEAK_DELAY_MS } from "@/components/review/speech";
+import { englishVoices, handleSpeak, AUTO_SPEAK_DELAY_MS } from "@/components/review/speech";
+import { practiceExerciseType } from "@/services/practicePicker";
 
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
@@ -111,6 +115,10 @@ export interface SessionStats {
   totalWrongAttempts: number;
   totalXPEarned: number;
   leechesSlain: number;
+  /** Words forgotten, revealed or skipped in this session, in that order (one entry per word): the summary lists them */
+  missedWords: Array<{ id: string; word: string; meaning: string }>;
+  /** The learner left before the last card ("Thoát"): the summary says what is left */
+  endedEarly?: { cardsLeft: number };
   /** The day after this session (set when it ends): streak, answers today vs the goal */
   day?: {
     streak: number;
@@ -274,13 +282,15 @@ export function useReviewSession({
     totalWrongAttempts: 0,
     totalXPEarned: 0,
     leechesSlain: 0,
+    missedWords: [],
   });
   // Words already counted as "coming back soon" (skipped, revealed or missed): one word, one count
   const comingBackWordsRef = useRef<Set<string>>(new Set());
-  const countComingBack = (wordId: string, field: "skippedCount" | "revealedCount") => {
-    if (comingBackWordsRef.current.has(wordId)) return;
-    comingBackWordsRef.current.add(wordId);
-    setSessionStats((prev) => ({ ...prev, [field]: prev[field] + 1 }));
+  const countComingBack = (card: ReviewCard, field: "skippedCount" | "revealedCount") => {
+    if (comingBackWordsRef.current.has(card.id)) return;
+    comingBackWordsRef.current.add(card.id);
+    const missed = { id: card.id, word: card.word, meaning: getConciseMeaning(card.meaning_vn, card.word) };
+    setSessionStats((prev) => ({ ...prev, [field]: prev[field] + 1, missedWords: [...prev.missedWords, missed] }));
   };
 
   // Phase 1: Response Time Tracking
@@ -377,12 +387,23 @@ export function useReviewSession({
     recordPretest(currentWord, result, "flashcard");
   };
 
+  // Where this session starts in the practice formats' rotation (a new one each session)
+  const practiceSeedRef = useRef(Math.floor(Math.random() * 1000));
+
+  // AI-graded exercises (free writing) only when an AI CLI is installed. A ref, not state: the answer
+  // arriving while a card is on screen must not change that card's exercise, the next card uses it
+  const aiReadyRef = useRef<boolean | null>(null);
+  useEffect(() => {
+    isAiCliReady().then((ready) => (aiReadyRef.current = ready));
+  }, []);
+
   /**
    * The exercise if it can be built for this card, else a same-direction exercise that always can.
    * Checked here (not only by the exercise's own onFallback) because a fallback requested while the card
    * is being set up is cleared by resetCardState, which left an empty card on screen.
    */
   const playableOrFallback = (type: ExerciseType, card: ReviewCard): ExerciseType => {
+    if (type === "free_writing" && aiReadyRef.current !== true) return "spelling";
     const pool = distractorPool && distractorPool.length >= 4 ? distractorPool : (wordsToReview as WordDetail[]);
     const upcoming = new Set(queue.slice(currentIndex + 1).map((c) => c.id));
     if (type === "cloze" && !pickExample(card)) return "spelling";
@@ -402,11 +423,15 @@ export function useReviewSession({
     if (introducedAtRef.current.has(currentKey) && isNewCard(currentWord)) {
       return currentWord.direction === "production" ? (pickExample(currentWord) ? "cloze" : "spelling") : "multiple_choice";
     }
-    const picked = selectExerciseType(currentWord);
+    // Practice: the format varies from one session to the next (see practiceExerciseType)
+    const picked = practiceMode
+      ? practiceExerciseType(currentWord, practiceSeedRef.current + currentIndex, englishVoices().length > 0)
+      : selectExerciseType(currentWord);
     // Mature recall cards sometimes get output practice: recall the word and write a sentence with it,
     // graded by the AI (a few per day: each AI check takes seconds)
     if (
       picked === "spelling" &&
+      aiReadyRef.current === true &&
       currentWord.direction === "production" &&
       (currentWord.srs.stability ?? 0) >= MATURE_STABILITY_DAYS &&
       freeWritingUsedToday() < FREE_WRITING_PER_DAY &&
@@ -513,7 +538,10 @@ export function useReviewSession({
       return;
     }
     const insertAt = requeuePosition(queue.length, currentIndex, INTRO_GAP);
-    setQueue((prev) => [...prev.slice(0, insertAt), currentWord, ...prev.slice(insertAt)]);
+    const next = currentIndex + 1;
+    setQueue((prev) =>
+      bringReadyCardForward([...prev.slice(0, insertAt), currentWord, ...prev.slice(insertAt)], next, introducedAtRef.current, Date.now())
+    );
     setCurrentIndex((prev) => prev + 1);
   };
 
@@ -642,7 +670,7 @@ export function useReviewSession({
       // Track statistics (only the first time a word is shown in this session)
       if (!isRequeuedCard) {
         if (rating === Rating.Again) {
-          countComingBack(currentWord.id, "revealedCount");
+          countComingBack(currentWord, "revealedCount");
         } else if (isFirstTry && rating !== Rating.Hard) {
           setSessionStats((prev) => ({ ...prev, firstTryCorrect: prev.firstTryCorrect + 1 }));
         } else {
@@ -771,19 +799,24 @@ export function useReviewSession({
 
   /** The summary: the day's goal and streak, achievements, the session log. Once per session. */
   const sessionEndedRef = useRef(false);
-  const endSession = (cards: number) => {
+  const endSession = (cards: number, early = false) => {
     if (sessionEndedRef.current) return;
     sessionEndedRef.current = true;
-    if (cards > 0) playSound("complete");
+    if (cards > 0 && !early) playSound("complete");
     finishDay();
     setSessionCompleted(true);
-    checkAndUnlockAchievements({ ...collectionStats, sessionCompleted: true });
-    logLearningEvent("session_completed", { meta: { cards, practice: practiceMode } });
+    // Leaving half-way is no completed session for the badges
+    if (!early) checkAndUnlockAchievements({ ...collectionStats, sessionCompleted: true });
+    logLearningEvent("session_completed", { meta: { cards, practice: practiceMode, ...(early ? { early: true } : {}) } });
   };
 
   /** Next card, or the end of the session (no card left, or a focus session out of time) */
   const advance = (recorded: RecordedAnswer) => {
     if (currentIndex + 1 < recorded.nextQueueLength && !stopAfterCurrentRef.current) {
+      // A new word's quiz coming too soon after its introduction lets a ready card go first (applied after a
+      // requeue of the answer just given, which is a queued update too)
+      const next = currentIndex + 1;
+      setQueue((prev) => bringReadyCardForward(prev, next, introducedAtRef.current, Date.now()));
       setCurrentIndex((prev) => prev + 1);
     } else {
       endSession(recorded.reviewCountAfter);
@@ -797,6 +830,18 @@ export function useReviewSession({
   const finishNow = async () => {
     const recorded = pendingRecordRef.current ? await pendingRecordRef.current.catch(() => null) : null;
     endSession(recorded ? recorded.reviewCountAfter : reviewCountRef.current);
+  };
+
+  /**
+   * "Thoát" half-way after some answers: a short summary (what was remembered, the words missed, what is left)
+   * instead of leaving without one. An answer on screen was recorded when it was given (holdAnswer).
+   */
+  const exitEarly = async () => {
+    const answeredOnScreen = !!pendingRecordRef.current;
+    const recorded = answeredOnScreen ? await pendingRecordRef.current!.catch(() => null) : null;
+    const cardsLeft = Math.max(0, queueRef.current.length - currentIndex - (answeredOnScreen ? 1 : 0));
+    setSessionStats((prev) => ({ ...prev, endedEarly: { cardsLeft } }));
+    endSession(recorded ? recorded.reviewCountAfter : reviewCountRef.current, true);
   };
 
   /** Record an answer and go to the next card right away (flip grades, skip, free writing) */
@@ -879,14 +924,6 @@ export function useReviewSession({
       // Lock the card right away: Enter / Skip / Show answer during the short delay are ignored
       answerLockedRef.current = true;
       setIsCorrect(true);
-      const typedForm = userInput.trim().toLowerCase();
-      setFeedbackMessage({
-        text:
-          clozeSentence && typedForm !== expectedForm.toLowerCase()
-            ? `Đúng từ rồi! Trong câu này dùng dạng "${expectedForm}". Nhấn Enter hoặc Tiếp tục.`
-            : "Chính xác! 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.",
-        type: "success",
-      });
       handleSpeak(currentWord.word);
 
       // FSRS grade: any wrong attempt = Again, hint / typo = Hard, otherwise Good
@@ -899,12 +936,22 @@ export function useReviewSession({
         responseTimeMs: Date.now() - cardStartTime.current,
         srs: currentWord.srs,
       });
-      if (match === "near") {
-        setFeedbackMessage({
-          text: `Gần đúng! Từ chính xác là "${expectedForm}" (tính là Khó). Nhấn Enter hoặc Tiếp tục.`,
-          type: "info",
-        });
-      }
+      // The message says how the answer was graded: "Chính xác!" after wrong tries hid that the word comes back
+      const typedForm = userInput.trim().toLowerCase();
+      const formNote =
+        clozeSentence && typedForm !== expectedForm.toLowerCase() ? ` Trong câu này dùng dạng "${expectedForm}".` : "";
+      const next = " Nhấn Enter hoặc Tiếp tục.";
+      setFeedbackMessage(
+        match === "near"
+          ? { text: `Gần đúng! Từ chính xác là "${expectedForm}" (tính là Khó).${next}`, type: "info" }
+          : rating === Rating.Again
+            ? { text: `Đúng rồi, nhưng đã sai ${wrongAttempts} lần trước đó nên từ này sẽ quay lại để ôn thêm.${formNote}${next}`, type: "info" }
+            : rating === Rating.Hard
+              ? { text: `Đúng! Đã cần trợ giúp nên tính là Khó.${formNote}${next}`, type: "success" }
+              : formNote
+                ? { text: `Đúng từ rồi!${formNote}${next}`, type: "success" }
+                : { text: `${praiseWord(reviewCountRef.current)} 🎉 Đọc lại đáp án rồi nhấn Enter hoặc Tiếp tục.`, type: "success" }
+      );
 
       // No auto-advance: the learner reads the answer and continues when ready (recorded now)
       holdAnswer({
@@ -986,7 +1033,7 @@ export function useReviewSession({
   // User explicitly skips this word
   const handleSkip = () => {
     if (!currentWord || isAdvancing || answerLockedRef.current) return;
-    countComingBack(currentWord.id, "skippedCount");
+    countComingBack(currentWord, "skippedCount");
     // User skipped word gets Rating.Again in FSRS (not counted again as revealed)
     handleGrade(Rating.Again);
   };
@@ -997,7 +1044,7 @@ export function useReviewSession({
     setHasCheckedAnswer(true);
     setIsFlipped(true);
     setIsCorrect(false);
-    countComingBack(currentWord.id, "revealedCount");
+    countComingBack(currentWord, "revealedCount");
     handleSpeak(currentWord.word);
   };
 
@@ -1141,5 +1188,6 @@ export function useReviewSession({
     handleSkip,
     handleShowAnswer,
     finishNow,
+    exitEarly,
   };
 }

@@ -384,6 +384,39 @@ export function parseSentenceGrade(raw: string, word?: string, sentence?: string
   };
 }
 
+/** How long an AI CLI check is trusted (each check starts a process) */
+const AI_CLI_CHECK_TTL_MS = 10 * 60 * 1000;
+let aiCliCheck: { at: number; ready: boolean } | null = null;
+let aiCliChecking: Promise<boolean> | null = null;
+
+/**
+ * Whether an AI CLI is installed, checked at most every few minutes. Exercises graded by the AI (free writing)
+ * are only picked when it is: without one, the learner wrote a whole sentence, waited for the timeout and
+ * was then sent to a typing exercise.
+ */
+export function isAiCliReady(now: number = Date.now()): Promise<boolean> {
+  if (aiCliCheck && now - aiCliCheck.at < AI_CLI_CHECK_TTL_MS) return Promise.resolve(aiCliCheck.ready);
+  if (aiCliChecking) return aiCliChecking;
+  let customPath: string | undefined;
+  try {
+    customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
+  } catch {}
+  aiCliChecking = invoke<{ installed: boolean } | null>("check_cli_status", { customPath })
+    .then((res) => !!res?.installed)
+    .catch(() => false)
+    .then((ready) => {
+      aiCliCheck = { at: now, ready };
+      aiCliChecking = null;
+      return ready;
+    });
+  return aiCliChecking;
+}
+
+/** An AI call failed: AI exercises are left out until the next check */
+export function markAiCliUnavailable(now: number = Date.now()): void {
+  aiCliCheck = { at: now, ready: false };
+}
+
 export async function gradeSentenceWithAI(word: string, meaningVn: string, sentence: string, level?: string): Promise<SentenceGrade> {
   const customPath = localStorage.getItem("myenglish_custom_cli_path") || undefined;
   const raw = await withTimeout(

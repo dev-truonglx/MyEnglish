@@ -28,6 +28,7 @@ import FocusTip from "./review/FocusTip";
 import { useFocusSession } from "@/hooks/useFocusSession";
 import { nextReviewPeek, type FocusPlan } from "@/services/focusSession";
 import { useWordsStore } from "@/stores/wordsStore";
+import { KNOWN_RECHECK_LABEL } from "@/services/reviewRecorder";
 import type { DashboardTab } from "./dashboard/shared";
 
 export type { StudyMode } from "@/hooks/useReviewSession";
@@ -54,6 +55,8 @@ interface FlashcardReviewProps {
   onNavigate?: (tab: DashboardTab) => void;
   /** Notifies parent when the session completion state changes */
   onSessionCompleted?: (completed: boolean) => void;
+  /** From the summary: practise right away the words missed in this session */
+  onRetryMissed?: (wordIds: string[]) => void;
 }
 
 export default function FlashcardReview({
@@ -67,6 +70,7 @@ export default function FlashcardReview({
   onStartFocus,
   onNavigate,
   onSessionCompleted,
+  onRetryMissed,
 }: FlashcardReviewProps) {
   const focusSession = useFocusSession(focus);
   const {
@@ -122,6 +126,7 @@ export default function FlashcardReview({
     celebration,
     lastPracticeReason,
     finishNow,
+    exitEarly,
   } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active, stopAfterCurrent: !!focus && focusSession.timeUp });
 
   // Distinct cards answered in this session (a card asked again after a miss counts once)
@@ -217,6 +222,7 @@ export default function FlashcardReview({
         xpState={xpState}
         lastResult={lastResult}
         onFinish={onFinish}
+        onRetryMissed={onRetryMissed}
         bonusXp={focusSession.result?.xp ?? 0}
         // A focus session's own summary already says when the next review is
         nextReview={focusSession.result ? undefined : nextReview}
@@ -344,7 +350,7 @@ export default function FlashcardReview({
                 <button
                   onClick={handleIntroKnown}
                   className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                  title="Bỏ qua phần học mới; app hỏi lại một lần sau khoảng một tuần"
+                  title={`Bỏ qua phần học mới; app chỉ hỏi lại một lần sau khoảng ${KNOWN_RECHECK_LABEL}`}
                 >
                   ✓ Đã biết từ này
                 </button>
@@ -603,7 +609,9 @@ export default function FlashcardReview({
               <button
                 onClick={() => {
                   setConfirmingExit(false);
-                  onExit();
+                  // Answers given: a short summary first (what was remembered, the words missed), then out
+                  if (reviewCount > 0) exitEarly();
+                  else onExit();
                 }}
                 className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
               >

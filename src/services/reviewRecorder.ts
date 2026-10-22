@@ -9,7 +9,7 @@ import { emit } from "@tauri-apps/api/event";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
 import type { CardDirection, ReviewCard, SRSReview } from "@/types/database";
 import { getDatabase, SRS_COLUMNS } from "./db";
-import { getFSRSSettings, recordReview, type FSRSResult } from "./srs";
+import { getFSRSScheduler, getFSRSSettings, recordReview, type FSRSResult } from "./srs";
 import { INTRO_READY_MS, isDueSrs, isValidEvidence } from "./cards";
 import {
   awardXP,
@@ -22,9 +22,11 @@ import {
   reviewLogBefore,
   saveReviewLog,
   type ExerciseType,
+  type ReviewLogBefore,
   type XPReward,
 } from "./smartReview";
 import { recordDailyActivity } from "./streak";
+import { countOvernightRecall } from "./celebrations";
 import { logLearningEvent } from "./learningEvents";
 
 /** A new word's first graded quiz must come at least this long after its introduction card */
@@ -110,6 +112,25 @@ export interface CardAnswerResult {
    * due (graded since the caller's snapshot was taken). Null otherwise.
    */
   practiceReason: PracticeReason | null;
+  /**
+   * This answer was a young word's first recall after a night (isFirstOvernightRecall): how many such words the
+   * learner has had so far, this one included. Null otherwise. Round counts are celebrated (celebrationFor).
+   */
+  overnightCount: number | null;
+}
+
+/**
+ * A word met recently (at most two graded answers, never forgotten, still weak) remembered on a later day than
+ * its last review: the first sign it is entering long-term memory, and the only "win" a first week can give
+ * (reaching 3 weeks of stability takes a month). Recognition only, one per word.
+ */
+export function isFirstOvernightRecall(card: ReviewCard, rating: Rating, before: ReviewLogBefore | null, now: Date = new Date()): boolean {
+  if (card.direction !== "recognition" || rating < Rating.Good || !before) return false;
+  if ((card.srs.reps ?? 0) > 2 || (card.srs.lapses ?? 0) > 0 || before.stability >= 3) return false;
+  const last = card.srs.last_review ? new Date(card.srs.last_review) : null;
+  if (!last || !Number.isFinite(last.getTime())) return false;
+  const day = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  return day(last) < day(now);
 }
 
 /** Below this predicted recall, remembering the word counts as "rescued just before forgetting" */
@@ -294,11 +315,12 @@ export async function recordCardAnswer(input: CardAnswerInput): Promise<CardAnsw
   }
   const rescued =
     !!result && rating >= Rating.Hard && before?.retrievability != null && before.retrievability < RESCUE_RETRIEVABILITY;
+  const overnightCount = !!result && isFirstOvernightRecall(card, rating, before, now) ? countOvernightRecall() : null;
 
   if (input.countsForDailyGoal && !gradedSince) recordDailyActivity(1);
   if (result || implicit || suspended) notifyWordsChanged([card.id]);
 
-  return { result, xp, implicit, becameLeech, suspended, mastered, rescued, scheduled, practiceReason };
+  return { result, xp, implicit, becameLeech, suspended, mastered, rescued, scheduled, practiceReason, overnightCount };
 }
 
 /** Log that a new (or relearned) word's introduction card was shown. Consumes the daily new-word budget. */
@@ -330,47 +352,80 @@ export async function recordIntro(card: ReviewCard, now: Date = new Date()): Pro
   notifyWordsChanged([card.id]);
 }
 
-/** First check of a word marked "Đã biết": spread over this many days, by word id */
-export const KNOWN_CHECK_MIN_DAYS = 4;
-export const KNOWN_CHECK_MAX_DAYS = 21;
+/**
+ * Stability (days) a word marked "Đã biết" starts with, spread over this range by word id. It is at least
+ * MASTERED_STABILITY_DAYS, so the word counts as "Nhớ lâu" at once: the mark is for words the learner knows
+ * well and does not want to review often.
+ */
+export const KNOWN_STABILITY_MIN_DAYS = 30;
+export const KNOWN_STABILITY_MAX_DAYS = 180;
+/** When a word marked "Đã biết" is asked again, said to the learner ("1–6 tháng") */
+export const KNOWN_RECHECK_LABEL = `${Math.round(KNOWN_STABILITY_MIN_DAYS / 30)}–${Math.round(KNOWN_STABILITY_MAX_DAYS / 30)} tháng`;
 /** Difficulty a word marked "Đã biết" starts with: a middle value, as after a first Good (not the minimum, as Easy gave) */
 export const KNOWN_DIFFICULTY = 5;
 
 /**
- * Days until the first check of a word marked "Đã biết", from KNOWN_CHECK_MIN_DAYS to KNOWN_CHECK_MAX_DAYS.
- * Deterministic (a hash of the word id, not Math.random): marking hundreds of words in one sitting spreads
- * their checks over two and a half weeks instead of piling them on one day, and a retry gives the same date.
+ * Stability of a word marked "Đã biết", from KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS.
+ * Deterministic (a hash of the word id, not Math.random): marking a whole level in one sitting spreads the
+ * checks over months instead of piling them on one day, and a retry gives the same schedule.
  */
-export function knownCheckDays(wordId: string): number {
+export function knownStabilityDays(wordId: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < wordId.length; i++) {
     h ^= wordId.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return KNOWN_CHECK_MIN_DAYS + ((h >>> 0) % (KNOWN_CHECK_MAX_DAYS - KNOWN_CHECK_MIN_DAYS + 1));
+  return KNOWN_STABILITY_MIN_DAYS + ((h >>> 0) % (KNOWN_STABILITY_MAX_DAYS - KNOWN_STABILITY_MIN_DAYS + 1));
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface KnownSchedule {
+  stability: number;
+  /** FSRS interval for that stability at the learner's retention target, capped by the maximum interval */
+  scheduledDays: number;
+  /** markedAt + scheduledDays */
+  due: string;
+}
+
+/**
+ * The FSRS schedule of a word marked "Đã biết" at `markedAt`: a Review card with stability knownStabilityDays,
+ * due after the interval FSRS gives that stability (I = S × interval modifier, as ts-fsrs next_interval without
+ * fuzz: the hash already spreads the words), so its first check comes when recall is predicted at the
+ * requested retention.
+ */
+export function knownSchedule(wordId: string, markedAt: Date): KnownSchedule {
+  const stability = knownStabilityDays(wordId);
+  const scheduler = getFSRSScheduler();
+  const scheduledDays = Math.min(
+    Math.max(1, Math.round(stability * scheduler.interval_modifier)),
+    scheduler.parameters.maximum_interval
+  );
+  return { stability, scheduledDays, due: new Date(markedAt.getTime() + scheduledDays * DAY_MS).toISOString() };
 }
 
 /**
  * The learner already knows a new word: its recognition card goes straight to Review without a quiz, with a
- * middle difficulty (KNOWN_DIFFICULTY) and a stability equal to the wait before its first check (knownCheckDays),
- * so FSRS expects 90% recall on that day. It is outside the daily new-word budget, it is not "remembered" until
- * a real review confirms it (see isKnownOnly), and recall practice only starts after that review (otherwise
- * skimming hundreds of easy words would flood the budget with recall cards). A word already studied is left
- * alone. Returns whether the word was marked.
+ * middle difficulty (KNOWN_DIFFICULTY) and a long stability (knownSchedule), so it counts as "Nhớ lâu" at once
+ * and comes back once, months later, when FSRS predicts recall at the requested retention. From that check on
+ * FSRS schedules it like any card: a right answer only raises its stability, a miss is a lapse and the word
+ * is relearned. It is outside the daily new-word budget and never gets a recall card: the mark means the
+ * learner already masters the word both ways (hearing, reading and writing it), so recall practice would only
+ * fill the daily budget with words they know. A word already studied is left alone. Returns whether the word
+ * was marked.
  */
 export async function markWordKnown(wordId: string, now: Date = new Date()): Promise<boolean> {
   const db = await getDatabase();
   const rows = await db.select<SRSReview[]>(`SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id = $1 LIMIT 1`, [wordId]);
   const before = rows[0];
   if (before && ((before.reps ?? 0) > 0 || (before.state ?? 0) !== 0)) return false;
-  const days = knownCheckDays(wordId);
-  const due = new Date(now.getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+  const known = knownSchedule(wordId, now);
   await db.execute(
     `INSERT INTO srs_reviews (
        word_id, ease_factor, interval, repetitions, next_review_date,
        stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
      )
-     VALUES ($1, 2.5, $2, 1, $3, $2, $4, 0, $2, 1, 0, 2, $5, 0)
+     VALUES ($1, 2.5, $2, 1, $3, $6, $4, 0, $2, 1, 0, 2, $5, 0)
      ON CONFLICT(word_id) DO UPDATE SET
        ease_factor = excluded.ease_factor,
        interval = excluded.interval,
@@ -385,7 +440,7 @@ export async function markWordKnown(wordId: string, now: Date = new Date()): Pro
        state = excluded.state,
        last_review = excluded.last_review,
        learning_steps = excluded.learning_steps`,
-    [wordId, days, due, KNOWN_DIFFICULTY, now.toISOString()]
+    [wordId, known.scheduledDays, known.due, KNOWN_DIFFICULTY, now.toISOString(), known.stability]
   );
   await saveReviewLog({
     wordId,
@@ -403,6 +458,74 @@ export async function markWordKnown(wordId: string, now: Date = new Date()): Pro
   await logLearningEvent("known", { wordId, direction: "recognition", at: now });
   notifyWordsChanged([wordId]);
   return true;
+}
+
+/**
+ * Words marked "Đã biết" before the long schedule (stability 4-21 days, so not "Nhớ lâu" and checked within
+ * three weeks) get it now, from the time they were marked (last_review): same stability, interval and due date
+ * as a mark made today would have given them then. Only cards still waiting for their check are touched;
+ * reps and last_review stay, so sync keeps treating both machines' copies as the same progress. Returns how
+ * many were moved.
+ */
+export async function rescheduleLegacyKnownCards(): Promise<number> {
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ word_id: string; last_review: string }>>(
+    `SELECT word_id, last_review FROM srs_reviews
+     WHERE state = 2 AND reps = 1 AND COALESCE(lapses, 0) = 0 AND COALESCE(stability, 0) < $1 AND last_review IS NOT NULL`,
+    [KNOWN_STABILITY_MIN_DAYS]
+  );
+  const schedules = rows.flatMap((r) => {
+    const markedAt = new Date(r.last_review);
+    return Number.isNaN(markedAt.getTime()) ? [] : [{ id: r.word_id, ...knownSchedule(r.word_id, markedAt) }];
+  });
+  const moved: string[] = [];
+  for (let i = 0; i < schedules.length; i += 100) {
+    const chunk = schedules.slice(i, i + 100);
+    const params: unknown[] = [];
+    const cases = chunk.map((c) => {
+      params.push(c.id, c.stability, c.scheduledDays, c.due);
+      const o = params.length - 4;
+      return { id: `$${o + 1}`, stability: `$${o + 2}`, days: `$${o + 3}`, due: `$${o + 4}` };
+    });
+    const pick = (field: "stability" | "days" | "due") => `CASE word_id ${cases.map((c) => `WHEN ${c.id} THEN ${c[field]}`).join(" ")} END`;
+    await db.execute(
+      `UPDATE srs_reviews SET stability = ${pick("stability")}, scheduled_days = ${pick("days")}, interval = ${pick("days")},
+         next_review_date = ${pick("due")}
+       WHERE word_id IN (${cases.map((c) => c.id).join(", ")})
+         AND state = 2 AND reps = 1 AND COALESCE(lapses, 0) = 0 AND COALESCE(stability, 0) < ${KNOWN_STABILITY_MIN_DAYS}`,
+      params
+    );
+    moved.push(...chunk.map((c) => c.id));
+  }
+  if (moved.length > 0) notifyWordsChanged(moved);
+  return moved.length;
+}
+
+/**
+ * Recall cards of words marked "Đã biết" that were opened before such words stopped getting one (their check
+ * answered right) and never answered: removed, so they no longer wait for the daily new-card budget. A recall
+ * card already answered keeps its FSRS history, and a word whose recognition card lapsed keeps its recall card
+ * (the claim was wrong: it is learned like any other). Returns how many were removed.
+ */
+export async function removeKnownRecallCards(): Promise<number> {
+  const db = await getDatabase();
+  const where = `COALESCE(reps, 0) = 0 AND COALESCE(state, 0) = 0
+    AND word_id IN (SELECT word_id FROM review_logs WHERE exercise_type = 'known')
+    AND word_id IN (SELECT word_id FROM srs_reviews WHERE COALESCE(lapses, 0) = 0)`;
+  const rows = await db.select<Array<{ word_id: string }>>(`SELECT word_id FROM srs_production WHERE ${where}`);
+  if (rows.length === 0) return 0;
+  await db.execute(`DELETE FROM srs_production WHERE ${where}`);
+  notifyWordsChanged(rows.map((r) => r.word_id));
+  return rows.length;
+}
+
+/**
+ * Brings words marked "Đã biết" to the current rules (rescheduleLegacyKnownCards, removeKnownRecallCards).
+ * Run at startup and after a pull: another machine may still be on the old ones.
+ */
+export async function settleKnownWords(): Promise<void> {
+  await rescheduleLegacyKnownCards();
+  await removeKnownRecallCards();
 }
 
 /**

@@ -3,15 +3,17 @@
  * instead of being shown all at once (seeing 120 cards due is the main reason people quit an SRS app).
  *
  *  - starts on the first day back, when the learner missed COMEBACK_MIN_MISSED_DAYS days or more and more
- *    reviews are due than one session holds
+ *    reviews are due than one session holds, or after a shorter break (1–2 days) when more than
+ *    COMEBACK_BACKLOG_SESSIONS sessions of reviews are due
  *  - each day asks for `dailyQuota` answers; counts, reminders and the tray show what is left of that share,
  *    and once it is done nothing nags until tomorrow (more practice stays possible)
  *  - new words pause while the backlog is not going down (they would only add future reviews); once it
  *    shrinks from one day to the next, 1–2 new words a day keep the course moving
  *  - lasts until no review is due any more, at most COMEBACK_MAX_PLAN_DAYS days
  *
- * FSRS already reviews the most valuable cards first (lowest retrievability), so the order is not changed:
- * only how much is asked per day and how it is presented.
+ * FSRS scheduling is not changed: only how much is asked per day and how it is presented. Which cards a day's
+ * share holds is buildReviewSession's usual choice (most memory saved first, plus a quarter of the slots for
+ * the cards longest past due).
  */
 import { getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
 import { persistKeyNow } from "./storageBackup";
@@ -20,6 +22,16 @@ const PLAN_KEY = "myenglish_comeback_plan_v1";
 
 /** Missed days (no study at all) before a comeback plan is offered */
 export const COMEBACK_MIN_MISSED_DAYS = 3;
+/**
+ * After a shorter break, a plan starts once more than this many sessions of reviews are due: after 1–2 days off,
+ * the whole pile was shown and new words stopped (newCardAllowance gives none beyond 2 sessions)
+ */
+export const COMEBACK_BACKLOG_SESSIONS = 1.5;
+/**
+ * The shorter break: at least a day without study. Not 0: a learner who studied yesterday is not coming back,
+ * and a plan that ran its COMEBACK_MAX_PLAN_DAYS would restart at once for a daily learner still behind.
+ */
+export const COMEBACK_SHORT_BREAK_MIN_DAYS = 1;
 /** A plan never lasts longer than this: after it, normal counts come back whatever is left */
 export const COMEBACK_MAX_PLAN_DAYS = 14;
 /** New words a day while the plan runs, once the backlog is going down */
@@ -98,7 +110,8 @@ export function minutesFor(cards: number): number {
 
 /**
  * Pure state machine: the plan to keep (or start, or end) given today's data. A plan only starts on the
- * first day back: the next day, the last active day is yesterday.
+ * first day back (the next day, the last active day is yesterday): after COMEBACK_MIN_MISSED_DAYS days or more
+ * with more due than one session, or after a shorter break with more than COMEBACK_BACKLOG_SESSIONS sessions due.
  */
 export function nextComebackPlan(
   current: ComebackPlan | null,
@@ -117,9 +130,11 @@ export function nextComebackPlan(
     return current;
   }
   const missed = missedDaysBefore(input.activeDates, today);
-  if (missed === null || missed < COMEBACK_MIN_MISSED_DAYS) return null;
-  // A pile that fits in one session is simply reviewed
-  if (backlog <= input.maxSessionSize) return null;
+  if (missed === null) return null;
+  // A pile that fits in one session is simply reviewed; after a short break, up to 1.5 sessions as well
+  const longBreak = missed >= COMEBACK_MIN_MISSED_DAYS && backlog > input.maxSessionSize;
+  const bigPile = missed >= COMEBACK_SHORT_BREAK_MIN_DAYS && backlog > input.maxSessionSize * COMEBACK_BACKLOG_SESSIONS;
+  if (!longBreak && !bigPile) return null;
   const dailyQuota = comebackQuota(backlog, input.maxSessionSize, input.dailyGoal);
   return {
     startedOn: today,

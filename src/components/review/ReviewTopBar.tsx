@@ -3,6 +3,7 @@ import type { ReviewCard } from "@/types/database";
 import type { StudyMode } from "@/hooks/useReviewSession";
 import { isSimpleMode } from "@/services/learnerProfile";
 import { COMBO_EVERY } from "@/services/sound";
+import { itemsLeft } from "@/lib/utils";
 
 interface ReviewTopBarProps {
   onExit: () => void;
@@ -29,7 +30,8 @@ export default function ReviewTopBar({
   consecutiveCorrect,
   hideExit = false,
 }: ReviewTopBarProps) {
-  // Simple mode: no format selector (the app picks), no combo pill (a run of right answers is not the goal)
+  // Simple mode: no format selector (the app picks). The combo pill shows in every mode: a run of right
+  // answers is the most immediate reward a beginner gets
   const simple = isSimpleMode();
   return (
     <div className="w-full shrink-0 mb-3 flex items-center justify-between flex-wrap gap-3">
@@ -146,7 +148,7 @@ export default function ReviewTopBar({
 
       {/* Progress indicator & Streak Pill */}
       <div className="flex items-center gap-3 flex-wrap justify-end">
-        {!simple && consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
+        {consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
           <div
             // A new key at every combo (5, 10…): the pill zooms in again together with the combo sound
             key={`combo-${Math.floor(consecutiveCorrect / COMBO_EVERY)}`}
@@ -169,7 +171,7 @@ export default function ReviewTopBar({
         )}
 
         <div className="text-xs font-mono text-slate-500 dark:text-zinc-400">
-          Thẻ <span className="text-slate-900 dark:text-white font-bold">{currentIndex + 1}</span> / {queue.length}
+          Còn <span className="text-slate-900 dark:text-white font-bold">{itemsLeft(queue.length, currentIndex)}</span> thẻ
           {currentWord && (
             <span
               className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"

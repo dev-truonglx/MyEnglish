@@ -14,3 +14,12 @@ export function shuffle<T>(items: readonly T[]): T[] {
   }
   return out;
 }
+
+/**
+ * Items left in a session, the one on screen included. An item asked again (a forgotten card, a new word's quiz
+ * after its introduction) joins the queue as the current one is answered, so this count never goes up, where
+ * "Thẻ 3 / 5" became "4 / 9" as the queue grew. ((currentIndex + 1) / length never goes down either.)
+ */
+export function itemsLeft(queueLength: number, currentIndex: number): number {
+  return Math.max(0, queueLength - currentIndex);
+}
