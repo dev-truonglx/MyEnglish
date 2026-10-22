@@ -154,16 +154,16 @@ function ProgressBars({ progress, levels }: { progress: LevelProgress[]; levels:
                 </span>
                 <span
                   className="text-slate-500 dark:text-zinc-400"
-                  title={`Nhớ lâu: đã ôn thật và sẽ không quên trong ít nhất 3 tuần. Gợi ý mở cấp mới khi gặp ${Math.round(
+                  title={`Nhớ lâu: sẽ không quên trong ít nhất 3 tuần, kể cả từ đánh dấu "Đã biết" chưa ôn. Gợi ý mở cấp mới khi gặp ${Math.round(
                     UNLOCK_MET_SHARE * 100
-                  )}% số từ và nhớ lâu ${Math.round(UNLOCK_REMEMBERED_SHARE * 100)}%.`}
+                  )}% số từ và nhớ lâu ${Math.round(UNLOCK_REMEMBERED_SHARE * 100)}% (tính từ đã ôn thật).`}
                 >
-                  {p.met}/{p.total} đã gặp · {p.remembered} nhớ lâu{p.known > 0 ? ` · ${p.known} đã biết` : ""}
+                  {p.met}/{p.total} đã gặp · {p.rememberedLong} nhớ lâu{p.rememberedKnown > 0 ? ` (${p.rememberedKnown} đã biết)` : ""}
                 </span>
               </div>
               <div className="relative h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
                 <div className="absolute inset-y-0 left-0 bg-cyan-300 dark:bg-cyan-800" style={{ width: pct(p.met) }} />
-                <div className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: pct(p.remembered) }} />
+                <div className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: pct(p.rememberedLong) }} />
               </div>
             </div>
           );
@@ -209,7 +209,8 @@ function LevelRoadmap({
         const on = i <= top;
         const total = Math.max(1, p?.total ?? CATALOG_LEVEL_COUNTS[level]);
         const met = p?.met ?? 0;
-        const remembered = p?.remembered ?? 0;
+        const remembered = p?.rememberedLong ?? 0;
+        const rememberedKnown = p?.rememberedKnown ?? 0;
         const pct = (n: number) => `${Math.min(100, Math.round((n * 100) / total))}%`;
         const allMet = met >= total;
         const ready = !!p && levelReadyToAdvance(p);
@@ -235,7 +236,7 @@ function LevelRoadmap({
               }
             }}
             aria-pressed={on}
-            title={`${level} · ${LEVEL_NAMES[level]}: ${met}/${total} từ đã gặp, ${remembered} nhớ lâu${p?.known ? `, ${p.known} đã biết` : ""}. ${action}.`}
+            title={`${level} · ${LEVEL_NAMES[level]}: ${met}/${total} từ đã gặp, ${remembered} nhớ lâu${rememberedKnown ? ` (${rememberedKnown} đã biết)` : ""}. ${action}.`}
             className={`group cursor-pointer select-none text-left p-3 rounded-xl border transition-all space-y-2 focus:outline-none focus:ring-2 focus:ring-cyan-500 ${
               disabled ? "opacity-60 cursor-not-allowed" : ""
             } ${
@@ -706,8 +707,13 @@ export default function VocabTab() {
   };
 
   const totals = progress?.reduce(
-    (t, p) => ({ total: t.total + p.total, met: t.met + p.met, remembered: t.remembered + p.remembered, known: t.known + p.known }),
-    { total: 0, met: 0, remembered: 0, known: 0 }
+    (t, p) => ({
+      total: t.total + p.total,
+      met: t.met + p.met,
+      rememberedLong: t.rememberedLong + p.rememberedLong,
+      rememberedKnown: t.rememberedKnown + p.rememberedKnown,
+    }),
+    { total: 0, met: 0, rememberedLong: 0, rememberedKnown: 0 }
   );
   const perDay = estimateNewWordsPerDay(getStudyLimits().newCardsPerDay);
   const card = "rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm";
@@ -747,14 +753,15 @@ export default function VocabTab() {
               Đã gặp <b className="font-mono text-slate-900 dark:text-white">{totals.met.toLocaleString("vi-VN")}</b>
               <span className="text-slate-400 dark:text-zinc-500">/{totals.total.toLocaleString("vi-VN")}</span>
             </span>
-            <span className="px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300" title="Đã ôn thật và sẽ không quên trong ít nhất 3 tuần">
-              Nhớ lâu <b className="font-mono">{totals.remembered.toLocaleString("vi-VN")}</b>
+            <span
+              className="px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
+              title='Sẽ không quên trong ít nhất 3 tuần, kể cả từ đánh dấu "Đã biết" chưa ôn'
+            >
+              Nhớ lâu <b className="font-mono">{totals.rememberedLong.toLocaleString("vi-VN")}</b>
+              {totals.rememberedKnown > 0 && (
+                <span className="text-emerald-600/80 dark:text-emerald-400/80"> (gồm {totals.rememberedKnown.toLocaleString("vi-VN")} đã biết)</span>
+              )}
             </span>
-            {totals.known > 0 && (
-              <span className="px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-zinc-800/80 text-slate-600 dark:text-zinc-300">
-                Đã biết <b className="font-mono text-slate-900 dark:text-white">{totals.known}</b>
-              </span>
-            )}
             <span className="px-2.5 py-1.5 rounded-lg bg-cyan-50 dark:bg-cyan-950/40 text-cyan-700 dark:text-cyan-300" title="Hạn mức thẻ mới mỗi ngày (Cài đặt) chia cho từ mới và thẻ nhớ ra từ, nên khoảng một nửa là từ mới">
               ~<b className="font-mono">{perDay}</b> từ mới/ngày
             </span>

@@ -7,13 +7,14 @@
  */
 import type { WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
-import { registerCatalogMeanings } from "./smartReview";
+import { registerCatalogMeanings, type SoundAlikeWord } from "./smartReview";
+import { clearPhonemeCache } from "./phoneticSimilarity";
 
 export const STUDY_LEVELS = ["A1", "A2", "B1", "B2", "C1"] as const;
 export type StudyLevel = (typeof STUDY_LEVELS)[number];
 
 /** Must match `version` in vocabCatalog.json: a new version is copied into SQLite on the next launch */
-export const CATALOG_VERSION = 2;
+export const CATALOG_VERSION = 3;
 
 /** Words per level in the deck (checked against the JSON by a test) */
 export const CATALOG_LEVEL_COUNTS: Record<StudyLevel, number> = { A1: 911, A2: 808, B1: 697, B2: 1302, C1: 1286 };
@@ -97,11 +98,13 @@ async function seedCatalog(load: () => Promise<CatalogFile>): Promise<void> {
     const params: unknown[] = [];
     const values = batch.map((w, i) => {
       const { id, word, cefr, list, order, freq, it, pos, vn, ...data } = w;
-      params.push(id, word, cefr, list, order, freq, it ? 1 : 0, pos, vn, JSON.stringify(data));
-      return `(${Array.from({ length: 10 }, (_, c) => `$${i * 10 + c + 1}`).join(", ")})`;
+      // The same pronunciation as a learner's word made from this entry (vocabFeed: US first)
+      const ipa = w.ipaUs?.[0] ?? w.ipaUk?.[0] ?? null;
+      params.push(id, word, cefr, list, order, freq, it ? 1 : 0, pos, vn, JSON.stringify(data), ipa);
+      return `(${Array.from({ length: 11 }, (_, c) => `$${i * 11 + c + 1}`).join(", ")})`;
     });
     await db.execute(
-      `INSERT OR REPLACE INTO vocab_catalog (id, word, cefr, list, study_order, freq, it, pos, vn, data) VALUES ${values.join(", ")}`,
+      `INSERT OR REPLACE INTO vocab_catalog (id, word, cefr, list, study_order, freq, it, pos, vn, data, ipa) VALUES ${values.join(", ")}`,
       params
     );
   }
@@ -300,4 +303,70 @@ export async function loadCatalogDistractors(levels: readonly string[], limit = 
     examples: [],
     srs: { word_id: `catalog:${r.id}`, ease_factor: 2.5, interval: 0, repetitions: 0, next_review_date: now, state: 0, reps: 0 },
   }));
+}
+
+let soundPool: SoundAlikeWord[] | null = null;
+let soundPoolLoading: Promise<SoundAlikeWord[]> | null = null;
+let soundPoolTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Unused this long, the deck's sounds are let go (about 2 MB with their parsed IPA); the next use reloads them */
+export const SOUND_POOL_IDLE_MS = 3 * 60_000;
+
+/** Free the deck's sounds now (see SOUND_POOL_IDLE_MS); the next listening question loads them again */
+export function releaseCatalogSoundPool(): void {
+  if (soundPoolTimer) clearTimeout(soundPoolTimer);
+  soundPoolTimer = null;
+  soundPool = null;
+  clearPhonemeCache();
+}
+
+function keepSoundPool(): void {
+  if (soundPoolTimer) clearTimeout(soundPoolTimer);
+  soundPoolTimer = setTimeout(releaseCatalogSoundPool, SOUND_POOL_IDLE_MS);
+}
+
+/**
+ * The deck's sound pool when already loaded (see loadCatalogSoundPool), so an exercise can build at once.
+ * Each use keeps it SOUND_POOL_IDLE_MS longer.
+ */
+export function catalogSoundPoolIfLoaded(): SoundAlikeWord[] | null {
+  if (soundPool) keepSoundPool();
+  return soundPool;
+}
+
+/**
+ * Every deck word with its pronunciation, for the listening exercise's sound-alike options: any word of the
+ * deck may be a wrong option, whatever the learner's levels, since the options must be the words that sound
+ * most like the one heard. Light objects (about 5000), kept while in use and released after SOUND_POOL_IDLE_MS
+ * without a listening question; a deck still being copied is returned as far as it goes but not kept.
+ */
+export function loadCatalogSoundPool(): Promise<SoundAlikeWord[]> {
+  if (soundPool) {
+    keepSoundPool();
+    return Promise.resolve(soundPool);
+  }
+  soundPoolLoading ??= (async () => {
+    const db = await getDatabase();
+    const rows = await db.select<Array<{ id: string; word: string; cefr: string; pos: string; vn: string; ipa: string }>>(
+      `SELECT id, word, cefr, pos, vn, ipa FROM vocab_catalog WHERE ipa IS NOT NULL AND ipa <> ''`
+    );
+    const pool: SoundAlikeWord[] = rows.map((r) => ({
+      id: `catalog:${r.id}`,
+      word: r.word,
+      meaning_vn: r.vn,
+      synonyms: "[]",
+      phonetic: r.ipa,
+      part_of_speech: r.pos,
+      cefr_level: r.cefr,
+      catalog_id: r.id,
+    }));
+    if (pool.length > 0 && (await isCatalogReady(db, pool.length))) {
+      soundPool = pool;
+      keepSoundPool();
+    }
+    return pool;
+  })().finally(() => {
+    soundPoolLoading = null;
+  });
+  return soundPoolLoading;
 }

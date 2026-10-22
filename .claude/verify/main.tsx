@@ -10,6 +10,9 @@ import { getAllWords } from "@/services/db";
 import { saveReviewLog } from "@/services/smartReview";
 import { saveMnemonic } from "@/services/aiMnemonic";
 import FlashcardReview from "@/components/FlashcardReview";
+import ClozeCard from "@/components/review/ClozeCard";
+import type { ReviewCard } from "@/types/database";
+import { newFocusPlan } from "@/services/focusSession";
 import LearningInsightsCard from "@/components/LearningInsightsCard";
 import HabitInsightsCard from "@/components/HabitInsightsCard";
 import { logLearningEvent } from "@/services/learningEvents";
@@ -37,6 +40,8 @@ import { setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
 import ContextMatchExercise from "@/components/exercises/ContextMatchExercise";
+import ListeningDictationExercise from "@/components/exercises/ListeningDictationExercise";
+import { ensureCatalogSeeded } from "@/services/vocabCatalog";
 import type { WordDetail } from "@/types/database";
 import PlacementTest from "@/components/PlacementTest";
 import AccountSettings from "@/components/dashboard/AccountSettings";
@@ -159,13 +164,17 @@ function Flash() {
       }
       const due = await getDueWordsFromDb();
       const session = buildReviewSession(due, await getNewCardsIntroducedToday());
-      setState({ session, all: await getAllWords() });
+      const all = await getAllWords();
+      // ?flash&focus: a 10-minute focus session (its extra practice reads the words store)
+      useWordsStore.setState({ words: all });
+      setState({ session, all });
       (window as any).__session = session.map((c: any) => `${c.word}:${c.direction}`);
     })();
   }, []);
+  const [focus] = useState(() => (new URLSearchParams(location.search).has("focus") ? newFocusPlan(10) : null));
   return state ? (
     <div className="h-screen">
-      <FlashcardReview wordsToReview={state.session} distractorPool={state.all} onFinish={() => {}} onExit={() => {}} />
+      <FlashcardReview wordsToReview={state.session} distractorPool={state.all} focus={focus} onFinish={() => {}} onExit={() => {}} />
     </div>
   ) : null;
 }
@@ -395,6 +404,7 @@ function Today() {
       onStart={() => ((window as any).__started = true)}
       onQuickStart={() => ((window as any).__quick = true)}
       onStartFocus={(m) => ((window as any).__focus = m)}
+      onStartReflex={() => ((window as any).__reflex = true)}
       setActiveTab={(t) => ((window as any).__tab = t)}
       simpleMode={q.has("simple")}
       now={fixedNow}
@@ -712,6 +722,70 @@ function Tiles() {
   ) : null;
 }
 
+// ?listening=ship[&young]: "Nghe từ và chọn nghĩa" on a deck word, options from the whole seeded deck by sound;
+// the spoken words are recorded on window.__spoken and the result on window.__listen
+// ?cloze[&checked][&novn]: the "Điền từ tiếng Anh còn thiếu" card with the whole-sentence translation
+function Cloze() {
+  const q = new URLSearchParams(location.search);
+  const example = {
+    id: "ex-1", word_id: "w-deploy", sentence_en: "We deployed the new version to production last night.",
+    sentence_vn: q.has("novn") ? undefined : "Tối qua chúng tôi đã triển khai phiên bản mới lên môi trường production.",
+    grammar_analysis: "", source: "catalog", focus: '["deployed"]', sense_index: 0,
+  };
+  const word = {
+    id: "w-deploy", word: "deploy", meaning_vn: "triển khai; bố trí", phonetic: "/dɪˈplɔɪ/", part_of_speech: "verb", cefr_level: "B2",
+    topic: "Dev Tech", image_url: null, synonyms: "[]", antonyms: "[]", created_at: new Date().toISOString(), examples: [example],
+    srs: { word_id: "w-deploy", state: 2, stability: 5, reps: 3, lapses: 0 },
+  } as unknown as ReviewCard;
+  const [input, setInput] = useState("");
+  return (
+    <div className="p-6 max-w-2xl mx-auto h-screen flex flex-col">
+      <ClozeCard
+        currentWord={word} hasCheckedAnswer={q.has("checked")} inputRef={React.createRef<HTMLInputElement>()}
+        userInput={input} setUserInput={setInput} feedbackMessage={null} setFeedbackMessage={() => {}}
+        isAdvancing={false} isCorrect={q.has("checked") ? true : null} isShaking={false} wrongAttempts={0}
+        showHint={false} setShowHint={() => {}} handleSkip={() => {}} handleShowAnswer={() => {}}
+        originalSentence={example.sentence_en} clozeDisplaySentence="We ______ the new version to production last night."
+        answerForm="deployed" clozeExample={example}
+      />
+    </div>
+  );
+}
+
+function Listening() {
+  const q = new URLSearchParams(location.search);
+  const [word, setWord] = useState<WordDetail | null>(null);
+  React.useEffect(() => {
+    (async () => {
+      await getDatabase();
+      await ensureCatalogSeeded();
+      const db = await getDatabase();
+      const id = q.get("listening") || "ship";
+      const [row] = await db.select<Array<{ id: string; word: string; vn: string; pos: string; cefr: string; ipa: string }>>(
+        `SELECT id, word, vn, pos, cefr, ipa FROM vocab_catalog WHERE id = $1`,
+        [id]
+      );
+      setWord({
+        id: `w-${row.id}`, word: row.word, meaning_vn: row.vn, phonetic: row.ipa, part_of_speech: row.pos, cefr_level: row.cefr,
+        catalog_id: row.id, topic: "Food", image_url: null, synonyms: "[]", antonyms: "[]", created_at: new Date().toISOString(), examples: [],
+        srs: q.has("young")
+          ? { word_id: `w-${row.id}`, state: 1, stability: 0.5, reps: 1 }
+          : { word_id: `w-${row.id}`, state: 2, stability: 20, reps: 5, last_review: new Date().toISOString() },
+      } as unknown as WordDetail);
+    })();
+  }, []);
+  return word ? (
+    <div className="p-6 max-w-xl mx-auto">
+      <ListeningDictationExercise
+        word={word}
+        allWords={[]}
+        onSpeak={(t) => ((window as any).__spoken = [...((window as any).__spoken ?? []), t])}
+        onComplete={(ok, attempts, rating) => ((window as any).__listen = { ok, attempts, rating })}
+      />
+    </div>
+  ) : null;
+}
+
 // ?contextmatch: "Nối từ với câu" on three words already met; the result is exposed on window.__match
 const MATCH_WORDS: Array<[string, string, string]> = [
   ["deploy", "triển khai", "We deploy the new version every Friday."],
@@ -807,6 +881,16 @@ function App() {
           const db = await getDatabase();
           await db.execute(`UPDATE srs_reviews SET stability = 15, difficulty = 4, reps = 5, state = 2, last_review = $1, next_review_date = $2 WHERE word_id = 'w-deploy'`, [iso(-80 * DAY), iso(-65 * DAY)]);
         }
+        // ?popuplisten: "deploy" is a known deck word (stability 20, reps 5) due now, so the popup asks it by ear;
+        // its options come from the seeded deck by sound. An English voice is faked so the listening variant is allowed.
+        if (params.has("popuplisten")) {
+          await ensureCatalogSeeded();
+          const db = await getDatabase();
+          await db.execute(`UPDATE words SET phonetic = '/dɪˈplɔɪ/', catalog_id = 'deploy' WHERE id = 'w-deploy'`);
+          await db.execute(`UPDATE srs_reviews SET stability = 20, reps = 5, state = 2, last_review = $1, next_review_date = $2 WHERE word_id = 'w-deploy'`, [iso(-20 * DAY), iso(-60000)]);
+          const voice = { lang: "en-US", name: "Fake English", default: true, localService: true, voiceURI: "fake" };
+          window.speechSynthesis.getVoices = () => [voice as SpeechSynthesisVoice];
+        }
         // ?rested: release, rollback and pipeline were answered right twice in a row (resting from practice), banana
         // once an hour ago: the popup's practice slot goes to apple, the only word not seen lately
         if (params.has("rested")) {
@@ -850,6 +934,8 @@ function App() {
   if (q.has("grammarhub")) return <GrammarHub />;
   if (q.has("tiles")) return <Tiles />;
   if (q.has("contextmatch")) return <ContextMatch />;
+  if (q.has("listening")) return <Listening />;
+  if (q.has("cloze")) return <Cloze />;
   if (q.has("placement"))
     return <PlacementTest onClose={() => {}} onDone={(level) => ((window as any).__placement = level)} />;
   if (q.has("nudge") && (q.has("quiz") || q.has("card"))) {

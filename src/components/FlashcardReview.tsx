@@ -26,9 +26,10 @@ import FocusBar from "./review/FocusBar";
 import FocusSummary from "./review/FocusSummary";
 import FocusTip from "./review/FocusTip";
 import { useFocusSession } from "@/hooks/useFocusSession";
-import { nextReviewPeek, type FocusPlan } from "@/services/focusSession";
+import { focusTopUpCards, nextReviewPeek, type FocusPlan } from "@/services/focusSession";
 import { useWordsStore } from "@/stores/wordsStore";
 import { KNOWN_RECHECK_LABEL } from "@/services/reviewRecorder";
+import { loadCatalogSoundPool } from "@/services/vocabCatalog";
 import type { DashboardTab } from "./dashboard/shared";
 
 export type { StudyMode } from "@/hooks/useReviewSession";
@@ -125,9 +126,19 @@ export default function FlashcardReview({
     quizRightAfterIntro,
     celebration,
     lastPracticeReason,
+    cardIsPractice,
+    inFocusPractice,
     finishNow,
     exitEarly,
-  } = useReviewSession({ wordsToReview, distractorPool, practiceMode, active, stopAfterCurrent: !!focus && focusSession.timeUp });
+  } = useReviewSession({
+    wordsToReview,
+    distractorPool,
+    practiceMode,
+    active,
+    stopAfterCurrent: !!focus && focusSession.timeUp,
+    // Focus session out of cards with time left: practice on the words being learnt until the time is up
+    topUp: focus ? (queue) => focusTopUpCards(useWordsStore.getState().words, queue) : undefined,
+  });
 
   // Distinct cards answered in this session (a card asked again after a miss counts once)
   const focusCards =
@@ -140,6 +151,12 @@ export default function FlashcardReview({
   useEffect(() => {
     onSessionCompleted?.(sessionCompleted);
   }, [sessionCompleted, onSessionCompleted]);
+  // The listening exercise ranks the whole deck by sound: load it while the first cards are answered
+  useEffect(() => {
+    if (!active) return;
+    const timer = setTimeout(() => loadCatalogSoundPool().catch(() => {}), 1500);
+    return () => clearTimeout(timer);
+  }, [active]);
   const [confirmingExit, setConfirmingExit] = useState(false);
   const confirmingExitRef = useRef(false);
   confirmingExitRef.current = confirmingExit;
@@ -274,6 +291,11 @@ export default function FlashcardReview({
           onConfirmChange={focusSession.hold}
         />
       )}
+      {inFocusPractice && (
+        <div className="w-full mb-2 text-center text-[11px] text-sky-700 dark:text-sky-300">
+          Đã xong thẻ đến hạn — đang luyện thêm từ đang học cho đủ giờ (không đổi lịch ôn).
+        </div>
+      )}
 
       {/* Top Bar with Mode Selector & Progress */}
       <ReviewTopBar
@@ -284,7 +306,7 @@ export default function FlashcardReview({
         currentIndex={currentIndex}
         queue={queue}
         currentWord={currentWord}
-        practiceMode={practiceMode}
+        practiceMode={cardIsPractice}
         consecutiveCorrect={consecutiveCorrect}
       />
 
@@ -361,7 +383,7 @@ export default function FlashcardReview({
           <div className="mt-1 text-center text-[11px] text-cyan-700 dark:text-cyan-300">
             Vừa xem từ này xong nên câu này chỉ để luyện — từ sẽ được hỏi lại ở cuối phiên (hoặc lần ôn sau) để chấm điểm.
           </div>
-        ) : !practiceMode && !exerciseCountsForSchedule ? (
+        ) : !cardIsPractice && !exerciseCountsForSchedule ? (
           <div className="mt-1 text-center text-[11px] text-amber-700 dark:text-amber-300">
             Dạng bài này không kiểm tra {currentWord.direction === "production" ? "khả năng tự nhớ ra từ" : "việc hiểu nghĩa"} của thẻ này — chỉ tính là luyện thêm, lịch ôn không đổi.
           </div>
@@ -579,7 +601,7 @@ export default function FlashcardReview({
         onContinue={confirmCorrectAnswer}
         introMode={isIntroCard}
         onIntroDone={handleIntroDone}
-        isPractice={practiceMode}
+        isPractice={cardIsPractice}
       />}
 
       {confirmingExit && (

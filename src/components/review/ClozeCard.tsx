@@ -54,6 +54,12 @@ export default function ClozeCard({
 }: ClozeCardProps) {
   // The length of the word is shown only after the learner asks for a hint
   const lengthRevealed = showHint || wrongAttempts >= 2;
+  // The whole sentence in Vietnamese; the word's own meaning only when the sentence has no translation.
+  // An English term kept in the translation would give the answer away, so it is masked.
+  const sentenceVn = clozeExample?.sentence_vn?.trim();
+  const meaningHint = sentenceVn
+    ? maskTargetInMeaning(maskTargetInMeaning(sentenceVn, answerForm), currentWord.word)
+    : maskTargetInMeaning(getExampleSenseMeaning(currentWord.meaning_vn, clozeExample), currentWord.word);
   return (
     <div className="flex-1 min-h-0 flex flex-col justify-between">
       {!hasCheckedAnswer ? (
@@ -81,13 +87,10 @@ export default function ClozeCard({
 
               {/* Vietnamese Meaning Hint */}
               <div className="pt-2.5 border-t border-slate-200 dark:border-zinc-800 text-xs text-slate-700 dark:text-zinc-300 flex items-start gap-2">
-                <span className="text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">Nghĩa tiếng Việt:</span>
-                <span className="font-medium">
-                  {maskTargetInMeaning(
-                    getExampleSenseMeaning(currentWord.meaning_vn, clozeExample),
-                    currentWord.word
-                  )}
+                <span className="text-indigo-700 dark:text-indigo-400 font-semibold shrink-0">
+                  {sentenceVn ? "Nghĩa cả câu:" : "Nghĩa tiếng Việt:"}
                 </span>
+                <span className="font-medium">{meaningHint}</span>
               </div>
             </div>
 
@@ -275,6 +278,9 @@ export default function ClozeCard({
             {/* Context Sentence with Highlighted Answer */}
             <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs md:text-sm font-mono leading-relaxed text-slate-800 dark:text-zinc-100">
               {highlightWord(originalSentence, currentWord.word)}
+              {sentenceVn && (
+                <p className="mt-1.5 font-sans text-xs text-slate-500 dark:text-zinc-400">{sentenceVn}</p>
+              )}
             </div>
           </div>
 

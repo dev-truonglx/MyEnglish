@@ -3,6 +3,8 @@ import {
   calculateReflexXP,
   speedRating,
   buildCandidatePool,
+  sampleReflexWords,
+  REFLEX_SAMPLE_SIZE,
   generateReflexQuestions,
   getReflexStats,
   recordReflexCompletion,
@@ -219,6 +221,43 @@ describe("reflexChallenge service", () => {
           expect(q.displayedPair!.meaning).toBe(q.targetMeaning);
         }
       }
+    });
+  });
+
+  describe("sampleReflexWords", () => {
+    const unmetWord = (i: number) => {
+      const w = makeFakeWord(`u${i}`, `unmet${i}`, `nghĩa chưa gặp ${i}`);
+      w.srs = { ...w.srs!, reps: 0, state: 0, last_review: null as unknown as string };
+      return w;
+    };
+
+    it("keeps every word when there are few", () => {
+      const words = Array.from({ length: 30 }, (_, i) => makeFakeWord(`w${i}`, `word${i}`, `nghĩa ${i}`));
+      expect(sampleReflexWords(words)).toHaveLength(30);
+    });
+
+    it("caps a large word list and prefers met words over words never met", () => {
+      const met = Array.from({ length: 1000 }, (_, i) => makeFakeWord(`w${i}`, `word${i}`, `nghĩa ${i}`));
+      const unmet = Array.from({ length: 3000 }, (_, i) => unmetWord(i));
+      const sample = sampleReflexWords([...unmet, ...met]);
+      expect(sample).toHaveLength(REFLEX_SAMPLE_SIZE);
+      expect(new Set(sample.map((w) => w.id)).size).toBe(REFLEX_SAMPLE_SIZE);
+      expect(sample.every((w) => w.id.startsWith("w"))).toBe(true);
+    });
+
+    it("gives a small category its words and fills the rest", () => {
+      const leeches = Array.from({ length: 5 }, (_, i) => makeFakeWord(`l${i}`, `leech${i}`, `nghĩa hay quên ${i}`, "noun", 3));
+      const learning = Array.from({ length: 500 }, (_, i) => makeFakeWord(`w${i}`, `word${i}`, `nghĩa ${i}`));
+      const unmet = Array.from({ length: 500 }, (_, i) => unmetWord(i));
+      const sample = sampleReflexWords([...learning, ...unmet, ...leeches]);
+      expect(sample).toHaveLength(REFLEX_SAMPLE_SIZE);
+      expect(sample.filter((w) => w.id.startsWith("l"))).toHaveLength(5);
+      expect(sample.some((w) => w.id.startsWith("u"))).toBe(false);
+    });
+
+    it("still builds a full deck from thousands of words", () => {
+      const words = Array.from({ length: 4000 }, (_, i) => makeFakeWord(`w${i}`, `word${i}`, `nghĩa ${i}`, ["noun", "verb"][i % 2]));
+      expect(generateReflexQuestions(words)).toHaveLength(37);
     });
   });
 

@@ -46,6 +46,7 @@ import {
 import { setPopupSessionActive } from "@/services/activeSession";
 import {
   buildPopupChoices,
+  buildPopupListenChoices,
   describeWrongChoice,
   needsIntro,
   popupAnswerRating,
@@ -55,7 +56,7 @@ import {
   type PopupMcVariant,
 } from "@/services/popupSession";
 import { getStudyLevels, topUpNewWords } from "@/services/vocabFeed";
-import { loadCatalogDistractors, loadCatalogMeanings } from "@/services/vocabCatalog";
+import { catalogSoundPoolIfLoaded, loadCatalogDistractors, loadCatalogMeanings, loadCatalogSoundPool } from "@/services/vocabCatalog";
 import { parseTerms } from "@/types/database";
 import { summarizeSession, type SessionResult, type SessionSummary } from "@/services/progress";
 import { getStoredMnemonic } from "@/services/aiMnemonic";
@@ -102,6 +103,9 @@ interface ChoiceOption {
   id: string;
   word: string;
   isCorrect: boolean;
+  /** English word and IPA behind a listening option, shown once answered */
+  english?: string;
+  phonetic?: string | null;
 }
 
 export type FocusReviewItem =
@@ -958,10 +962,16 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
         allWordsRef.current.length > 0
           ? Promise.resolve(allWordsRef.current)
           : loadCatalogDistractors(getStudyLevels(), 600).catch(() => [] as WordDetail[]);
-      pool.then((all) => {
+      // Heard words: the wrong options are the deck words that sound most like it (loaded only when needed)
+      const deckSounds =
+        direction !== "listen"
+          ? Promise.resolve([])
+          : Promise.resolve(catalogSoundPoolIfLoaded() ?? loadCatalogSoundPool()).catch(() => []);
+      Promise.all([pool, deckSounds]).then(([all, sounds]) => {
         if (cancelled) return;
+        const usable = all.filter((w) => !isPlaceholderMeaning(w.meaning_vn));
         setChoices(
-          buildPopupChoices(wordObj, all.filter((w) => !isPlaceholderMeaning(w.meaning_vn)), direction === "listen" ? "en_to_vn" : direction)
+          direction === "listen" ? buildPopupListenChoices(wordObj, sounds, usable) : buildPopupChoices(wordObj, usable, direction)
         );
       });
     } else {
@@ -1338,13 +1348,14 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
   const listenPrompt = activeMode === "multiple_choice" && mcDirection === "listen";
 
   // After a wrong answer: which word was picked instead, and the stored memory hook if any
-  const wrongPick = useMemo(
-    () =>
-      isAnswered && !isCorrect && activeMode === "multiple_choice"
-        ? describeWrongChoice(selectedChoiceId, allWordsRef.current)
-        : null,
-    [isAnswered, isCorrect, activeMode, selectedChoiceId]
-  );
+  const wrongPick = useMemo(() => {
+    if (!isAnswered || isCorrect || activeMode !== "multiple_choice") return null;
+    const known = describeWrongChoice(selectedChoiceId, allWordsRef.current);
+    if (known) return known;
+    // A sound-alike option from the whole deck is not in the session's pool: its option carries the word
+    const picked = choices.find((c) => c.id === selectedChoiceId);
+    return picked?.english ? { word: picked.english, meaning: picked.word } : null;
+  }, [isAnswered, isCorrect, activeMode, selectedChoiceId, choices]);
   const mnemonic = useMemo(
     () => (isAnswered && !isCorrect && currentWord ? getStoredMnemonic(currentWord.id, currentWord.meaning_vn) : null),
     [isAnswered, isCorrect, currentWord]
@@ -1702,21 +1713,38 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                         }
                       }
 
+                      // A heard word, once answered: every option shows its English word and IPA and plays it,
+                      // so the right word and its sound-alikes can be compared by ear
+                      const heard = listenPrompt && isAnswered && Boolean(choice.english);
+                      if (heard && !choice.isCorrect && !isSelected) {
+                        btnStyle = "border-slate-200 dark:border-zinc-800 opacity-70 bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-200";
+                      }
+
                       return (
                         <button
                           key={choice.id}
-                          disabled={isAnswered}
-                          onClick={() => handleSelectChoice(choice)}
-                          className={`w-full p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all duration-150 ${btnStyle}`}
+                          disabled={isAnswered && !heard}
+                          onClick={() => (heard ? handleSpeak(choice.english!) : handleSelectChoice(choice))}
+                          title={heard ? `Nghe "${choice.english}"` : undefined}
+                          className={`w-full p-3.5 rounded-2xl border text-left flex items-center gap-3 transition-all duration-150 ${btnStyle} ${heard ? "cursor-pointer" : ""}`}
                         >
                           <span
                             className={`w-6 h-6 shrink-0 rounded-lg flex items-center justify-center font-mono text-xs font-bold ${badgeStyle}`}
                           >
                             {idx + 1}
                           </span>
-                          <span className="text-sm sm:text-base font-bold flex-1 tracking-tight">
-                            {choice.word}
+                          <span className="flex-1 min-w-0">
+                            <span className="block text-sm sm:text-base font-bold tracking-tight">{choice.word}</span>
+                            {heard && (
+                              <span className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-xs font-normal">
+                                <span className="font-semibold">{choice.english}</span>
+                                {choice.phonetic && (
+                                  <span className="font-mono text-cyan-600 dark:text-cyan-400">{choice.phonetic}</span>
+                                )}
+                              </span>
+                            )}
                           </span>
+                          {heard && <Volume2 className="w-3.5 h-3.5 text-slate-400 dark:text-zinc-500 shrink-0" />}
                           {isAnswered && choice.isCorrect && (
                             <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
                           )}
@@ -1727,6 +1755,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                       );
                     })}
                   </div>
+                  {listenPrompt && isAnswered && choices.some((c) => c.english) && (
+                    <p className="text-[11px] text-center text-slate-400 dark:text-zinc-500">
+                      Bấm vào từng đáp án để nghe và so sánh cách phát âm
+                    </p>
+                  )}
                 </div>
               )}
 

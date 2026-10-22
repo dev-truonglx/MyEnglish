@@ -21,6 +21,8 @@ import { persistKeyNow } from "./storageBackup";
 import { recordXpEarned, XP_DAILY_LOG_KEY, XP_TOTAL_KEY } from "./sync/xpLedger";
 import { COMMON_WORDS } from "@/data/commonWords";
 import { FULL_VERB_FORMS, IRREGULAR_PLURALS, IRREGULAR_VERB_FORMS } from "@/data/irregularForms";
+import { samePronunciation } from "@/utils/exerciseHints";
+import { ipaPhonemes, soundDistance } from "./phoneticSimilarity";
 
 // ─── 1. RETRIEVABILITY ──────────────────────────────────────────────────────
 
@@ -1623,6 +1625,9 @@ export interface MultipleChoiceOption {
   text: string;
   isCorrect: boolean;
   explanation?: string;
+  /** The English word behind the option and its IPA, shown once the question is answered */
+  word?: string;
+  phonetic?: string | null;
 }
 
 export interface MultipleChoiceQuestion {
@@ -1711,7 +1716,10 @@ function getSynonymSet(synonymsRaw: string | undefined | null): Set<string> {
  * ("get" = "nhận; mua; trở nên; lấy" and "become" = "trở nên"). Such a word must not be a distractor, in
  * either direction: the question would have two right answers and the learner would be graded Again unfairly.
  */
-export function areConfusable(a: WordDetail, b: WordDetail): boolean {
+export function areConfusable(
+  a: Pick<WordDetail, "word" | "synonyms" | "meaning_vn">,
+  b: Pick<WordDetail, "word" | "synonyms" | "meaning_vn">
+): boolean {
   const aw = a.word.trim().toLowerCase();
   const bw = b.word.trim().toLowerCase();
   if (aw === bw) return true;
@@ -1797,6 +1805,8 @@ export function generateMultipleChoiceQuestion(
       text: cleanMeaningForOption(targetWord.meaning_vn),
       isCorrect: true,
       explanation: targetWord.meaning_vn,
+      word: targetWord.word,
+      phonetic: targetWord.phonetic,
     });
 
     selectedDistractors.forEach((d) => {
@@ -1805,6 +1815,8 @@ export function generateMultipleChoiceQuestion(
         text: cleanMeaningForOption(d.meaning_vn),
         isCorrect: false,
         explanation: `${d.word}: ${cleanMeaningForOption(d.meaning_vn)}`,
+        word: d.word,
+        phonetic: d.phonetic,
       });
     });
 
@@ -1866,6 +1878,134 @@ export function generateMultipleChoiceQuestion(
       options,
     };
   }
+}
+
+/** A word that can be a sound-alike option: deck words come as light objects (vocabCatalog.loadCatalogSoundPool) */
+export type SoundAlikeWord = Pick<
+  WordDetail,
+  "id" | "word" | "meaning_vn" | "synonyms" | "phonetic" | "part_of_speech" | "cefr_level" | "catalog_id"
+>;
+
+/** Above this sound distance (phoneticSimilarity.soundDistance) two words no longer sound alike */
+export const MAX_SOUND_ALIKE_DISTANCE = 0.6;
+/**
+ * A young card (or a leech) is not asked the closest pairs (ship / sheep, ship / chip): below this distance the options
+ * wait until the card is known, and somewhat close words (ship / shop) are used meanwhile.
+ */
+export const YOUNG_MIN_SOUND_DISTANCE = 0.12;
+
+const DERIVATION_SUFFIXES = new Set([
+  "s", "es", "ed", "d", "ing", "er", "ers", "est", "ly", "ily", "ment", "ments", "ness", "ful", "less", "al",
+  "ally", "ion", "ions", "tion", "ation", "ive", "ity", "able", "ible", "y", "ish", "ism", "ist",
+]);
+const FAMILY_PREFIXES = ["un", "re", "dis", "mis", "in", "im"];
+
+/**
+ * Whether two words are forms of one another (think / thinking, deploy / deployment, happy / unhappy):
+ * they sound alike because they are the same word, so one is no fair wrong option for the other.
+ */
+export function sameWordFamily(a: string, b: string): boolean {
+  const x = a.trim().toLowerCase();
+  const y = b.trim().toLowerCase();
+  if (x === y) return true;
+  if (wordForms(x).some((f) => f.toLowerCase() === y) || wordForms(y).some((f) => f.toLowerCase() === x)) return true;
+  const [short, long] = x.length <= y.length ? [x, y] : [y, x];
+  if (short.length < 3) return false;
+  const stems = [short, short.replace(/e$/, ""), short.replace(/y$/, "i")];
+  if (stems.some((st) => long.startsWith(st) && DERIVATION_SUFFIXES.has(long.slice(st.length)))) return true;
+  return FAMILY_PREFIXES.some((p) => long === p + short);
+}
+
+/**
+ * The listening exercise's question: the learner hears `targetWord` and picks its meaning, so the wrong options
+ * are the words that sound most like it (ship -> sheep, chip, shop), from `soundPool` (the whole deck plus the
+ * learner's own words), whatever their topic or level: options can then only be told apart by ear, not ruled
+ * out by meaning. Never offered: a word pronounced the same (right / write would be a right answer by ear),
+ * a form of the word (think / thinking), a word sharing a meaning with it, or two options that look or sound
+ * the same. A young card (or a leech) skips the closest pairs (YOUNG_MIN_SOUND_DISTANCE). When fewer than three deck
+ * words sound alike (long words, no IPA), the rest come from generateMultipleChoiceQuestion over `fallbackPool`.
+ * Every option carries its English word and IPA, shown after answering.
+ */
+export function generateListeningQuestion(
+  targetWord: WordDetail,
+  soundPool: readonly SoundAlikeWord[],
+  fallbackPool: WordDetail[]
+): MultipleChoiceQuestion {
+  const target = ipaPhonemes(targetWord.phonetic);
+  const targetKey = targetWord.word.trim().toLowerCase();
+  const notTarget = (w: SoundAlikeWord) =>
+    w.id !== targetWord.id &&
+    w.word.trim().toLowerCase() !== targetKey &&
+    !(targetWord.catalog_id && w.catalog_id === targetWord.catalog_id) &&
+    !samePronunciation(w.phonetic, targetWord.phonetic);
+
+  const { state = 0, stability = 0 } = targetWord.srs || {};
+  const young = state === 0 || state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(targetWord.srs);
+  const minDistance = young ? YOUNG_MIN_SOUND_DISTANCE : 0;
+
+  // Shuffled before the (stable) sort so equally close words are picked at random
+  const ranked = target.units.length === 0
+    ? []
+    : shuffle(
+        soundPool.flatMap((w) => {
+          if (!w.phonetic) return [];
+          // Distance first: the other checks are dearer and only matter for the few words close enough
+          const distance = soundDistance(target, ipaPhonemes(w.phonetic), MAX_SOUND_ALIKE_DISTANCE);
+          if (distance < minDistance || distance > MAX_SOUND_ALIKE_DISTANCE) return [];
+          return isPlaceholderMeaning(w.meaning_vn) || !notTarget(w) ? [] : [{ w, distance }];
+        })
+      ).sort((x, y) => x.distance - y.distance);
+
+  const usedTexts = new Set([cleanMeaningForOption(targetWord.meaning_vn).trim().toLowerCase()]);
+  const usedSounds: string[] = [targetWord.phonetic ?? ""];
+  const picked: SoundAlikeWord[] = [];
+  for (const { w } of ranked) {
+    if (picked.length >= 3) break;
+    const text = cleanMeaningForOption(w.meaning_vn).trim().toLowerCase();
+    if (!text || usedTexts.has(text)) continue;
+    if (usedSounds.some((p) => samePronunciation(p, w.phonetic))) continue;
+    if (sameWordFamily(w.word, targetWord.word) || areConfusable(targetWord, w)) continue;
+    usedTexts.add(text);
+    usedSounds.push(w.phonetic ?? "");
+    picked.push(w);
+  }
+
+  const options: MultipleChoiceOption[] = [
+    {
+      id: targetWord.id,
+      text: cleanMeaningForOption(targetWord.meaning_vn),
+      isCorrect: true,
+      explanation: targetWord.meaning_vn,
+      word: targetWord.word,
+      phonetic: targetWord.phonetic,
+    },
+    ...picked.map((d) => ({
+      id: d.id,
+      text: cleanMeaningForOption(d.meaning_vn),
+      isCorrect: false,
+      explanation: `${d.word}: ${cleanMeaningForOption(d.meaning_vn)}`,
+      word: d.word,
+      phonetic: d.phonetic,
+    })),
+  ];
+  if (options.length < 4) {
+    const pickedIds = new Set(picked.map((w) => w.id));
+    const rest = generateMultipleChoiceQuestion(
+      targetWord,
+      fallbackPool.filter((w) => !pickedIds.has(w.id) && notTarget(w) && !sameWordFamily(w.word, targetWord.word)),
+      "en_to_vn"
+    ).options.filter((o) => !o.isCorrect && !usedTexts.has(o.text.trim().toLowerCase()));
+    options.push(...rest.slice(0, 4 - options.length));
+  }
+
+  return {
+    promptType: "en_to_vn",
+    question: targetWord.word,
+    subPrompt: "Nghe từ và chọn nghĩa đúng",
+    phonetic: targetWord.phonetic,
+    partOfSpeech: targetWord.part_of_speech,
+    options: shuffle(options),
+  };
 }
 
 /**

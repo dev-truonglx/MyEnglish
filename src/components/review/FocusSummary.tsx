@@ -47,7 +47,7 @@ export default function FocusSummary({ result, next, onExtend, onNavigate }: Foc
       )}
       {result.endedBy === "queue" && left >= 1 && (
         <div className="space-y-1.5">
-          <p className="text-xs text-slate-600 dark:text-zinc-400">Hết thẻ đến hạn, còn {left} phút. Muốn dùng nốt?</p>
+          <p className="text-xs text-slate-600 dark:text-zinc-400">Hết thẻ để ôn và luyện thêm, còn {left} phút. Muốn dùng nốt?</p>
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => onNavigate("writing")}

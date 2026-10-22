@@ -33,6 +33,8 @@ export interface LibraryStats {
   /** "Đang học" / "Nhớ lâu" (services/wordStatus): the same two tiers on every screen */
   learningCount: number;
   rememberedLongCount: number;
+  /** The part of rememberedLongCount only marked "Đã biết", not asked yet */
+  rememberedKnownCount: number;
   leechCount: number;
   perTopic: Record<string, { total: number; due: number }>;
 }

@@ -7,6 +7,7 @@ import type { ReviewCard, WordDetail } from "@/types/database";
 import {
   cleanMeaningForOption,
   deriveRating,
+  generateListeningQuestion,
   generateMultipleChoiceQuestion,
   isLeech,
   isNewCard,
@@ -14,7 +15,10 @@ import {
   selectExerciseType,
   YOUNG_STABILITY_DAYS,
   type ExerciseType,
+  type MultipleChoiceOption,
+  type SoundAlikeWord,
 } from "./smartReview";
+import { samePronunciation } from "@/utils/exerciseHints";
 
 /**
  * Question format of a vocabulary card in the popup, the same ladder as flashcard sessions:
@@ -61,8 +65,16 @@ export function popupMcExercise(variant: PopupMcVariant): ExerciseType {
 
 export interface PopupChoice {
   id: string;
+  /** The text shown on the option: a meaning or an English word, depending on the direction */
   word: string;
   isCorrect: boolean;
+  /** The English word behind the option and its IPA, shown once a listening question is answered */
+  english?: string;
+  phonetic?: string | null;
+}
+
+function toPopupChoice(o: MultipleChoiceOption): PopupChoice {
+  return { id: o.id, word: o.text, isCorrect: o.isCorrect, english: o.word, phonetic: o.phonetic };
 }
 
 /**
@@ -82,11 +94,23 @@ export function buildPopupChoices(
   allWords: WordDetail[],
   direction: "en_to_vn" | "vn_to_en" = "vn_to_en"
 ): PopupChoice[] {
-  return generateMultipleChoiceQuestion(target, allWords, direction).options.map((o) => ({
-    id: o.id,
-    word: o.text,
-    isCorrect: o.isCorrect,
-  }));
+  return generateMultipleChoiceQuestion(target, allWords, direction).options.map(toPopupChoice);
+}
+
+/**
+ * Options of a listening question ("listen"): the meanings of the words that sound most like the one heard,
+ * from the whole deck (`deckSounds`, vocabCatalog.loadCatalogSoundPool) and the learner's own words outside it,
+ * as in flashcard sessions (generateListeningQuestion). `allWords` fills in when too few sound alike; a word
+ * pronounced the same as the target is never offered, since by ear it would be a right answer too.
+ */
+export function buildPopupListenChoices(
+  target: WordDetail,
+  deckSounds: readonly SoundAlikeWord[],
+  allWords: WordDetail[]
+): PopupChoice[] {
+  const ownWords = allWords.filter((w) => !w.catalog_id && w.phonetic);
+  const fallback = allWords.filter((w) => !samePronunciation(w.phonetic, target.phonetic));
+  return generateListeningQuestion(target, [...deckSounds, ...ownWords], fallback).options.map(toPopupChoice);
 }
 
 /**

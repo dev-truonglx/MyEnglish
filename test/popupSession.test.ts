@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { Rating } from "ts-fsrs";
-import { buildPopupChoices, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
+import { buildPopupChoices, buildPopupListenChoices, needsIntro, popupAnswerRating, selectSmartPopupMode } from "@/services/popupSession";
 import { toCard } from "@/services/cards";
 import { generateMultipleChoiceQuestion, selectExerciseType } from "@/services/smartReview";
 import {
@@ -232,4 +232,34 @@ describe("#7 smart popup exercise mode ladder", () => {
   });
 });
 
+describe("buildPopupListenChoices", () => {
+  const sound = (word: string, ipa: string, vn: string) => ({
+    id: `catalog:${word}`, word, meaning_vn: vn, synonyms: "[]", phonetic: ipa, part_of_speech: "noun", cefr_level: "A1", catalog_id: word,
+  });
+  const deck = [
+    sound("ship", "/ʃɪp/", "con tàu"),
+    sound("sheep", "/ʃiːp/", "con cừu"),
+    sound("chip", "/tʃɪp/", "khoai tây chiên"),
+    sound("shop", "/ʃɑːp/", "cửa hàng"),
+    sound("banana", "/bəˈnænə/", "quả chuối"),
+  ];
+  const ship = makeWord("w-ship", { word: "ship", meaning_vn: "con tàu", phonetic: "/ʃɪp/", catalog_id: "ship", srs: reviewSrs(30, 6) });
 
+  it("offers the meanings of the deck words that sound like the word heard, with their word and IPA", () => {
+    const choices = buildPopupListenChoices(ship, deck, []);
+    expect(choices.map((c) => c.english).sort()).toEqual(["chip", "sheep", "ship", "shop"]);
+    expect(choices.find((c) => c.isCorrect)).toMatchObject({ word: "Con tàu", english: "ship", phonetic: "/ʃɪp/" });
+    expect(choices.find((c) => c.english === "sheep")).toMatchObject({ word: "Con cừu", phonetic: "/ʃiːp/", isCorrect: false });
+  });
+
+  it("fills from the session's words when too few sound alike, never with a homophone", () => {
+    const pool = [
+      makeWord("w-a", { word: "alpha", meaning_vn: "nghĩa a" }),
+      makeWord("w-b", { word: "bravo", meaning_vn: "nghĩa b" }),
+      makeWord("w-same", { word: "shipp", meaning_vn: "đồng âm", phonetic: "/ʃɪp/" }),
+    ];
+    const choices = buildPopupListenChoices(ship, [deck[0], deck[4]], pool);
+    expect(choices).toHaveLength(4);
+    expect(choices.map((c) => c.english)).not.toContain("shipp");
+  });
+});

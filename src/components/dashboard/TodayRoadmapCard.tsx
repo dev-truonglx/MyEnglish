@@ -103,7 +103,12 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
               <div className="flex items-center justify-between gap-2 text-xs">
                 <span className="font-semibold text-slate-800 dark:text-zinc-200">
                   {p.level}: {p.met}/{p.total} từ
-                  {p.remembered > 0 && <span className="font-normal text-slate-500 dark:text-zinc-400"> · {p.remembered} nhớ lâu</span>}
+                  {p.rememberedLong > 0 && (
+                    <span className="font-normal text-slate-500 dark:text-zinc-400">
+                      {" "}
+                      · {p.rememberedLong} nhớ lâu{p.rememberedKnown > 0 ? ` (${p.rememberedKnown} đã biết)` : ""}
+                    </span>
+                  )}
                 </span>
                 <span className="text-slate-500 dark:text-zinc-400 text-right">
                   {remaining <= 0 || goal === null
@@ -115,7 +120,7 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
               </div>
               <div className="relative h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
                 <div className="absolute inset-y-0 left-0 bg-cyan-300 dark:bg-cyan-800" style={{ width: pct(p.met) }} />
-                <div className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: pct(p.remembered) }} />
+                <div className="absolute inset-y-0 left-0 bg-emerald-500" style={{ width: pct(p.rememberedLong) }} />
               </div>
             </div>
           );

@@ -155,7 +155,10 @@ describe("migrations", () => {
     const wordCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(words);`)).map((c) => c.name);
     expect(wordCols).toContain("suspended");
     const [{ user_version }] = await conn.select<{ user_version: number }[]>(`PRAGMA user_version;`);
-    expect(user_version).toBe(17);
+    expect(user_version).toBe(18);
+    // v18: the deck words' pronunciation
+    const catalogCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(vocab_catalog);`)).map((c) => c.name);
+    expect(catalogCols).toContain("ipa");
     // v17: the mistakes' normalized key
     const mistakeCols = (await conn.select<{ name: string }[]>(`PRAGMA table_info(mistakes);`)).map((c) => c.name);
     expect(mistakeCols).toContain("norm_key");

@@ -19,6 +19,19 @@
         ".claude/verify/vite.config.ts"
       ],
       "port": 1430
+    },
+    {
+      "name": "verify-harness-alt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--config",
+        ".claude/verify/vite.config.ts",
+        "--port",
+        "1431",
+        "--strictPort"
+      ],
+      "port": 1431
     }
   ]
 }

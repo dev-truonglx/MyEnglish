@@ -494,10 +494,18 @@ export default function Sidebar({
             />
           </div>
           <div className="flex items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-zinc-400">
-            <span className="truncate">
+            <span
+              className="truncate"
+              title={
+                libraryStats.rememberedKnownCount > 0
+                  ? `Nhớ lâu ${libraryStats.rememberedLongCount}, gồm ${libraryStats.rememberedKnownCount} từ đánh dấu "Đã biết" chưa ôn`
+                  : undefined
+              }
+            >
               Đang học <span className="font-semibold text-slate-800 dark:text-zinc-200">{libraryStats.learningCount}</span>
               {" · "}
               Nhớ lâu <span className="font-semibold text-emerald-600 dark:text-emerald-400">{libraryStats.rememberedLongCount}</span>
+              {libraryStats.rememberedKnownCount > 0 && ` (${libraryStats.rememberedKnownCount} đã biết)`}
             </span>
             {!simpleMode && (
               <span className="shrink-0 font-mono text-amber-700 dark:text-amber-300" title={`${xpState.rank} • ${xpState.totalXP} XP`}>

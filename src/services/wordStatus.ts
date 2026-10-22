@@ -63,14 +63,19 @@ export function wordStatus(w: StatusWord): WordStatus {
 export interface WordStatusCounts {
   learning: number;
   rememberedLong: number;
+  /** The part of rememberedLong only marked "Đã biết", not asked yet */
+  rememberedKnown: number;
 }
 
 export function countWordStatus(words: readonly StatusWord[]): WordStatusCounts {
   let learning = 0;
   let rememberedLong = 0;
+  let rememberedKnown = 0;
   for (const w of words) {
-    if (isRememberedLong(w)) rememberedLong++;
-    else if (isLearning(w)) learning++;
+    if (isRememberedLong(w)) {
+      rememberedLong++;
+      if (isKnownOnly(recognitionSrs(w))) rememberedKnown++;
+    } else if (isLearning(w)) learning++;
   }
-  return { learning, rememberedLong };
+  return { learning, rememberedLong, rememberedKnown };
 }

@@ -209,7 +209,8 @@ describe("words the learner already knows", () => {
 
     const progress = await feed.loadLevelProgress();
     const a1 = progress.find((p) => p.level === "A1");
-    expect(a1).toMatchObject({ met: 10, known: 10 });
+    // Counted "Nhớ lâu" like the sidebar does, shown as "đã biết"; not yet for suggesting the next level
+    expect(a1).toMatchObject({ met: 10, known: 10, rememberedLong: 10, rememberedKnown: 10, remembered: 0 });
 
     // Each word gets the long "Đã biết" schedule: "Nhớ lâu" at once, not due for a month or more
     const conn = await db.getDatabase();

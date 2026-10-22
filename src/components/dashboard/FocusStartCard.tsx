@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Timer, Zap } from "lucide-react";
-import { FOCUS_DURATIONS, getFocusSettings, saveFocusSettings } from "@/services/focusSession";
+import { FOCUS_DURATIONS, focusPreview, focusPreviewText, getFocusSettings, saveFocusSettings } from "@/services/focusSession";
+import { getStudyLimits } from "@/services/srs";
 import { focusPitch, loadFocusPitchInput, type FocusPitchInput } from "@/services/focusPitch";
 
 interface FocusStartCardProps {
@@ -12,13 +13,15 @@ interface FocusStartCardProps {
   due?: number;
   /** A slim one-line row (Today, when its list already has a loud focus button) */
   quiet?: boolean;
+  /** Today's work, for the line saying what the session will hold */
+  work?: { reviews: number; newToday: number };
 }
 
 /**
  * Start a focus session: pick 5 / 10 / 15 / 25 minutes (the last choice is kept). Loud (gradient, pulsing icon)
  * until a session is done today, then a quiet card; the line on it says why now (see focusPitch).
  */
-export default function FocusStartCard({ onStart, disabled = false, shortcut = false, due = 0, quiet = false }: FocusStartCardProps) {
+export default function FocusStartCard({ onStart, disabled = false, shortcut = false, due = 0, quiet = false, work }: FocusStartCardProps) {
   const [minutes, setMinutes] = useState(() => getFocusSettings().minutes);
   const [input, setInput] = useState<FocusPitchInput | null>(null);
 
@@ -46,6 +49,7 @@ export default function FocusStartCard({ onStart, disabled = false, shortcut = f
     minutes,
   });
   const strong = pitch.tone === "strong" && !quiet;
+  const preview = work ? focusPreviewText(focusPreview(work, minutes, getStudyLimits().maxSessionSize), minutes) : null;
 
   const chips = (
     <div className="flex items-center gap-1" role="radiogroup" aria-label="Thời lượng">
@@ -94,6 +98,7 @@ export default function FocusStartCard({ onStart, disabled = false, shortcut = f
           Bắt đầu
           {shortcut && <kbd className="ml-1.5 px-1 rounded bg-white/20 font-mono text-[10px]">F</kbd>}
         </button>
+        {preview && <div className="basis-full text-[11px] text-slate-500 dark:text-zinc-400">{preview}</div>}
       </div>
     );
   }
@@ -119,6 +124,7 @@ export default function FocusStartCard({ onStart, disabled = false, shortcut = f
           Thêm {minutes} phút
           {shortcut && <kbd className="ml-2 px-1 rounded bg-white/20 font-mono text-[10px]">F</kbd>}
         </button>
+        {preview && <div className="basis-full text-[11px] text-slate-500 dark:text-zinc-400">{preview}</div>}
       </div>
     );
   }
@@ -153,6 +159,7 @@ export default function FocusStartCard({ onStart, disabled = false, shortcut = f
           </span>
           {shortcut && <kbd className="px-1 rounded bg-violet-100 font-mono text-[10px] text-violet-600">F</kbd>}
         </button>
+        {preview && <div className="basis-full text-xs text-white/80">{preview}</div>}
       </div>
     </div>
   );

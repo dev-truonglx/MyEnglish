@@ -516,9 +516,13 @@ export interface LevelProgress {
   met: number;
   /**
    * In long-term memory: Review state with at least MASTERED_STABILITY_DAYS of stability, after a real review
-   * (a word only marked "Đã biết" does not count)
+   * (a word only marked "Đã biết" does not count). Only for suggesting the next level; screens show rememberedLong
    */
   remembered: number;
+  /** "Nhớ lâu" as every screen counts it (services/wordStatus), words only marked "Đã biết" included */
+  rememberedLong: number;
+  /** The part of rememberedLong only marked "Đã biết", not asked yet (isKnownOnly) */
+  rememberedKnown: number;
   /** Marked "already known" */
   known: number;
   /** Deck words of the level not added to the learner's words yet (0 = the level has nothing left to add) */
@@ -552,13 +556,18 @@ export function suggestNextLevel(progress: LevelProgress[], levels: readonly Stu
 
 export async function loadLevelProgress(): Promise<LevelProgress[]> {
   const db = await getDatabase();
-  const rows = await db.select<Array<{ level: string; met: number; remembered: number; known: number }>>(
+  const rows = await db.select<
+    Array<{ level: string; met: number; remembered: number; remembered_long: number; remembered_known: number; known: number }>
+  >(
     `SELECT w.cefr_level AS level,
             SUM(CASE WHEN COALESCE(s.reps, 0) > 0 THEN 1 ELSE 0 END) AS met,
             SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 AND EXISTS (
                   SELECT 1 FROM review_logs r WHERE r.word_id = w.id AND r.exercise_type NOT IN ('known', 'intro')
                     AND COALESCE(r.is_scheduled, 1) != 2
                 ) THEN 1 ELSE 0 END) AS remembered,
+            SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 THEN 1 ELSE 0 END) AS remembered_long,
+            SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 AND COALESCE(s.reps, 0) = 1
+                      AND COALESCE(s.lapses, 0) = 0 THEN 1 ELSE 0 END) AS remembered_known,
             SUM(CASE WHEN k.word_id IS NOT NULL THEN 1 ELSE 0 END) AS known
      FROM words w JOIN srs_reviews s ON s.word_id = w.id
      LEFT JOIN (SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'known') k ON k.word_id = w.id
@@ -582,6 +591,8 @@ export async function loadLevelProgress(): Promise<LevelProgress[]> {
       total: d ? Number(d.total) : CATALOG_LEVEL_COUNTS[level],
       met: Number(r?.met ?? 0),
       remembered: Number(r?.remembered ?? 0),
+      rememberedLong: Number(r?.remembered_long ?? 0),
+      rememberedKnown: Number(r?.remembered_known ?? 0),
       known: Number(r?.known ?? 0),
       notAdded: d ? Number(d.not_added) : CATALOG_LEVEL_COUNTS[level],
     };

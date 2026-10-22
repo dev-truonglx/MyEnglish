@@ -41,7 +41,6 @@ import {
 } from "./todayPlan";
 import TodayChecklist from "./TodayChecklist";
 import DayCloseCard from "./DayCloseCard";
-import TodayRoadmapCard from "./TodayRoadmapCard";
 import FocusStartCard from "./FocusStartCard";
 import DailyQuestsCard from "./DailyQuestsCard";
 import { FOCUS_SETTINGS_EVENT, getFocusSettings, nextReviewPeek } from "@/services/focusSession";
@@ -167,7 +166,7 @@ function StreakNotices({ stats, now }: { stats: StreakStats; now: Date }) {
  * (streak, words learnt in the sidebar's two tiers, how much of a real IT text the learner recognises). Then, on
  * wide windows, two columns: today as a short list (words, one grammar lesson, one pronunciation lesson, sized by
  * the minutes chosen at onboarding) with one main button, or the day close once everything is done, plus the
- * focus card; on the right the daily quests and the weekly race. Below the list: the Oxford path and last week's
+ * focus card; on the right the daily quests and the weekly race. Below the list: the Ramp Up reflex drill and last week's
  * summary on the first day of a new week.
  */
 export default function TodayTab({
@@ -251,7 +250,9 @@ export default function TodayTab({
   const nextReview = useMemo(() => nextReviewPeek(words, now), [words, todayWork.total]);
 
   // A "Nhớ lâu" milestone, celebrated once (the line stays for the day it is reached)
-  const milestone = useMemo(() => milestoneToCelebrate(status.rememberedLong, readMilestoneMark(), today), [status.rememberedLong, today]);
+  // Words only marked "Đã biết" are no milestone: the learner has not remembered them through study
+  const studiedRemembered = status.rememberedLong - status.rememberedKnown;
+  const milestone = useMemo(() => milestoneToCelebrate(studiedRemembered, readMilestoneMark(), today), [studiedRemembered, today]);
   useEffect(() => {
     if (milestone.next) saveMilestoneMark(milestone.next);
   }, [milestone.next]);
@@ -301,7 +302,7 @@ export default function TodayTab({
   const pathLabel = AI_VOCAB_ENABLED ? "Thêm từ bằng AI" : "Lộ trình từ vựng";
 
   const showQuests = !loading && !empty;
-  const twoColumns = showQuests || showRank || !!onStartReflex;
+  const twoColumns = showQuests || showRank;
   const statCard = "flex items-center gap-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 min-w-0";
 
   return (
@@ -437,6 +438,7 @@ export default function TodayTab({
               <FocusStartCard
                 onStart={onStartFocus}
                 due={todayWork.total}
+                work={todayWork}
                 shortcut
                 // The list's "Tập trung" button already stands out: no second loud card under it
                 quiet={primary?.id === "vocab"}
@@ -463,22 +465,22 @@ export default function TodayTab({
                 />
               )}
               {showRank && <RankPanel onNavigate={setActiveTab} />}
+            </aside>
+          )}
 
-              {/* ⚡ BANNER LUYỆN PHẢN XẠ NẰM NGAY DƯỚI CUỘC ĐUA TUẦN */}
-              {onStartReflex && (
-                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 p-4 text-white shadow-md shadow-orange-500/10 transition-all hover:shadow-lg hover:shadow-orange-500/15">
-                  <div className="flex items-center gap-3">
+          <div className={`min-w-0 space-y-4 ${twoColumns ? "min-[1000px]:col-start-1 min-[1000px]:row-start-2" : ""}`}>
+            {/* Ramp Up: the timed reflex drill, where the Oxford path card used to be */}
+            {onStartReflex && (
+              <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 p-4 text-white shadow-md shadow-orange-500/10 transition-all hover:shadow-lg hover:shadow-orange-500/15">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
                     <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm shadow-inner">
                       <Zap className="h-5 w-5 fill-white text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-black uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded-full text-white">
-                          Ramp Up
-                        </span>
-                        <h4 className="font-extrabold text-sm text-white truncate">
-                          Luyện Phản Xạ
-                        </h4>
+                        <span className="text-[9px] font-black uppercase tracking-wider bg-white/20 px-1.5 py-0.5 rounded-full text-white">Ramp Up</span>
+                        <h4 className="font-extrabold text-sm text-white truncate">Luyện Phản Xạ</h4>
                       </div>
                       <p className="text-[11px] text-amber-100 mt-0.5 line-clamp-2">
                         Ôn nhanh nghĩa các từ đã học, tính giờ. Nhận tới <strong className="text-white font-bold">+{REFLEX_DAILY_XP_MAX} XP</strong> mỗi ngày.
@@ -487,18 +489,14 @@ export default function TodayTab({
                   </div>
                   <button
                     onClick={onStartReflex}
-                    className="mt-3 w-full inline-flex items-center justify-center gap-1.5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95"
+                    className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95"
                   >
                     <Zap className="w-3.5 h-3.5 fill-amber-400" />
                     <span>Bắt đầu luyện phản xạ</span>
                   </button>
                 </div>
-              )}
-            </aside>
-          )}
-
-          <div className={`min-w-0 space-y-4 ${twoColumns ? "min-[1000px]:col-start-1 min-[1000px]:row-start-2" : ""}`}>
-            <TodayRoadmapCard simple={simpleMode} milestone={milestone.show} onOpenPath={() => setActiveTab("capture")} />
+              </div>
+            )}
             <WeeklySummaryCard simple={simpleMode} now={fixedNow} />
           </div>
         </div>

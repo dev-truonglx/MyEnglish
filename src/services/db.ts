@@ -6,7 +6,7 @@ import { INTRO_READY_MS, nextLocalDayStart } from "./cards";
 import { WORD_KEY_SQL, wordKey } from "./sync/keys";
 
 const DB_PATH = "sqlite:myenglish.db";
-const SCHEMA_VERSION = 17;
+const SCHEMA_VERSION = 18;
 let dbInstance: Database | null = null;
 let initPromise: Promise<Database> | null = null;
 
@@ -704,6 +704,13 @@ async function runMigrations(db: Database): Promise<void> {
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_created_at ON words(created_at DESC);`);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_words_updated_at ON words(updated_at);`);
     await tryExec(`CREATE INDEX IF NOT EXISTS idx_mistakes_sync ON mistakes(last_review, created_at);`);
+  }
+
+  await checkpoint(17);
+  if (version < 18) {
+    // Schema v18: each deck word's pronunciation in its own column, so the listening exercise can rank the
+    // whole deck by sound without parsing every row's JSON (filled by the catalog copy, version 3)
+    await tryExec(`ALTER TABLE vocab_catalog ADD COLUMN ipa TEXT;`);
   }
 
   // Every block is idempotent: when a step failed unexpectedly, user_version stays put so the failed

@@ -3,13 +3,18 @@
  *  - the clock runs only while the learner is studying: it stops when the window loses focus or is hidden, and
  *    after FOCUS_IDLE_MS without any input, so `activeSec` is time actually spent on the cards
  *  - time up never cuts an answer: the session ends after the card on screen
+ *  - no card left with time to spare: practice cards are added (focusTopUpCards), so the session lasts what was
+ *    promised; they move no schedule
  *  - a completed session earns FOCUS_XP_PER_MIN per active minute (FOCUS_MIN_CARDS answers at least), at most
  *    FOCUS_XP_DAILY_CAP a day
  *  - start and end are logged as learning events (synced), for the D1/D7 comparison in services/retention.ts
  */
-import type { WordDetail } from "@/types/database";
+import type { ReviewCard, WordDetail } from "@/types/database";
+import { practiceCards } from "./cards";
+import { minutesFor } from "./comeback";
 import { logLearningEvent } from "./learningEvents";
-import { awardXP } from "./smartReview";
+import { loadRecentRuns, pickPracticeWords, type RecentRun } from "./practicePicker";
+import { awardXP, getStudiedWords, getUnmasteredWords, interleaveTopics } from "./smartReview";
 import { getLocalDateString } from "./streak";
 
 export {
@@ -159,6 +164,64 @@ export function endFocus(
     meta: { id: plan.id, day: plan.day, ...meta },
   });
   return result;
+}
+
+// ─── Before and during the session ──────────────────────────────────────────
+
+/** Cards added each time a focus session runs out of cards with time left */
+export const FOCUS_TOPUP_BATCH = 8;
+/** The last cards on screen are not added again right away */
+const TOPUP_RECENT_CARDS = 3;
+
+/**
+ * Practice cards for a focus session that ran out of cards with time left: words being learnt first (all
+ * studied words when none of them can be practised now), picked as for a practice session (pickPracticeWords:
+ * words missed lately first, resting words left out). Never one of the last cards of `queue`.
+ */
+export function pickFocusTopUp(
+  words: readonly WordDetail[],
+  queue: readonly ReviewCard[],
+  runs: ReadonlyMap<string, RecentRun>,
+  now: Date = new Date()
+): ReviewCard[] {
+  const exclude = new Set(queue.slice(-TOPUP_RECENT_CARDS).map((c) => c.id));
+  const pool = [...words];
+  const learning = pickPracticeWords(getUnmasteredWords(pool), runs, FOCUS_TOPUP_BATCH, { now, exclude });
+  const picked = learning.length > 0 ? learning : pickPracticeWords(getStudiedWords(pool), runs, FOCUS_TOPUP_BATCH, { now, exclude });
+  return practiceCards(interleaveTopics(picked));
+}
+
+export async function focusTopUpCards(words: readonly WordDetail[], queue: readonly ReviewCard[], now: Date = new Date()): Promise<ReviewCard[]> {
+  const runs = await loadRecentRuns(now).catch(() => new Map<string, RecentRun>());
+  return pickFocusTopUp(words, queue, runs, now);
+}
+
+export interface FocusPreview {
+  /** Reviews and new cards the session will hold */
+  reviews: number;
+  newCards: number;
+  /** About how long they take */
+  workMin: number;
+  /** They take longer than the planned minutes: the most urgent go first, the rest wait */
+  overflow: boolean;
+}
+
+/** What a focus session of `minutes` will hold, from today's work (the session is capped at maxSessionSize) */
+export function focusPreview(work: { reviews: number; newToday: number }, minutes: number, maxSessionSize: number): FocusPreview {
+  const reviews = Math.min(work.reviews, maxSessionSize);
+  const newCards = Math.min(work.newToday, maxSessionSize - reviews);
+  // A new word costs an introduction and a quiz, about two reviews
+  const workMin = reviews + newCards > 0 ? minutesFor(reviews + newCards * 2) : 0;
+  return { reviews, newCards, workMin, overflow: workMin > minutes };
+}
+
+/** The preview in one line, under the start button */
+export function focusPreviewText(p: FocusPreview, minutes: number): string {
+  if (p.reviews + p.newCards === 0) return `Hết thẻ đến hạn: ${minutes}′ luyện thêm từ đang học (không đổi lịch ôn).`;
+  const parts = [p.reviews > 0 ? `${p.reviews} thẻ ôn` : "", p.newCards > 0 ? `${p.newCards} từ mới` : ""].filter(Boolean).join(" · ");
+  if (p.overflow) return `${parts}, khoảng ${p.workMin}′: làm trước thẻ cần nhất, phần còn lại để lượt sau.`;
+  if (p.workMin < minutes) return `${parts} (~${p.workMin}′), sau đó luyện thêm từ đang học cho đủ ${minutes}′.`;
+  return `${parts} (~${p.workMin}′).`;
 }
 
 // ─── Next review ────────────────────────────────────────────────────────────

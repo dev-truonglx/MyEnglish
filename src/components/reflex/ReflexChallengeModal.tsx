@@ -104,11 +104,10 @@ export default function ReflexChallengeModal({
   catalogRef.current = catalog;
   const wasOpenRef = useRef(false);
 
-  // Initialize fresh session
+  // Initialize fresh session (the deck itself is built on start, so the ready screen shows at once)
   const initSession = useCallback(() => {
     if (advanceTimerRef.current) clearTimeout(advanceTimerRef.current);
-    const deck = generateReflexQuestions(wordsRef.current, catalogRef.current);
-    setQuestions(deck);
+    setQuestions([]);
     setCurrentIdx(0);
     setTimeLeft(REFLEX_CONFIG.INITIAL_TIME_SECONDS);
     setActiveTier(1);
@@ -191,8 +190,9 @@ export default function ReflexChallengeModal({
     }
   }, [timeLeft, phase, secondChanceUsed]);
 
-  // Start actual game from ready screen
+  // Start actual game from ready screen: a new deck each run
   const handleStartGame = () => {
+    setQuestions(generateReflexQuestions(wordsRef.current, catalogRef.current));
     questionStartTimeRef.current = Date.now();
     setPhase("playing");
   };
@@ -497,7 +497,7 @@ export default function ReflexChallengeModal({
   const wrongAnswerRecords = answerRecords.filter((a) => !a.isCorrect);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md text-white p-4 select-none animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 text-white p-4 select-none animate-in fade-in duration-200">
       {/* ── PHASE 1: READY / ONBOARDING ── */}
       {phase === "ready" && (
         <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 shadow-2xl text-center space-y-6 animate-in zoom-in-95">

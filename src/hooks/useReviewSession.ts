@@ -157,6 +157,11 @@ interface UseReviewSessionOptions {
    * one). Cards not reached stay due as they were.
    */
   stopAfterCurrent?: boolean;
+  /**
+   * Focus session with time left: called when the queue runs out, its cards are added as practice (they move no
+   * schedule) instead of ending the session. None (empty list): the session ends as usual.
+   */
+  topUp?: (queue: readonly ReviewCard[]) => Promise<ReviewCard[]>;
 }
 
 /**
@@ -169,10 +174,15 @@ export function useReviewSession({
   practiceMode,
   active = true,
   stopAfterCurrent = false,
+  topUp,
 }: UseReviewSessionOptions) {
   // Read when a card is done (after awaits): the latest value, not the one of the render that started it
   const stopAfterCurrentRef = useRef(stopAfterCurrent);
   stopAfterCurrentRef.current = stopAfterCurrent;
+  const topUpRef = useRef(topUp);
+  topUpRef.current = topUp;
+  // Queue index from which the cards are a focus session's extra practice (see topUp); null before any
+  const [practiceFrom, setPracticeFrom] = useState<number | null>(null);
   // Preferred mode persistence
   const [mode, setMode] = useState<StudyMode>(() => {
     // Simple mode: the app always picks the exercise (no mode selector on screen)
@@ -210,8 +220,9 @@ export function useReviewSession({
   const introducedAtRef = useRef<Map<string, number>>(new Map());
   // The learner typed a synonym of the target before finding it: the exact word needed a cue
   const synonymTriedRef = useRef(false);
-  // Why the last answer did not move the schedule (shown as a hint in the UI)
-  const [lastPracticeReason, setLastPracticeReason] = useState<PracticeReason | null>(null);
+  // Why the last answer did not move the schedule, and the queue index of that answer (shown as a hint in the UI
+  // on that card's feedback and on the next card only)
+  const [practiceNotice, setPracticeNotice] = useState<{ reason: PracticeReason; index: number } | null>(null);
   // Praise for a word reaching long-term memory or remembered just before fading (shown a few seconds)
   const [celebration, setCelebration] = useState<Celebration | null>(null);
   const celebrationTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -347,6 +358,10 @@ export function useReviewSession({
     [distractorPool, wordsToReview]
   );
   const currentWord = queue[currentIndex];
+  // Practice session, or a focus session's extra practice: nothing recorded moves the schedule
+  const cardIsPractice = practiceMode || (practiceFrom !== null && currentIndex >= practiceFrom);
+  const noticeAge = practiceNotice ? currentIndex - practiceNotice.index : -1;
+  const lastPracticeReason = practiceNotice && noticeAge >= 0 && noticeAge <= 1 ? practiceNotice.reason : null;
   const currentKey = currentWord ? `${currentWord.id}:${currentWord.direction}` : "";
 
   // Introductions shown recently in any window (popup / earlier session): those words go straight to their quiz
@@ -365,7 +380,7 @@ export function useReviewSession({
   const isIntroCard =
     !!currentWord &&
     introsLoaded &&
-    !practiceMode &&
+    !cardIsPractice &&
     !introducedAtRef.current.has(currentKey) &&
     (needsIntro(currentWord) || needsRelearnIntro(currentWord));
 
@@ -424,7 +439,7 @@ export function useReviewSession({
       return currentWord.direction === "production" ? (pickExample(currentWord) ? "cloze" : "spelling") : "multiple_choice";
     }
     // Practice: the format varies from one session to the next (see practiceExerciseType)
-    const picked = practiceMode
+    const picked = cardIsPractice
       ? practiceExerciseType(currentWord, practiceSeedRef.current + currentIndex, englishVoices().length > 0)
       : selectExerciseType(currentWord);
     // Mature recall cards sometimes get output practice: recall the word and write a sentence with it,
@@ -441,7 +456,7 @@ export function useReviewSession({
       return "free_writing";
     }
     return playableOrFallback(picked, currentWord);
-  }, [mode, currentWord, fallbackMode, isIntroCard, currentKey]);
+  }, [mode, currentWord, fallbackMode, isIntroCard, currentKey, cardIsPractice]);
 
   /** The card is quizzed right after its introduction: the answer will be practice, graded next time */
   const introAt = currentKey ? introducedAtRef.current.get(currentKey) : undefined;
@@ -459,7 +474,7 @@ export function useReviewSession({
   }, [currentKey, currentIndex, introWaitMs > 0]);
 
   /** Whether the current exercise can update this card's schedule (shown before answering) */
-  const exerciseCountsForSchedule = !!currentWord && !practiceMode && isValidEvidence(effectiveExerciseType, currentWord.direction);
+  const exerciseCountsForSchedule = !!currentWord && !cardIsPractice && isValidEvidence(effectiveExerciseType, currentWord.direction);
 
   // "Xem đáp án" pressed on a typed exercise: the word was not recalled
   const revealedWithoutRecall = effectiveExerciseType !== "flip" && hasCheckedAnswer && !isCorrect;
@@ -627,7 +642,7 @@ export function useReviewSession({
     const decision = schedulingDecision({
       card: currentWord,
       exerciseType: activeExType,
-      practiceMode,
+      practiceMode: cardIsPractice,
       alreadyGraded: scheduledThisSessionRef.current.has(cardKey),
       introducedAt: introducedAtRef.current.get(cardKey) ?? null,
     });
@@ -689,7 +704,8 @@ export function useReviewSession({
         // Asked seconds after its introduction and not asked again here: its first graded quiz waits
         postponeNewCard(currentWord.id, currentWord.direction).catch(() => {});
       }
-      setLastPracticeReason(scheduled ? null : recorded.practiceReason ?? decision.reason ?? null);
+      const practiceReason = scheduled ? null : recorded.practiceReason ?? decision.reason ?? null;
+      setPracticeNotice(practiceReason ? { reason: practiceReason, index: currentIndex } : null);
       const praise = celebrationFor({ ...recorded, direction: currentWord.direction, word: currentWord.word });
       if (praise) {
         setCelebration(praise);
@@ -818,9 +834,30 @@ export function useReviewSession({
       const next = currentIndex + 1;
       setQueue((prev) => bringReadyCardForward(prev, next, introducedAtRef.current, Date.now()));
       setCurrentIndex((prev) => prev + 1);
+    } else if (!stopAfterCurrentRef.current && topUpRef.current) {
+      void extendWithPractice(recorded);
     } else {
       endSession(recorded.reviewCountAfter);
     }
+  };
+
+  /** A focus session out of cards with time left: practice cards follow (the card on screen waits meanwhile) */
+  const extendWithPractice = async (recorded: RecordedAnswer) => {
+    const added = await topUpRef.current!(queueRef.current).catch((err) => {
+      console.warn("Failed to add focus practice cards:", err);
+      return [] as ReviewCard[];
+    });
+    if (sessionEndedRef.current) return;
+    // Time ran out while the cards were picked: the session ends after this card, as it would have
+    if (added.length === 0 || stopAfterCurrentRef.current) {
+      endSession(recorded.reviewCountAfter);
+      return;
+    }
+    const start = queueRef.current.length;
+    queueRef.current = [...queueRef.current, ...added];
+    setQueue((prev) => [...prev, ...added]);
+    setPracticeFrom((prev) => prev ?? start);
+    setCurrentIndex((prev) => prev + 1);
   };
 
   /**
@@ -1158,6 +1195,8 @@ export function useReviewSession({
     exerciseCountsForSchedule,
     quizRightAfterIntro,
     lastPracticeReason,
+    cardIsPractice,
+    inFocusPractice: practiceFrom !== null && currentIndex >= practiceFrom,
     celebration,
     consecutiveCorrect,
     isFlipped,

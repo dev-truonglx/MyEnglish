@@ -164,3 +164,49 @@ describe("focus pitch", async () => {
     expect(focusPitch({ ...base, minutes: 25 }).xp).toBe(50);
   });
 });
+
+describe("focus preview and top-up", async () => {
+  const { focusPreview, focusPreviewText, pickFocusTopUp, FOCUS_TOPUP_BATCH } = await import("@/services/focusSession");
+  const { makeWord, reviewSrs, DAY_MS } = await import("./helpers");
+  const { toCard } = await import("@/services/cards");
+  const NOW = new Date("2026-10-22T10:00:00Z");
+
+  it("says what the session holds and what fills the time left", () => {
+    // 6 reviews + 2 new = 10 card-equivalents × 15 s ≈ 3 min
+    const short = focusPreview({ reviews: 6, newToday: 2 }, 10, 30);
+    expect(short).toEqual({ reviews: 6, newCards: 2, workMin: 3, overflow: false });
+    expect(focusPreviewText(short, 10)).toBe("6 thẻ ôn · 2 từ mới (~3′), sau đó luyện thêm từ đang học cho đủ 10′.");
+  });
+
+  it("caps the session and says when the time is too short", () => {
+    const long = focusPreview({ reviews: 80, newToday: 5 }, 5, 30);
+    expect(long).toMatchObject({ reviews: 30, newCards: 0, overflow: true });
+    expect(focusPreviewText(long, 5)).toBe("30 thẻ ôn, khoảng 8′: làm trước thẻ cần nhất, phần còn lại để lượt sau.");
+  });
+
+  it("is practice only when nothing is due", () => {
+    expect(focusPreviewText(focusPreview({ reviews: 0, newToday: 0 }, 10, 30), 10)).toBe(
+      "Hết thẻ đến hạn: 10′ luyện thêm từ đang học (không đổi lịch ôn)."
+    );
+  });
+
+  it("adds practice cards for words being learnt, never the last ones on screen", () => {
+    const words = Array.from({ length: 12 }, (_, i) =>
+      makeWord(`w${i}`, {
+        srs: reviewSrs(3, 1, {
+          last_review: new Date(NOW.getTime() - DAY_MS).toISOString(),
+          next_review_date: new Date(NOW.getTime() + 2 * DAY_MS).toISOString(),
+        }),
+      })
+    );
+    const queue = words.slice(0, 4).map((w) => toCard(w, "recognition"));
+    const added = pickFocusTopUp(words, queue, new Map(), NOW);
+    expect(added).toHaveLength(FOCUS_TOPUP_BATCH);
+    const ids = added.map((c) => c.id);
+    for (const recent of ["w1", "w2", "w3"]) expect(ids).not.toContain(recent);
+  });
+
+  it("adds nothing when no word was quizzed yet", () => {
+    expect(pickFocusTopUp([makeWord("fresh")], [], new Map(), NOW)).toEqual([]);
+  });
+});

@@ -212,7 +212,7 @@ def main():
         json.dump({
             "source": DECK_URL,
             "note": "Words, CEFR levels and IPA from the Oxford 3000/5000; Vietnamese meanings and examples by the deck's author (examples marked llm_authored in the deck).",
-            "version": 2,
+            "version": 3,
             "retrieved": datetime.date.today().isoformat(),
             "words": words,
         }, f, ensure_ascii=False, separators=(",", ":"))

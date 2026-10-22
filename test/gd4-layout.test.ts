@@ -44,8 +44,8 @@ describe("one definition of 'đã thuộc': Đang học / Nhớ lâu (U9)", () =
   });
 
   it("countWordStatus puts every word in at most one tier", () => {
-    expect(countWordStatus([unseen, learning, young, relearning, long, tapOnly])).toEqual({ learning: 3, rememberedLong: 2 });
-    expect(countWordStatus([])).toEqual({ learning: 0, rememberedLong: 0 });
+    expect(countWordStatus([unseen, learning, young, relearning, long, tapOnly])).toEqual({ learning: 3, rememberedLong: 2, rememberedKnown: 1 });
+    expect(countWordStatus([])).toEqual({ learning: 0, rememberedLong: 0, rememberedKnown: 0 });
   });
 });
 

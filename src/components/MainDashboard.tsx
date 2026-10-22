@@ -54,12 +54,22 @@ const AccountTab = lazy(() => import("./dashboard/AccountTab"));
 const VocabTab = lazy(() => import("./dashboard/VocabTab"));
 const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
 const GrammarTenseSetupModal = lazy(() => import("./grammar/GrammarTenseSetupModal"));
-const ReflexChallengeModal = lazy(() => import("./reflex/ReflexChallengeModal"));
+const loadReflexChallengeModal = () => import("./reflex/ReflexChallengeModal");
+const ReflexChallengeModal = lazy(loadReflexChallengeModal);
 
 function TabFallback() {
   return (
     <div className="flex-1 flex items-center justify-center p-10">
       <div className="w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
+
+/** Shown while the reflex modal's chunk loads (first open, before the idle preload): the same dark overlay at once */
+function ReflexFallback() {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950">
+      <div className="w-8 h-8 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
     </div>
   );
 }
@@ -158,6 +168,16 @@ export default function MainDashboard({
   const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
   const focusing = !!focusPlan && isReviewing;
   const [reflexChallengeOpen, setReflexChallengeOpen] = useState(false);
+  // Fetch the reflex modal's chunk once the app is idle, so the first open does not wait for it
+  useEffect(() => {
+    const preload = () => void loadReflexChallengeModal().catch(() => {});
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(preload, { timeout: 10_000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const id = window.setTimeout(preload, 3000);
+    return () => window.clearTimeout(id);
+  }, []);
   const [confirmExitNav, setConfirmExitNav] = useState<{
     targetTab?: DashboardTab;
     pendingStart?: () => void;
@@ -1060,8 +1080,15 @@ export default function MainDashboard({
       entry.total++;
       if (isDue) entry.due++;
     }
-    const { learning, rememberedLong } = countWordStatus(libraryWords);
-    return { dueWords, learningCount: learning, rememberedLongCount: rememberedLong, leechCount: leechIds.size, perTopic };
+    const { learning, rememberedLong, rememberedKnown } = countWordStatus(libraryWords);
+    return {
+      dueWords,
+      learningCount: learning,
+      rememberedLongCount: rememberedLong,
+      rememberedKnownCount: rememberedKnown,
+      leechCount: leechIds.size,
+      perTopic,
+    };
   }, [libraryWords, nowTick]);
 
   // What a review session will actually contain today: due reviews + new words within the daily budget
@@ -1580,7 +1607,7 @@ export default function MainDashboard({
 
       {/* ⚡ DUOLINGO RAMP UP REFLEX CHALLENGE MODAL */}
       {reflexChallengeOpen && (
-        <Suspense fallback={null}>
+        <Suspense fallback={<ReflexFallback />}>
           <ReflexChallengeModal
             words={words}
             isOpen={reflexChallengeOpen}

@@ -204,6 +204,36 @@ function wasMet(w: WordDetail): boolean {
   return (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || !!w.srs?.last_review || (w.srsProduction?.reps ?? 0) > 0;
 }
 
+/** How many of the learner's words one run is built from: 37 targets plus enough same-POS distractors. */
+export const REFLEX_SAMPLE_SIZE = 160;
+
+/**
+ * A random sample of the learner's words for one run, so building the deck stays cheap with thousands of words
+ * (a whole level marked "Đã biết" adds every word of it). Each met category gets an equal share first, the
+ * rest of the met words fill what a small category leaves, and words never met only top it up.
+ */
+export function sampleReflexWords(words: readonly WordDetail[], limit = REFLEX_SAMPLE_SIZE): WordDetail[] {
+  if (words.length <= limit) return [...words];
+  const met: Record<Exclude<WordCategory, "catalog">, WordDetail[]> = { leech: [], learning: [], remembered_long: [], known: [] };
+  const unmet: WordDetail[] = [];
+  for (const w of words) {
+    if (!wasMet(w)) unmet.push(w);
+    else met[classifyWord(w) as Exclude<WordCategory, "catalog">].push(w);
+  }
+  const share = Math.ceil(limit / 4);
+  const picked: WordDetail[] = [];
+  const leftover: WordDetail[] = [];
+  for (const list of Object.values(met)) {
+    const mixed = shuffle(list);
+    picked.push(...mixed.slice(0, share));
+    leftover.push(...mixed.slice(share));
+  }
+  if (picked.length > limit) return shuffle(picked).slice(0, limit);
+  picked.push(...shuffle(leftover).slice(0, limit - picked.length));
+  picked.push(...shuffle(unmet).slice(0, limit - picked.length));
+  return picked;
+}
+
 /**
  * Normalizes words from user database and optional catalog fallback into a unified candidate pool.
  */
@@ -274,7 +304,7 @@ export function generateReflexQuestions(
   words: readonly WordDetail[],
   catalogFallback: readonly CatalogEntry[] = []
 ): ReflexQuestion[] {
-  const pool = buildCandidatePool(words, catalogFallback);
+  const pool = buildCandidatePool(sampleReflexWords(words), catalogFallback);
   if (pool.length === 0) return [];
 
   // Need at least 4 items for choices; if pool is very small, duplicate with unique IDs
