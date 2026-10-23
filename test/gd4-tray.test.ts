@@ -83,7 +83,7 @@ async function setup(opts: Partial<ReminderSettings> & { lastPopupAgoMs?: number
     intervalMinutes: 60,
     triggerCondition: "due_only",
     respectFocus: false,
-    contextMoments: false,
+    smartReminders: false,
     snoozedUntil: null,
     ...settings,
   });
@@ -199,7 +199,7 @@ describe("morning reminder at launch (N12)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     at("2026-10-12T08:00:00");
     // Clock reminder only every hour, the last one 30 minutes ago
-    const { worker } = await setup({ contextMoments: true, lastPopupAgoMs: 30 * MIN });
+    const { worker } = await setup({ smartReminders: true, lastPopupAgoMs: 30 * MIN });
     native.state.blockers = state();
     await worker.tick();
     expect(nudgeMoment()).toBe("morning");
@@ -257,7 +257,7 @@ describe("leaving full screen (N11)", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(t0);
     // Clock reminder due at 14:30
-    const { worker } = await setup({ contextMoments: true, lastPopupAgoMs: 30 * MIN });
+    const { worker } = await setup({ smartReminders: true, lastPopupAgoMs: 30 * MIN });
     const read = async (t: number, b: PopupBlockers) => {
       vi.setSystemTime(t);
       native.state.blockers = b;

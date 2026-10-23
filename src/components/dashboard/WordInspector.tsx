@@ -35,6 +35,7 @@ import { pullMessage, pullWordFromDeck } from "@/services/vocabFeed";
 import { WORD_STATUS_LABELS, wordStatus } from "@/services/wordStatus";
 import { calculateRetrievability, isLeechWord } from "@/services/smartReview";
 import { setWordSuspended } from "@/services/reviewRecorder";
+import { releaseEasyMark } from "@/services/easyWords";
 import { generateSmartMnemonic, getStoredMnemonic } from "@/services/aiMnemonic";
 import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 import ReviewTrajectoryModal from "../review/ReviewTrajectoryModal";
@@ -172,6 +173,8 @@ export default function WordInspector({
     const on = !w.suspended;
     try {
       await setWordSuspended(w.id, on);
+      // Resumed: a word set aside as too easy is no longer (a later suspension is not taken for one)
+      if (!on) await releaseEasyMark(w.id).catch(() => {});
       patchWord(w.id, { suspended: on ? 1 : 0 });
       setMessage(on ? `Đã tạm ngưng "${w.word}": từ này không được hỏi lại cho đến khi bạn bật lại` : `Đã đưa "${w.word}" trở lại lịch ôn`);
     } catch (err) {

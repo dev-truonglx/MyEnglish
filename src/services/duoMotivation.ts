@@ -19,6 +19,7 @@ import type { ReminderMoment } from "./reminderMoments";
 import type { WordDetail, CardDirection, ReviewCard } from "@/types/database";
 import { invoke } from "@tauri-apps/api/core";
 import { shuffle } from "@/lib/utils";
+import { getLocalDateString } from "./streak";
 
 export type DuoToneLevel =
   | "level_1_encouraging"
@@ -112,6 +113,37 @@ export function resetConsecutiveSkipCount(): void {
   try {
     localStorage.removeItem(CONSECUTIVE_SKIPS_KEY);
   } catch {}
+  resetMissedNudgeStreak();
+}
+
+const MISSED_NUDGES_KEY = "myenglish_missed_nudges_v1";
+
+/**
+ * Corner reminders in a row that timed out before the learner ever pointed at them (probably not seen), today only.
+ * Unlike a skip it never changes the tone or the wait: it only decides when the reminder moves to a system
+ * notification (see shouldEscalate). Any study or answered reminder resets it, as the skip count.
+ */
+export function getMissedNudgeStreak(now: Date = new Date()): number {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MISSED_NUDGES_KEY) || "null");
+    return parsed?.day === getLocalDateString(now) && Number.isFinite(parsed.count) && parsed.count > 0 ? parsed.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function incrementMissedNudgeStreak(now: Date = new Date()): number {
+  const next = getMissedNudgeStreak(now) + 1;
+  try {
+    localStorage.setItem(MISSED_NUDGES_KEY, JSON.stringify({ day: getLocalDateString(now), count: next }));
+  } catch {}
+  return next;
+}
+
+export function resetMissedNudgeStreak(): void {
+  try {
+    localStorage.removeItem(MISSED_NUDGES_KEY);
+  } catch {}
 }
 
 // ─── Reminder copy ───────────────────────────────────────────────────────────
@@ -165,6 +197,7 @@ const MOMENT_QUIZ: Record<ReminderMoment, boolean> = {
   after_fullscreen: true,
   anchor_lunch: false,
   anchor_evening: false,
+  anchor_custom: false,
 };
 
 const COPY: Record<ReminderBranch, Variant[]> = {
@@ -382,6 +415,13 @@ const COPY: Record<ReminderBranch, Variant[]> = {
         : `Hôm nay: ${f.todayCount}/${f.dailyGoal} câu. Ôn ~${m} phút trước khi về nhé.`,
     (f, m) =>
       f.questsLeft > 0 ? `Còn ${f.questsLeft} nhiệm vụ hôm nay — làm nốt trước khi rời máy?` : `Đúng giờ hẹn: vài thẻ (~${m} phút) là xong ngày học.`,
+  ]),
+  moment_anchor_custom: momentVariants("Giờ học quen thuộc của bạn ⏰", [
+    (_, m) => `Giờ này bạn hay học: vài thẻ (~${m} phút) là xong.`,
+    (_, m) => `Đúng nhịp của bạn: ôn ~${m} phút rồi làm việc khác.`,
+    (f, m) =>
+      f.streak > 0 ? `Giờ học quen thuộc, giữ nhịp chuỗi ${f.streak} ngày: ôn ~${m} phút nhé.` : `Giờ học quen thuộc: ôn ~${m} phút nhé.`,
+    (f, m) => (f.fadingCount > 0 ? `Có ${f.fadingCount} từ sắp quên. Ôn ~${m} phút ngay giờ này?` : `Vài thẻ (~${m} phút) đúng giờ bạn hay học.`),
   ]),
 };
 

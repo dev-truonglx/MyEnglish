@@ -86,7 +86,7 @@ describe("nudge payload", () => {
 describe("background worker", () => {
   async function setup(
     respectFocus: boolean,
-    opts: { contextMoments?: boolean; intervalMinutes?: 15 | 60; lastPopupAgoMs?: number } = {}
+    opts: { smartReminders?: boolean; intervalMinutes?: 15 | 60; lastPopupAgoMs?: number } = {}
   ) {
     // Let a previous tick's tray refresh finish its lazy imports before the reset (see gd4-tray.test.ts)
     await vi.dynamicImportSettled();
@@ -101,7 +101,7 @@ describe("background worker", () => {
       triggerCondition: "due_only",
       respectFocus,
       snoozedUntil: null,
-      contextMoments: opts.contextMoments ?? false,
+      smartReminders: opts.smartReminders ?? false,
     });
     // By default the last popup was an hour ago -> due now
     reminders.recordPopupDisplayed(Date.now() - (opts.lastPopupAgoMs ?? 60 * 60 * 1000));
@@ -117,7 +117,7 @@ describe("background worker", () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-05T14:00:00"));
     // Clock reminder only every hour, the last one 30 minutes ago
-    const worker = await setup(true, { contextMoments: true, intervalMinutes: 60, lastPopupAgoMs: 30 * 60 * 1000 });
+    const worker = await setup(true, { smartReminders: true, intervalMinutes: 60, lastPopupAgoMs: 30 * 60 * 1000 });
     blockers = { ...none, idle_seconds: 9 * 60 }; // away
     await worker.tick();
     expect(invokeCalls).not.toContain("show_review_nudge");
@@ -133,7 +133,7 @@ describe("background worker", () => {
   it("a moment never comes right after the previous reminder", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-05T14:00:00"));
-    const worker = await setup(true, { contextMoments: true, intervalMinutes: 60, lastPopupAgoMs: 5 * 60 * 1000 });
+    const worker = await setup(true, { smartReminders: true, intervalMinutes: 60, lastPopupAgoMs: 5 * 60 * 1000 });
     blockers = { ...none, screen_sharing_app: "Zoom" };
     await worker.tick();
     vi.setSystemTime(new Date("2026-10-05T14:00:20"));
@@ -145,7 +145,7 @@ describe("background worker", () => {
   it("the clock reminder skips hours where reminders are always ignored", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-05T14:30:00"));
-    const worker = await setup(false);
+    const worker = await setup(false, { smartReminders: true });
     localStorage.setItem("myenglish_quiet_hours_v1", JSON.stringify({ day: "2026-10-05", hours: [14] }));
     await worker.tick();
     expect(invokeCalls).not.toContain("show_review_nudge");

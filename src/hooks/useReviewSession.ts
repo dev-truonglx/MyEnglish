@@ -43,10 +43,10 @@ import {
   postponeNewCard,
   recordCardAnswer,
   recordIntro,
-  markWordKnown,
   schedulingDecision,
   type PracticeReason,
 } from "@/services/reviewRecorder";
+import { levelOf, markWordEasy, recordKnownCheck, unmarkWordEasy } from "@/services/easyWords";
 import { nextWaitingWord } from "@/services/vocabFeed";
 import { loadCatalogMeanings } from "@/services/vocabCatalog";
 import { setMainSessionActive } from "@/services/activeSession";
@@ -63,6 +63,20 @@ import { practiceExerciseType } from "@/services/practicePicker";
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
 const INTRO_GAP = 4; // Cards shown between a new word's introduction and its first quiz
+/**
+ * Exercises about one word that is plain to see (or to recall): "Đã biết" is offered on them. Not on matching
+ * several words (context / meaning match) nor on ordering a sentence: there the card's word is one among others.
+ */
+const KNOWN_MARK_EXERCISES: ReadonlySet<ExerciseType> = new Set<ExerciseType>([
+  "flip",
+  "multiple_choice",
+  "letter_tiles",
+  "cloze",
+  "spelling",
+  "listening",
+  "reverse_cloze",
+  "free_writing",
+]);
 /** Local day the daily goal was last celebrated with confetti (once a day, see shouldCelebrateDailyGoal) */
 const GOAL_CELEBRATED_KEY = "myenglish_goal_celebrated_v1";
 
@@ -258,6 +272,8 @@ export function useReviewSession({
   const pendingRecordRef = useRef<Promise<RecordedAnswer | null> | null>(null);
   const continuingRef = useRef(false);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const currentIndexRef = useRef(currentIndex);
+  currentIndexRef.current = currentIndex;
   const [isFlipped, setIsFlipped] = useState(false);
   const [reviewCount, setReviewCount] = useState(0);
   const [sessionCompleted, setSessionCompleted] = useState(false);
@@ -375,6 +391,9 @@ export function useReviewSession({
       .finally(() => setIntrosLoaded(true));
   }, []);
 
+  // Checks of words marked "Đã biết" answered in this session (one missed and asked again is no second check)
+  const easyCheckedRef = useRef<Set<string>>(new Set());
+
   // A new word (or a leech to relearn) is first shown as an introduction card, never quizzed cold.
   // Practice sessions don't introduce: nothing they record touches the schedule.
   const isIntroCard =
@@ -382,6 +401,8 @@ export function useReviewSession({
     introsLoaded &&
     !cardIsPractice &&
     !introducedAtRef.current.has(currentKey) &&
+    // The check of a word marked "Đã biết" asks it straight away (that is the point of the check)
+    !currentWord.easyCheck &&
     (needsIntro(currentWord) || needsRelearnIntro(currentWord));
 
   // Brand-new word: guess its meaning from a sentence before the introduction (practice, never graded)
@@ -432,6 +453,8 @@ export function useReviewSession({
   const effectiveExerciseType: ExerciseType = useMemo(() => {
     if (isIntroCard) return "flip";
     if (fallbackMode) return fallbackMode;
+    // A word set aside as too easy gets a light check of its meaning, whatever the mode
+    if (currentWord?.easyCheck) return "multiple_choice";
     if (mode !== "mixed") return currentWord ? playableOrFallback(mode as ExerciseType, currentWord) : (mode as ExerciseType);
     if (!currentWord) return "flip";
     // Quiz after the introduction: a cued recognition question
@@ -560,43 +583,93 @@ export function useReviewSession({
     setCurrentIndex((prev) => prev + 1);
   };
 
-  /** "Đã biết": only for a brand-new word, never for a word being relearned */
-  const canMarkKnown =
-    isIntroCard && !!currentWord && currentWord.direction === "recognition" && (currentWord.srs.reps ?? 0) === 0;
-
   /**
-   * The learner already knows this new word: it is scheduled as Easy without a quiz (outside the daily
-   * budget) and the next waiting word takes its place in the session.
+   * "Đã biết" (services/easyWords): on a new word's introduction (not on a word being relearned), or on any other
+   * card before it is answered, when its exercise is about that one word (KNOWN_MARK_EXERCISES). The word is set aside without touching FSRS and its cards leave the session; a new
+   * word's place goes to the next word waiting, so the day's new words stay words the learner does not know yet.
    */
-  const handleIntroKnown = async () => {
-    if (!currentWord || !canMarkKnown || gradingLockRef.current || sessionCompleted || sessionEndedRef.current) return;
+  const canMarkKnown =
+    !!currentWord &&
+    !isPretestCard &&
+    !currentWord.easyCheck &&
+    (isIntroCard
+      ? currentWord.direction === "recognition" && (currentWord.srs.reps ?? 0) === 0
+      : KNOWN_MARK_EXERCISES.has(effectiveExerciseType) && !pendingAnswer && !hasCheckedAnswer);
+  // The word just marked, shown (with an undo) on the next card only
+  const [knownMark, setKnownMark] = useState<{
+    card: ReviewCard;
+    removed: ReviewCard[];
+    index: number;
+    replacementId: string | null;
+    fromIntro: boolean;
+  } | null>(null);
+  // The answer to a marked word's check, shown on its card (with what it changed for its level)
+  const [knownCheckResult, setKnownCheckResult] = useState<{
+    ok: boolean;
+    index: number;
+    level: string;
+    relearned: number;
+    correct: number;
+    total: number;
+  } | null>(null);
+
+  const handleMarkKnown = async () => {
+    if (!currentWord || !canMarkKnown || gradingLockRef.current || answerLockedRef.current || sessionCompleted || sessionEndedRef.current) return;
     gradingLockRef.current = true;
     const word = currentWord;
-    introducedAtRef.current.set(currentKey, Date.now());
-    const marked = await markWordKnown(word.id).catch((err) => {
-      console.warn("Failed to mark word as known:", err);
-      return false;
-    });
-    if (!marked) console.warn("Word was not marked as known:", word.id);
-    const replacement = await nextWaitingWord(queueRef.current.map((c) => c.id)).catch((err) => {
-      console.warn("Failed to find a replacement for a known word:", err);
-      return null;
-    });
-    if (sessionEndedRef.current) {
+    const index = currentIndex;
+    const fromIntro = isIntroCard;
+    if (fromIntro) introducedAtRef.current.set(currentKey, Date.now());
+    const done = await markWordEasy(word.id).then(
+      () => true,
+      (err) => {
+        console.warn("Failed to mark a word as known:", err);
+        return false;
+      }
+    );
+    if (sessionEndedRef.current) return;
+    if (!done) {
+      if (fromIntro) introducedAtRef.current.delete(currentKey);
       gradingLockRef.current = false;
+      setFeedbackMessage({ text: "Chưa đánh dấu được từ này, thử lại nhé.", type: "error" });
       return;
     }
-    const rest = queueRef.current.filter((c, i) => i <= currentIndex || c.id !== word.id);
-    const nextQueue = replacement ? [...rest, toCard(replacement, "recognition")] : rest;
+    // A new word (not in practice): the next waiting word takes its place, opening the next level if needed
+    const replacement =
+      !cardIsPractice && isNewCard({ ...word, srs: word.srsRecognition })
+        ? await nextWaitingWord(queueRef.current.map((c) => c.id)).catch((err) => {
+            console.warn("Failed to find a replacement for a known word:", err);
+            return null;
+          })
+        : null;
+    if (sessionEndedRef.current) return;
+    const removed = queueRef.current.filter((c, i) => i > index && c.id === word.id);
+    const kept = queueRef.current.filter((c, i) => i <= index || c.id !== word.id);
+    const added = replacement ? toCard(replacement, "recognition") : null;
+    const nextQueue = added ? [...kept, added] : kept;
     queueRef.current = nextQueue;
-    setQueue((prev) => {
-      const kept = prev.filter((c, i) => i <= currentIndex || c.id !== word.id);
-      return replacement ? [...kept, toCard(replacement, "recognition")] : kept;
-    });
+    setQueue(nextQueue);
+    setKnownMark({ card: word, removed, index, replacementId: added?.id ?? null, fromIntro });
     // Nothing left after this card: end the session the way the last answer does (advance), instead of
     // moving past the end of the queue with no summary
     resetCardState();
     advance({ nextQueueLength: nextQueue.length, reviewCountAfter: reviewCountRef.current });
+  };
+  const knownMarkShown = knownMark && currentIndex === knownMark.index + 1 ? knownMark : null;
+
+  /** Undo "Đã biết": back on the schedule and next in this session; its replacement waits for another time */
+  const undoMarkKnown = async () => {
+    const mark = knownMarkShown;
+    if (!mark) return;
+    setKnownMark(null);
+    await unmarkWordEasy(mark.card.id).catch((err) => console.warn("Failed to undo a known word:", err));
+    if (sessionEndedRef.current) return;
+    if (mark.fromIntro) introducedAtRef.current.delete(`${mark.card.id}:${mark.card.direction}`);
+    const at = currentIndexRef.current + 1;
+    const rest = queueRef.current.filter((c, i) => i < at || c.id !== mark.replacementId);
+    const next = [...rest.slice(0, at), mark.card, ...mark.removed, ...rest.slice(at)];
+    queueRef.current = next;
+    setQueue(next);
   };
 
   // Exercises report their own attempts; the FSRS grade is derived centrally.
@@ -642,7 +715,8 @@ export function useReviewSession({
     const decision = schedulingDecision({
       card: currentWord,
       exerciseType: activeExType,
-      practiceMode: cardIsPractice,
+      // The check of a word marked "Đã biết" and never learned is practice: FSRS keeps it new
+      practiceMode: cardIsPractice || (!!currentWord.easyCheck && isNewCard(currentWord)),
       alreadyGraded: scheduledThisSessionRef.current.has(cardKey),
       introducedAt: introducedAtRef.current.get(cardKey) ?? null,
     });
@@ -678,6 +752,22 @@ export function useReviewSession({
 
     const nextReviewCount = reviewCountRef.current + 1;
     reviewCountRef.current = nextReviewCount;
+
+    // The check of a word marked "Đã biết": right keeps it aside, wrong sends it back to learning (and too many
+    // wrong answers on its level send the level's unconfirmed words back too)
+    if (currentWord.easyCheck && !easyCheckedRef.current.has(currentWord.id)) {
+      easyCheckedRef.current.add(currentWord.id);
+      const ok = rating > Rating.Again;
+      const index = currentIndex;
+      setKnownCheckResult({ ok, index, level: levelOf(currentWord), relearned: 0, correct: 0, total: 0 });
+      recordKnownCheck(currentWord, ok)
+        .then((o) =>
+          setKnownCheckResult((prev) =>
+            prev && prev.index === index ? { ...prev, relearned: o.relearned, correct: o.stats.correct, total: o.stats.total } : prev
+          )
+        )
+        .catch((err) => console.warn("Known-word check not saved:", err));
+    }
     const nextConsecutive = rating === Rating.Again ? 0 : consecutiveCorrectRef.current + 1;
     consecutiveCorrectRef.current = nextConsecutive;
 
@@ -762,8 +852,10 @@ export function useReviewSession({
     if (rating === Rating.Again && requeued < MAX_REQUEUES_PER_WORD) {
       requeueCountRef.current.set(currentWord.id, requeued + 1);
       const result = recorded.result;
-      const updatedWord: ReviewCard =
+      const graded: ReviewCard =
         result && result.direction === currentWord.direction ? cardWithResult(currentWord, result) : currentWord;
+      // A missed easy check comes back as an ordinary card: the word is on the schedule again
+      const updatedWord: ReviewCard = graded.easyCheck ? { ...graded, easyCheck: false } : graded;
       const index = currentIndex;
       setQueue((prev) => {
         const insertAt = requeuePosition(prev.length, index, REQUEUE_GAP);
@@ -1100,6 +1192,25 @@ export function useReviewSession({
         return;
       }
 
+      // "D": "Đã biết" on a new word's introduction, "Từ này dễ" on any other card. Not while typing, nor on letter
+      // tiles (their letters are typed on the keyboard), nor on the meaning guess before an introduction.
+      const typingTarget = e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement;
+      if (
+        (e.key === "d" || e.key === "D") &&
+        !e.metaKey &&
+        !e.ctrlKey &&
+        !e.altKey &&
+        !typingTarget &&
+        !isPretestCard &&
+        effectiveExerciseType !== "letter_tiles"
+      ) {
+        if (canMarkKnown) {
+          e.preventDefault();
+          handleMarkKnown();
+          return;
+        }
+      }
+
       const isInteractiveExercise = [
         "multiple_choice",
         "sentence_builder",
@@ -1187,7 +1298,10 @@ export function useReviewSession({
     isIntroCard,
     handleIntroDone,
     canMarkKnown,
-    handleIntroKnown,
+    handleMarkKnown,
+    knownMark: knownMarkShown,
+    undoMarkKnown,
+    knownCheckOutcome: knownCheckResult && knownCheckResult.index === currentIndex ? knownCheckResult : null,
     pretest,
     isPretestCard,
     pretestResult,

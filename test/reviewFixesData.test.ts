@@ -61,7 +61,7 @@ describe("deck loading", () => {
 });
 
 describe("bulk Đã biết", () => {
-  it("marks every word with one change notification and one log each", async () => {
+  it("marks every word with one change notification and one event each, FSRS untouched", async () => {
     const { db, feed } = await setup();
     feed.setStudyLevels(["A1"]);
     const events: string[] = [];
@@ -69,11 +69,15 @@ describe("bulk Đã biết", () => {
     expect(await feed.markCatalogWordsKnown(DECK.slice(0, 20).map((e) => e.id))).toBe(20);
     expect(events).toHaveLength(1);
     const conn = await db.getDatabase();
-    const logs = await conn.select<Array<{ n: number }>>(`SELECT COUNT(*) AS n FROM review_logs WHERE exercise_type = 'known'`);
-    expect(Number(logs[0].n)).toBe(20);
-    const srs = await conn.select<Array<{ n: number }>>(`SELECT COUNT(*) AS n FROM srs_reviews WHERE state = 2 AND reps = 1`);
-    expect(Number(srs[0].n)).toBe(20);
-    // A second time: already studied, left alone
+    const marks = await conn.select<Array<{ n: number }>>(`SELECT COUNT(*) AS n FROM learning_events WHERE type = 'easy_skip'`);
+    expect(Number(marks[0].n)).toBe(20);
+    const logs = await conn.select<Array<{ n: number }>>(`SELECT COUNT(*) AS n FROM review_logs`);
+    expect(Number(logs[0].n)).toBe(0);
+    const aside = await conn.select<Array<{ n: number }>>(
+      `SELECT COUNT(*) AS n FROM words w JOIN srs_reviews s ON s.word_id = w.id WHERE w.suspended = 1 AND s.state = 0 AND s.reps = 0`
+    );
+    expect(Number(aside[0].n)).toBe(20);
+    // A second time: already marked, left alone
     expect(await feed.markCatalogWordsKnown(DECK.slice(0, 5).map((e) => e.id))).toBe(0);
   });
 });

@@ -10,7 +10,7 @@ import {
   type DailyMinutes,
   type LevelChoice,
 } from "@/services/onboarding";
-import { ANCHOR_TIMES, type ReminderAnchor } from "@/services/reminderMoments";
+import { ANCHOR_TIMES, type PresetAnchor, type ReminderAnchor } from "@/services/reminderMoments";
 import type { ReminderTrigger } from "@/services/reminderSettings";
 import PlacementTest from "./PlacementTest";
 import { LevelPicker, MixOrderToggle, mixDescription } from "./dashboard/VocabTab";
@@ -215,7 +215,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
               </label>
               {reminders && (
                 <div className="pl-6 space-y-1.5">
-                  {(Object.keys(ANCHOR_TIMES) as ReminderAnchor[]).map((a) => (
+                  {(Object.keys(ANCHOR_TIMES) as PresetAnchor[]).map((a) => (
                     <label key={a} className="flex items-center gap-2 text-sm text-slate-700 dark:text-zinc-300 cursor-pointer">
                       <input type="checkbox" checked={anchors.includes(a)} onChange={() => toggleAnchor(a)} className="accent-cyan-600" />
                       {ANCHOR_TIMES[a].label}

@@ -5,6 +5,7 @@ import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareContextMatch, type ContextMatchPair } from "@/services/smartReview";
 import { playWrongTry } from "@/services/sound";
+import KeyBadge from "./KeyBadge";
 
 interface ContextMatchExerciseProps {
   word: WordDetail;
@@ -367,15 +368,6 @@ export default function ContextMatchExercise({
 }
 
 type PairColor = (typeof PAIR_COLORS)[number];
-
-/** Number badge: the key that picks this item */
-function KeyBadge({ number, className }: { number: number; className: string }) {
-  return (
-    <kbd className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center text-sm font-bold font-mono border ${className}`}>
-      {number}
-    </kbd>
-  );
-}
 
 function WordCell({
   number,

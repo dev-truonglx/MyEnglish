@@ -28,7 +28,7 @@ import FocusTip from "./review/FocusTip";
 import { useFocusSession } from "@/hooks/useFocusSession";
 import { focusTopUpCards, nextReviewPeek, type FocusPlan } from "@/services/focusSession";
 import { useWordsStore } from "@/stores/wordsStore";
-import { KNOWN_RECHECK_LABEL } from "@/services/reviewRecorder";
+import { levelOf } from "@/services/easyWords";
 import { loadCatalogSoundPool } from "@/services/vocabCatalog";
 import type { DashboardTab } from "./dashboard/shared";
 
@@ -116,7 +116,10 @@ export default function FlashcardReview({
     consecutiveCorrect,
     isIntroCard,
     canMarkKnown,
-    handleIntroKnown,
+    handleMarkKnown,
+    knownMark,
+    undoMarkKnown,
+    knownCheckOutcome,
     handleIntroDone,
     pretest,
     isPretestCard,
@@ -367,17 +370,6 @@ export default function FlashcardReview({
               {currentWord.srs.reps ? "🔁 Học lại từ hay quên" : "✨ Từ mới"} — đọc nghĩa, ví dụ và nghe phát âm. Bạn sẽ được hỏi lại sau vài thẻ.
             </div>
             <SayAloudPrompt key={currentWord.id} word={currentWord.word} wordId={currentWord.id} />
-            {canMarkKnown && (
-              <div className="text-center">
-                <button
-                  onClick={handleIntroKnown}
-                  className="text-[11px] font-medium px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
-                  title={`Bỏ qua phần học mới; app chỉ hỏi lại một lần sau khoảng ${KNOWN_RECHECK_LABEL}`}
-                >
-                  ✓ Đã biết từ này
-                </button>
-              </div>
-            )}
           </div>
         ) : quizRightAfterIntro ? (
           <div className="mt-1 text-center text-[11px] text-cyan-700 dark:text-cyan-300">
@@ -388,6 +380,27 @@ export default function FlashcardReview({
             Dạng bài này không kiểm tra {currentWord.direction === "production" ? "khả năng tự nhớ ra từ" : "việc hiểu nghĩa"} của thẻ này — chỉ tính là luyện thêm, lịch ôn không đổi.
           </div>
         ) : null}
+        {/* The word just marked "Đã biết" (on the next card only), with an undo */}
+        {knownMark && (
+          <div role="status" className="mt-1 text-center text-[11px] text-emerald-700 dark:text-emerald-300">
+            Đã ghi nhận bạn biết chắc "{knownMark.card.word}" (mục Đã biết) — từ không vào lịch ôn, thỉnh thoảng app hỏi lại ngẫu nhiên để kiểm chứng
+            {knownMark.replacementId ? " (đã thêm một từ mới khác thay chỗ)" : ""}.
+            <button onClick={undoMarkKnown} className="ml-1.5 font-semibold underline hover:no-underline">
+              Hoàn tác
+            </button>
+          </div>
+        )}
+        {currentWord.easyCheck && (
+          <div className="mt-1 text-center text-[11px] text-violet-700 dark:text-violet-300">
+            {knownCheckOutcome
+              ? knownCheckOutcome.relearned > 0
+                ? `${knownCheckOutcome.level}: chỉ đúng ${knownCheckOutcome.correct}/${knownCheckOutcome.total} câu kiểm tra gần đây — ${knownCheckOutcome.relearned} từ ${knownCheckOutcome.level} chưa được xác nhận sẽ học lại từ đầu.`
+                : knownCheckOutcome.ok
+                  ? "Vẫn nhớ tốt — từ vẫn là Đã biết, lần kiểm tra sau còn lâu hơn nữa."
+                  : "Chưa nhớ — từ này quay lại học như bình thường."
+              : `🔎 Kiểm tra từ Đã biết (${levelOf(currentWord)}): đúng thì giữ Đã biết, sai thì từ quay lại học như bình thường.`}
+          </div>
+        )}
         {/* The previous answer was downgraded: that card had been graded since this session was built */}
         {lastPracticeReason === "not_due" && !isPretestCard && (
           <div className="mt-1 text-center text-[11px] text-amber-700 dark:text-amber-300">
@@ -601,6 +614,7 @@ export default function FlashcardReview({
         onContinue={confirmCorrectAnswer}
         introMode={isIntroCard}
         onIntroDone={handleIntroDone}
+        onKnown={canMarkKnown ? handleMarkKnown : undefined}
         isPractice={cardIsPractice}
       />}
 

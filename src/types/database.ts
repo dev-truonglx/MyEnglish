@@ -102,6 +102,8 @@ export type ReviewCard = WordDetail & {
   direction: CardDirection;
   /** The word's recognition schedule (since `srs` holds the production schedule on production cards) */
   srsRecognition: SRSReview;
+  /** A word set aside as too easy, drawn for its occasional check (services/easyWords) */
+  easyCheck?: boolean;
 };
 
 export interface CreateWordInput {

@@ -431,6 +431,8 @@ export async function getNewCardsIntroducedToday(): Promise<NewCardCounts> {
   const counts: NewCardCounts = { recognition: 0, production: 0 };
   const pending = new Map<string, number>();
   for (const r of rows) {
+    // A new word marked "Đã biết" after its introduction (now set aside, suspended) leaves its place to another
+    if (r.direction !== "production" && r.suspended && (r.state ?? 0) === 0 && (r.reps ?? 0) === 0) continue;
     if (r.direction === "production") counts.production++;
     else counts.recognition++;
     // Introduced, first quiz not graded yet (postponed after the intro): still a new card

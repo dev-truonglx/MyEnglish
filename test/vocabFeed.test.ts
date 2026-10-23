@@ -90,12 +90,14 @@ describe("feeding words from the deck", () => {
 
     // Full buffer: nothing to add
     expect((await feed.topUpNewWords()).added).toBe(0);
-    // Two words studied: two more come in; then the level runs out
+    // Two words studied: two more come in; A1 has only one left, so A2 opens by itself for the other
     await db.getDatabase();
     const srs = await import("@/services/srs");
     await srs.recordReview(order[0].id, Rating.Good);
     await srs.recordReview(order[1].id, Rating.Good);
-    expect(await feed.topUpNewWords()).toEqual({ added: 1, exhausted: true });
+    expect(await feed.topUpNewWords()).toEqual({ added: 2, exhausted: false });
+    expect(feed.getStudyLevels()).toEqual(["A1", "A2"]);
+    expect((await introductionOrder(db)).filter((w) => w.cefr_level === "A2")).toHaveLength(1);
   });
 
   it("mixes the chosen levels 2:1 and drops unstarted words of a level no longer chosen", async () => {
@@ -209,21 +211,20 @@ describe("words the learner already knows", () => {
 
     const progress = await feed.loadLevelProgress();
     const a1 = progress.find((p) => p.level === "A1");
-    // Counted "Nhớ lâu" like the sidebar does, shown as "đã biết"; not yet for suggesting the next level
-    expect(a1).toMatchObject({ met: 10, known: 10, rememberedLong: 10, rememberedKnown: 10, remembered: 0 });
+    // Met and "đã biết"; never "Nhớ lâu" (nothing was reviewed) nor counted for suggesting the next level
+    expect(a1).toMatchObject({ met: 10, known: 10, rememberedLong: 0, rememberedKnown: 0, remembered: 0 });
 
-    // Each word gets the long "Đã biết" schedule: "Nhớ lâu" at once, not due for a month or more
+    // Each word is set aside: suspended, FSRS card still new (no made-up schedule), no review log
     const conn = await db.getDatabase();
-    const cards = await conn.select<Array<{ word_id: string; stability: number; scheduled_days: number; next_review_date: string; last_review: string }>>(
-      `SELECT s.word_id, s.stability, s.scheduled_days, s.next_review_date, s.last_review
+    const cards = await conn.select<Array<{ suspended: number; state: number; reps: number; stability: number }>>(
+      `SELECT w.suspended, s.state, s.reps, s.stability
        FROM srs_reviews s JOIN words w ON w.id = s.word_id JOIN vocab_catalog c ON c.id = w.catalog_id WHERE c.cefr = 'A1'`
     );
     expect(cards).toHaveLength(10);
-    for (const c of cards) {
-      const expected = recorder.knownSchedule(c.word_id, new Date(c.last_review));
-      expect(c).toMatchObject({ stability: expected.stability, scheduled_days: expected.scheduledDays, next_review_date: expected.due });
-      expect(c.stability).toBeGreaterThanOrEqual(recorder.KNOWN_STABILITY_MIN_DAYS);
-    }
+    for (const c of cards) expect(c).toMatchObject({ suspended: 1, state: 0, reps: 0, stability: 0 });
+    const logs = await conn.select<Array<{ n: number }>>(`SELECT COUNT(*) AS n FROM review_logs`);
+    expect(Number(logs[0].n)).toBe(0);
+    expect((await (await import("@/services/easyWords")).loadEasyStates()).size).toBe(10);
 
     // Calling markLevelWordsKnown on an already exhausted level returns 0
     expect(await feed.markLevelWordsKnown("A1")).toBe(0);

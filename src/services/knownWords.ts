@@ -1,19 +1,23 @@
 /**
- * "Đã biết": words the learner said they already know when they first met them (markWordKnown, or the
- * vocabulary path's markCatalogWordsKnown). Such a word counts as "Nhớ lâu" at once: it gets a Review card with
- * a stability of KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS (knownSchedule), and one real review when
- * it falls due confirms the claim:
- *  - waiting: not checked yet (isKnownOnly)
- *  - confirmed: the check was answered right; FSRS only raised its stability, so it stays Nhớ lâu
- *  - failed: the check was missed (a lapse): the word is learned again like a normal one
- * "Kiểm tra ngay" moves the check to now. Undoing the mark is not offered: sync keeps the card with more
- * reviews, so a card put back to New would come back from another machine.
+ * "Đã biết": words the learner said they already know, with their checks:
+ *  - waiting: not checked yet
+ *  - confirmed: a check was answered right
+ *  - failed: a check was missed: the word is learned again like a normal one
+ * Marks are kept as services/easyWords describes (the word set aside, FSRS untouched, checked now and then at
+ * random). Words marked before that (markWordKnown, `legacy`) kept their own way: a Review card with a stability
+ * of KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS, and one real review when it falls due (waiting while
+ * isKnownOnly, then confirmed or failed by its lapses); "Kiểm tra ngay" moves that review to now. Their mark is
+ * not undone: sync keeps the card with more reviews, so a card put back to New would come back from another
+ * machine.
  */
 import type { WordDetail } from "@/types/database";
 import { getDatabase } from "./db";
 import { isKnownOnly } from "./smartReview";
 import { isRememberedLong } from "./wordStatus";
 import { notifyWordsChanged } from "./reviewRecorder";
+import { CEFR_LEVELS, isSetAsideEasy, levelOf, NO_LEVEL, nextKnownCheckAt, type EasyState } from "./easyWords";
+
+export { CEFR_LEVELS, levelOf, NO_LEVEL };
 
 export type KnownStatus = "waiting" | "confirmed" | "failed";
 
@@ -22,10 +26,14 @@ export interface KnownEntry {
   status: KnownStatus;
   /** When the learner marked it */
   markedAt: string | null;
-  /** The check (waiting): when it is due */
+  /** The next check, when it has a date (a legacy mark's review, a confirmed word's next check); null: at random */
   checkAt: string | null;
   /** Confirmed and stable for the long run */
   rememberedLong: boolean;
+  /** Marked before marks set words aside (an FSRS schedule of its own, see the top of this file) */
+  legacy?: boolean;
+  /** Set aside: checks answered right since the mark */
+  passedChecks?: number;
 }
 
 /** Word ids marked "Đã biết", with the time of the (latest) mark */
@@ -41,12 +49,29 @@ export async function loadKnownMarks(): Promise<Map<string, string>> {
  * Every word marked "Đã biết": a word still only marked counts even without its log row (marked on another
  * machine before logs synced), a checked one needs the mark in its logs.
  */
-export function classifyKnownWords(words: readonly WordDetail[], marks: ReadonlyMap<string, string>): KnownEntry[] {
+export function classifyKnownWords(
+  words: readonly WordDetail[],
+  marks: ReadonlyMap<string, string>,
+  easy: ReadonlyMap<string, EasyState> = new Map()
+): KnownEntry[] {
   const out: KnownEntry[] = [];
   for (const w of words) {
     const markedAt = marks.get(w.id) ?? null;
-    if (isKnownOnly(w.srs)) {
-      out.push({ word: w, status: "waiting", markedAt: markedAt ?? w.srs.last_review ?? null, checkAt: w.srs.next_review_date ?? null, rememberedLong: false });
+    const set = easy.get(w.id);
+    if (set && isSetAsideEasy(w, easy)) {
+      const passed = set.passedChecks;
+      out.push({
+        word: w,
+        status: passed > 0 ? "confirmed" : "waiting",
+        markedAt: set.markedAt,
+        checkAt: passed > 0 ? nextKnownCheckAt(w.id, set, false) : null,
+        rememberedLong: false,
+        passedChecks: passed,
+      });
+    } else if (set && !set.parked && set.failedAt) {
+      out.push({ word: w, status: "failed", markedAt: set.markedAt, checkAt: null, rememberedLong: false, passedChecks: set.passedChecks });
+    } else if (isKnownOnly(w.srs)) {
+      out.push({ word: w, status: "waiting", markedAt: markedAt ?? w.srs.last_review ?? null, checkAt: w.srs.next_review_date ?? null, rememberedLong: false, legacy: true });
     } else if (markedAt && (w.srs.reps ?? 0) > 1) {
       out.push({
         word: w,
@@ -54,10 +79,11 @@ export function classifyKnownWords(words: readonly WordDetail[], marks: Readonly
         markedAt,
         checkAt: null,
         rememberedLong: isRememberedLong(w),
+        legacy: true,
       });
     }
   }
-  // Waiting: the soonest check first; checked: the latest mark first
+  // Waiting: the soonest check first (dated ones, then those asked at random); checked: the latest mark first
   return out.sort((a, b) =>
     a.status === "waiting" && b.status === "waiting"
       ? (a.checkAt ?? "").localeCompare(b.checkAt ?? "")
@@ -88,16 +114,6 @@ export async function checkKnownNow(wordIds: readonly string[], now: Date = new 
 }
 
 // ─── Filters, order and pages of the list ────────────────────────────────────
-
-export const CEFR_LEVELS = ["A1", "A2", "B1", "B2", "C1", "C2"] as const;
-/** A word with no CEFR level (added by hand) */
-export const NO_LEVEL = "Khác";
-
-/** The word's CEFR level: its own tag, else the deck's level kept in `topic` */
-export function levelOf(w: WordDetail): string {
-  const tag = (w.cefr_level || w.topic || "").trim().toUpperCase();
-  return (CEFR_LEVELS as readonly string[]).includes(tag) ? tag : NO_LEVEL;
-}
 
 export type KnownResultFilter = "all" | "confirmed" | "remembered" | "failed";
 export type KnownSort = "check" | "marked" | "az";

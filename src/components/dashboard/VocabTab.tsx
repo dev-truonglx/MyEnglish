@@ -28,7 +28,7 @@ import {
 import { estimateNewWordsPerDay, levelEtaDays } from "@/services/progress";
 import { getStudyLimits } from "@/services/srs";
 import { useWordsStore } from "@/stores/wordsStore";
-import { KNOWN_RECHECK_LABEL } from "@/services/reviewRecorder";
+import { KNOWN_CHECK_LABEL } from "@/services/easyWords";
 import { PAGE_CONTAINER, handleSpeak } from "./shared";
 
 const LEVEL_NAMES: Record<StudyLevel, string> = {
@@ -421,7 +421,7 @@ function Skim({
     setBusy(true);
     try {
       const n = await markCatalogWordsKnown([...picked]);
-      setMessage(`Đã đánh dấu ${n} từ là đã biết. Mỗi từ sẽ được hỏi lại một lần sau khoảng ${KNOWN_RECHECK_LABEL} để chắc chắn.`);
+      setMessage(`Đã đánh dấu ${n} từ là đã biết. Chúng không vào lịch ôn; thỉnh thoảng app hỏi lại ngẫu nhiên vài từ để kiểm chứng.`);
       onChanged();
       load();
     } catch (err) {
@@ -573,7 +573,7 @@ function Skim({
             <p className="text-xs text-emerald-700 dark:text-emerald-400 flex-1 min-w-[200px]">{message}</p>
           ) : (
             <p className="text-xs text-slate-500 dark:text-zinc-400 flex-1 min-w-[200px]">
-              Từ đã biết được bỏ qua phần học mới, chỉ hỏi lại một lần sau khoảng {KNOWN_RECHECK_LABEL}.
+              Từ đã biết được bỏ qua phần học mới và không vào lịch ôn; app chỉ thỉnh thoảng hỏi lại ngẫu nhiên (từng từ sớm nhất sau khoảng {KNOWN_CHECK_LABEL} khi cấp đã được kiểm chứng).
             </p>
           )}
         </div>

@@ -5,7 +5,18 @@ import AdvancedLearningSettings from "./dashboard/AdvancedLearningSettings";
 import ResetAppDataModal from "./dashboard/ResetAppDataModal";
 import Jargon from "./Jargon";
 import { isPretestEnabled, setPretestEnabled } from "@/services/pretest";
-import { ANCHOR_TIMES, getQuietHours, type ReminderAnchor } from "@/services/reminderMoments";
+import {
+  ANCHOR_TIMES,
+  anchorTime,
+  customAnchor,
+  getBestReminderHour,
+  getQuietHours,
+  isCustomAnchor,
+  MAX_CUSTOM_ANCHORS,
+  type PresetAnchor,
+  type ReminderAnchor,
+} from "@/services/reminderMoments";
+import { dismissStudyAnchorSuggestion, loadStudyAnchorSuggestion, type StudyAnchorSuggestion } from "@/services/habits";
 import { getActivityLogs, getDailyGoal, getLocalDateString, setDailyGoal } from "@/services/streak";
 import { isMainSessionActive } from "@/services/activeSession";
 import { useState, useEffect } from "react";
@@ -120,6 +131,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
   const [nextReminderMs, setNextReminderMs] = useState<number>(getNextReminderTime());
   const [goalMet, setGoalMet] = useState<boolean>(isDailyGoalMet);
   const [showResetModal, setShowResetModal] = useState(false);
+  const [anchorSuggestion, setAnchorSuggestion] = useState<StudyAnchorSuggestion | null>(null);
 
   const formatDisplayTime = (ms: number) => {
     if (!ms || ms <= 0) return "Chưa từng hiển thị";
@@ -238,6 +250,24 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
     srsWorker.restart();
     setNotifFeedback("Đã lưu thiết lập nhắc học và cập nhật bộ đếm thời gian!");
   };
+
+  // The study time the learner already has a habit of (from their answers), offered as a reminder time
+  const anchorsKey = (reminderSettings.anchors ?? []).join(",");
+  useEffect(() => {
+    let cancelled = false;
+    const existing = (reminderSettings.anchors ?? []).map(anchorTime).filter((t): t is NonNullable<typeof t> => t !== null);
+    loadStudyAnchorSuggestion(existing)
+      .then((s) => {
+        if (!cancelled) setAnchorSuggestion(s);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchorsKey]);
+
+  const customAnchors = (reminderSettings.anchors ?? []).filter(isCustomAnchor);
 
   const handleTestPopupQuiz = async () => {
     setTestingPopup(true);
@@ -754,7 +784,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   Nhắc đúng lúc bạn hay học trong ngày, mỗi mốc một lần mỗi ngày. Mốc này không bị giới hạn số lần nhắc tối đa.
                 </p>
                 <div className="space-y-1.5">
-                  {(Object.keys(ANCHOR_TIMES) as ReminderAnchor[]).map((anchor) => {
+                  {(Object.keys(ANCHOR_TIMES) as PresetAnchor[]).map((anchor) => {
                     const chosen = (reminderSettings.anchors ?? []).includes(anchor);
                     return (
                       <label
@@ -781,7 +811,61 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       </label>
                     );
                   })}
+                  {customAnchors.map((anchor) => (
+                    <label
+                      key={anchor}
+                      className={`flex items-center gap-2 text-xs ${
+                        anchorsActive ? "cursor-pointer text-slate-700 dark:text-zinc-300" : "text-slate-400 dark:text-zinc-500"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 accent-cyan-600"
+                        checked
+                        disabled={!anchorsActive}
+                        onChange={() =>
+                          handleUpdateReminder({ anchors: (reminderSettings.anchors ?? []).filter((a) => a !== anchor) })
+                        }
+                      />
+                      <span>{anchorTime(anchor)?.label}</span>
+                    </label>
+                  ))}
                 </div>
+                {anchorsActive && anchorSuggestion && customAnchors.length < MAX_CUSTOM_ANCHORS && (
+                  <div className="rounded-xl border border-cyan-200/80 dark:border-cyan-900/60 bg-cyan-50/70 dark:bg-cyan-950/30 p-2.5 space-y-1.5">
+                    <p className="text-[11px] text-slate-700 dark:text-zinc-300 leading-snug">
+                      Bạn thường bắt đầu học khoảng{" "}
+                      <strong>
+                        {String(anchorSuggestion.hour).padStart(2, "0")}:{String(anchorSuggestion.minute).padStart(2, "0")}
+                      </strong>{" "}
+                      ({anchorSuggestion.days}/{anchorSuggestion.activeDays} ngày có học trong 30 ngày qua). Thêm làm giờ nhắc?
+                    </p>
+                    <div className="flex items-center gap-3 text-[11px] font-semibold">
+                      <button
+                        className="text-cyan-700 dark:text-cyan-400 hover:underline"
+                        onClick={() =>
+                          handleUpdateReminder({
+                            anchors: [
+                              ...(reminderSettings.anchors ?? []),
+                              customAnchor(anchorSuggestion.hour, anchorSuggestion.minute) as ReminderAnchor,
+                            ],
+                          })
+                        }
+                      >
+                        Thêm mốc này
+                      </button>
+                      <button
+                        className="text-slate-500 dark:text-zinc-400 hover:underline"
+                        onClick={() => {
+                          dismissStudyAnchorSuggestion();
+                          setAnchorSuggestion(null);
+                        }}
+                      >
+                        Để sau
+                      </button>
+                    </div>
+                  </div>
+                )}
                 {!anchorsActive && (
                   <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-snug">
                     Chỉ có tác dụng khi bật pop-up và chọn một khoảng thời gian nhắc (không phải &quot;Tắt tự động&quot;).
@@ -878,42 +962,48 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
                   <span className="space-y-1">
                     <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Nhắc vào lúc chuyển việc
+                      Nhắc thông minh
                     </span>
                     <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Ngoài chu kỳ trên, nhắc sớm hơn vào lúc bạn vừa quay lại máy (buổi sáng, sau khi rời máy hoặc
-                      máy ngủ), vừa tắt chia sẻ màn hình hoặc vừa thoát ứng dụng toàn màn hình. Chỉ khi có thẻ cần ôn,
-                      và cách lời nhắc trước ít nhất 20 phút.
+                      Học theo thói quen của bạn. Ngoài chu kỳ trên, nhắc sớm hơn vào lúc bạn vừa quay lại máy (buổi
+                      sáng, sau khi rời máy hoặc máy ngủ), vừa tắt chia sẻ màn hình hoặc vừa thoát ứng dụng toàn màn
+                      hình, cách lời nhắc trước ít nhất 20 phút. Đồng thời né giờ mà 30 ngày gần nhất lời nhắc gần như
+                      luôn bị hoãn hoặc bỏ qua (lời nhắc lúc chuyển việc vẫn hiện, và vài ngày một lần app thử nhắc lại
+                      ở giờ đó để xem thói quen của bạn có đổi không). Giờ bạn hay trả lời nhất luôn giữ được một lời
+                      nhắc mỗi ngày, kể cả khi đã hết số lần nhắc tối đa. Chỉ khi có thẻ cần ôn.
+                      {getQuietHours().length > 0 && ` Hiện đang né: ${getQuietHours().map((h) => `${h}h`).join(", ")}.`}
+                      {getBestReminderHour() !== null && ` Giờ bạn hay trả lời nhất: ${getBestReminderHour()}h.`}
                     </span>
                     {!IS_MAC && (
                       <span className="block text-[11px] font-semibold text-amber-700 dark:text-amber-400 pt-1">
-                        Hiện chỉ hoạt động trên macOS.
+                        Phần nhắc lúc chuyển việc hiện chỉ hoạt động trên macOS.
                       </span>
                     )}
                   </span>
                   <input
                     type="checkbox"
                     className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.contextMoments}
-                    onChange={(e) => handleUpdateReminder({ contextMoments: e.target.checked })}
+                    checked={reminderSettings.smartReminders}
+                    onChange={(e) => handleUpdateReminder({ smartReminders: e.target.checked })}
                   />
                 </label>
                 <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
                   <span className="space-y-1">
                     <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
-                      Né giờ bạn hay bỏ qua lời nhắc
+                      Thông báo hệ thống khi bỏ lỡ lời nhắc
                     </span>
                     <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
-                      Học từ 30 ngày gần nhất: giờ nào lời nhắc gần như luôn bị hoãn hoặc bỏ qua thì không nhắc theo
-                      chu kỳ vào giờ đó (lời nhắc lúc chuyển việc vẫn hiện).
-                      {getQuietHours().length > 0 && ` Hiện đang né: ${getQuietHours().map((h) => `${h}h`).join(", ")}.`}
+                      Thẻ nhắc ở góc màn hình tự đóng sau vài giây. Nếu 2 thẻ liên tiếp trôi qua mà bạn chưa kịp nhìn
+                      (chưa rê chuột vào), lần nhắc kế tiếp sẽ là một thông báo nằm lại trong Trung tâm thông báo cho
+                      đến khi bạn xem. Tối đa 2 lần mỗi ngày, vẫn tôn trọng giờ ban đêm, giới hạn số lần nhắc mỗi
+                      ngày và mục tiêu ngày.
                     </span>
                   </span>
                   <input
                     type="checkbox"
                     className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
-                    checked={reminderSettings.avoidQuietHours}
-                    onChange={(e) => handleUpdateReminder({ avoidQuietHours: e.target.checked })}
+                    checked={reminderSettings.escalateMissed}
+                    onChange={(e) => handleUpdateReminder({ escalateMissed: e.target.checked })}
                   />
                 </label>
                 <label className="mt-3 pt-3 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">

@@ -9,21 +9,19 @@
  *    new-word budget. The scheduler then works as before (one budget for new cards, oldest first), and
  *    `words` never holds thousands of New cards that would all count as due.
  */
-import { Rating } from "ts-fsrs";
 import {
   addUserContextExample,
   getDatabase,
   getWordsByIds,
   insertCatalogWords,
   insertCatalogWordsReport,
-  SRS_COLUMNS,
   type CatalogWordInput,
 } from "./db";
-import type { SRSReview, WordDetail } from "@/types/database";
+import type { WordDetail } from "@/types/database";
 import { getStudyLimits } from "./srs";
 import { persistKeyNow } from "./storageBackup";
-import { KNOWN_DIFFICULTY, knownSchedule, notifyWordsChanged } from "./reviewRecorder";
-import { reviewLogBefore } from "./smartReview";
+import { notifyWordsChanged } from "./reviewRecorder";
+import { knownParkedSql, markWordsEasyBatch } from "./easyWords";
 import { MASTERED_STABILITY_DAYS } from "./progress";
 import {
   CATALOG_LEVEL_COUNTS,
@@ -392,9 +390,9 @@ async function settleTopUp(): Promise<void> {
 
 async function doTopUp({ target, now = new Date() }: { target?: number; now?: Date }): Promise<TopUpResult> {
   // Nothing is added before the learner has chosen their levels (onboarding / migration screen)
-  const setting = readSetting();
+  let setting = readSetting();
   if (!setting) return { added: 0, exhausted: false };
-  const levelsKey = setting.levels.join();
+  let levelsKey = setting.levels.join();
   const goal = target ?? getStudyLimits().newCardsPerDay + BUFFER_EXTRA;
 
   // Once per window and deck version: copy the deck if needed and bring the learner's words up to it
@@ -414,8 +412,21 @@ async function doTopUp({ target, now = new Date() }: { target?: number; now?: Da
   const need = goal - (await countWaitingWords());
   if (need <= 0) return { added: 0, exhausted: lastTopUp?.levels === levelsKey ? lastTopUp.exhausted : false };
 
-  const available = await availableByLevel(setting.levels);
-  const left = Object.values(available).reduce((a, b) => a + (b ?? 0), 0);
+  let available = await availableByLevel(setting.levels);
+  let left = Object.values(available).reduce((a, b) => a + (b ?? 0), 0);
+  // The chosen levels cannot fill the buffer (all met, or marked "Đã biết"): the next level opens by itself, so
+  // the day's new words are always words the learner does not know yet
+  while (left < need) {
+    const next = STUDY_LEVELS[setting.levels.length];
+    if (!next) break;
+    setStudyLevels([...setting.levels, next]);
+    const opened = readSetting();
+    if (!opened || opened.levels.length <= setting.levels.length) break;
+    setting = opened;
+    levelsKey = setting.levels.join();
+    available = await availableByLevel(setting.levels);
+    left = Object.values(available).reduce((a, b) => a + (b ?? 0), 0);
+  }
   if (left === 0) return { added: 0, exhausted: true };
 
   // `drawn` of the setting only grows by the words really created (another window may have inserted some first)
@@ -560,7 +571,7 @@ export async function loadLevelProgress(): Promise<LevelProgress[]> {
     Array<{ level: string; met: number; remembered: number; remembered_long: number; remembered_known: number; known: number }>
   >(
     `SELECT w.cefr_level AS level,
-            SUM(CASE WHEN COALESCE(s.reps, 0) > 0 THEN 1 ELSE 0 END) AS met,
+            SUM(CASE WHEN COALESCE(s.reps, 0) > 0 OR ${knownParkedSql("w")} THEN 1 ELSE 0 END) AS met,
             SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 AND EXISTS (
                   SELECT 1 FROM review_logs r WHERE r.word_id = w.id AND r.exercise_type NOT IN ('known', 'intro')
                     AND COALESCE(r.is_scheduled, 1) != 2
@@ -568,7 +579,7 @@ export async function loadLevelProgress(): Promise<LevelProgress[]> {
             SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 THEN 1 ELSE 0 END) AS remembered_long,
             SUM(CASE WHEN s.state = 2 AND COALESCE(s.stability, 0) >= $1 AND COALESCE(s.reps, 0) = 1
                       AND COALESCE(s.lapses, 0) = 0 THEN 1 ELSE 0 END) AS remembered_known,
-            SUM(CASE WHEN k.word_id IS NOT NULL THEN 1 ELSE 0 END) AS known
+            SUM(CASE WHEN k.word_id IS NOT NULL OR ${knownParkedSql("w")} THEN 1 ELSE 0 END) AS known
      FROM words w JOIN srs_reviews s ON s.word_id = w.id
      LEFT JOIN (SELECT DISTINCT word_id FROM review_logs WHERE exercise_type = 'known') k ON k.word_id = w.id
      WHERE w.catalog_id IS NOT NULL
@@ -608,7 +619,7 @@ export async function nextUnstudiedEntries(level: StudyLevel, limit = 30): Promi
      FROM vocab_catalog c
      LEFT JOIN words w ON w.catalog_id = c.id
      LEFT JOIN srs_reviews s ON s.word_id = w.id
-     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0))
+     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0 AND COALESCE(w.suspended, 0) = 0))
      ORDER BY c.it DESC, c.study_order LIMIT $2`,
     [level, limit]
   );
@@ -621,12 +632,12 @@ async function markCatalogWordsKnownInternal(entryIds: string[], now: Date): Pro
   const base = now.getTime() - entries.length;
   const ids = await insertCatalogWords(entries.map((e, i) => toCatalogWordInput(e, new Date(base + i).toISOString())));
   const wordIds = entries.map((e) => ids.get(e.id)).filter((id): id is string => Boolean(id));
-  return markWordsKnownBatch(wordIds, now);
+  return markWordsEasyBatch(wordIds, now);
 }
 
 /**
- * Words the learner already knows (skimming): added to `words` if needed, scheduled as "Nhớ lâu" without a
- * quiz (see markWordKnown), then the buffer is refilled. Returns how many were marked.
+ * Words the learner already knows (skimming): added to `words` if needed and marked "Đã biết" (set aside, FSRS
+ * untouched, checked now and then: services/easyWords), then the buffer is refilled. Returns how many were marked.
  */
 export async function markCatalogWordsKnown(entryIds: string[], now: Date = new Date()): Promise<number> {
   if (entryIds.length === 0) return 0;
@@ -644,7 +655,7 @@ export async function getUnstudiedCatalogIdsForLevel(level: StudyLevel): Promise
     `SELECT c.id FROM vocab_catalog c
      LEFT JOIN words w ON w.catalog_id = c.id
      LEFT JOIN srs_reviews s ON s.word_id = w.id
-     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0))
+     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0 AND COALESCE(w.suspended, 0) = 0))
        AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)
      ORDER BY c.it DESC, c.study_order`,
     [level]
@@ -660,7 +671,7 @@ export async function countUnstudiedWordsForLevel(level: StudyLevel): Promise<nu
     `SELECT COUNT(*) AS n FROM vocab_catalog c
      LEFT JOIN words w ON w.catalog_id = c.id
      LEFT JOIN srs_reviews s ON s.word_id = w.id
-     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0))
+     WHERE c.cefr = $1 AND (w.id IS NULL OR (COALESCE(s.reps, 0) = 0 AND COALESCE(s.state, 0) = 0 AND COALESCE(w.suspended, 0) = 0))
        AND NOT EXISTS (SELECT 1 FROM sync_tombstones t WHERE t.kind = 'word' AND t.key = c.id)`,
     [level]
   );
@@ -695,85 +706,6 @@ export async function markLevelWordsKnown(
   if (totalMarked > 0) notifyWordsChanged();
   await topUpNewWords({ now });
   return totalMarked;
-}
-
-const KNOWN_BATCH = 50;
-
-/**
- * reviewRecorder.markWordKnown for many words with a few multi-row statements: the recognition card goes to
- * Review with the "known" schedule, one `known` review log and learning event each. A word already studied is
- * left alone (also guarded in the upsert, in case it was studied meanwhile). Returns how many were marked.
- */
-async function markWordsKnownBatch(wordIds: string[], now: Date): Promise<number> {
-  const db = await getDatabase();
-  const eligible: Array<{ id: string; before: ReturnType<typeof reviewLogBefore> }> = [];
-  for (const chunk of chunked(wordIds, 500)) {
-    const rows = await db.select<SRSReview[]>(
-      `SELECT ${SRS_COLUMNS} FROM srs_reviews WHERE word_id IN (${chunk.map((_, i) => `$${i + 1}`).join(", ")})`,
-      chunk
-    );
-    const byId = new Map(rows.map((r) => [r.word_id, r]));
-    for (const id of chunk) {
-      const row = byId.get(id);
-      if (row && ((row.reps ?? 0) > 0 || (row.state ?? 0) !== 0)) continue;
-      eligible.push({ id, before: row ? reviewLogBefore(row, now) : null });
-    }
-  }
-  const stamp = now.toISOString();
-  const round = (n: number | null | undefined, digits: number) => (n == null ? null : Number(n.toFixed(digits)));
-  const rowsSql = (n: number, width: number, one: (r: number) => string) =>
-    Array.from({ length: n }, (_, r) => one(r * width)).join(", ");
-  for (const chunk of chunked(eligible, KNOWN_BATCH)) {
-    const srsParams: unknown[] = [];
-    const logParams: unknown[] = [];
-    const eventParams: unknown[] = [];
-    for (const { id, before } of chunk) {
-      const known = knownSchedule(id, now);
-      srsParams.push(id, known.scheduledDays, known.due, known.stability);
-      logParams.push(
-        crypto.randomUUID(), id, before ? before.state : null, round(before?.stability, 4), round(before?.difficulty, 4),
-        round(before?.retrievability, 4), round(before?.elapsedDays, 3)
-      );
-      eventParams.push(crypto.randomUUID(), id);
-    }
-    await db.execute(
-      `INSERT INTO srs_reviews (
-         word_id, ease_factor, interval, repetitions, next_review_date,
-         stability, difficulty, elapsed_days, scheduled_days, reps, lapses, state, last_review, learning_steps
-       )
-       VALUES ${rowsSql(chunk.length, 4, (o) => `($${o + 1}, 2.5, $${o + 2}, 1, $${o + 3}, $${o + 4}, ${KNOWN_DIFFICULTY}, 0, $${o + 2}, 1, 0, 2, '${stamp}', 0)`)}
-       ON CONFLICT(word_id) DO UPDATE SET
-         ease_factor = excluded.ease_factor,
-         interval = excluded.interval,
-         repetitions = excluded.repetitions,
-         next_review_date = excluded.next_review_date,
-         stability = excluded.stability,
-         difficulty = excluded.difficulty,
-         elapsed_days = excluded.elapsed_days,
-         scheduled_days = excluded.scheduled_days,
-         reps = excluded.reps,
-         lapses = excluded.lapses,
-         state = excluded.state,
-         last_review = excluded.last_review,
-         learning_steps = excluded.learning_steps
-       WHERE COALESCE(srs_reviews.reps, 0) = 0 AND COALESCE(srs_reviews.state, 0) = 0`,
-      srsParams
-    );
-    await db.execute(
-      `INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp,
-         is_scheduled, direction, state_before, stability_before, difficulty_before, r_predicted, elapsed_days_before)
-       VALUES ${rowsSql(chunk.length, 7, (o) => `($${o + 1}, $${o + 2}, 'known', 0, 1, 0, ${Rating.Good}, 0, '${stamp}', 0, 'recognition', $${o + 3}, $${o + 4}, $${o + 5}, $${o + 6}, $${o + 7})`)}`,
-      logParams
-    );
-    await db
-      .execute(
-        `INSERT INTO learning_events (id, type, word_id, direction, at, meta)
-         VALUES ${rowsSql(chunk.length, 2, (o) => `($${o + 1}, 'known', $${o + 2}, 'recognition', '${stamp}', NULL)`)}`,
-        eventParams
-      )
-      .catch((err) => console.warn("Learning events not saved:", err));
-  }
-  return eligible.length;
 }
 
 /**

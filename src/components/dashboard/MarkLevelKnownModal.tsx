@@ -163,7 +163,9 @@ export default function MarkLevelKnownModal({
                 <b>{countToMark.toLocaleString("vi-VN")} từ</b> chưa học sẽ được chuyển thẳng vào mục <b>"Đã biết"</b> và không còn xuất hiện trong phần học từ mới.
               </p>
               <p className="text-[11px] text-emerald-800 dark:text-emerald-300">
-                Để chắc chắn bạn không quên, app sẽ phân bổ lịch kiểm tra nhẹ nhàng sau <b>4 đến 21 ngày</b> (rải đều các ngày, không dồn dập).
+                Các từ này không vào lịch ôn. Để kiểm chứng, mỗi phiên ôn app hỏi ngẫu nhiên <b>2–3 từ</b> của cấp này: đúng từ 90% thì cấp
+                được công nhận, đúng 50% trở xuống thì các từ chưa được xác nhận sẽ quay lại học từ đầu. Hết từ mới ở cấp đang học thì app tự
+                mở cấp tiếp theo.
               </p>
             </div>
           </div>

@@ -370,12 +370,17 @@ export const KNOWN_DIFFICULTY = 5;
  * checks over months instead of piling them on one day, and a retry gives the same schedule.
  */
 export function knownStabilityDays(wordId: string): number {
+  return KNOWN_STABILITY_MIN_DAYS + (wordIdHash(wordId) % (KNOWN_STABILITY_MAX_DAYS - KNOWN_STABILITY_MIN_DAYS + 1));
+}
+
+/** FNV-1a of the word id (unsigned): spreads per-word dates over a range without Math.random */
+export function wordIdHash(wordId: string): number {
   let h = 0x811c9dc5;
   for (let i = 0; i < wordId.length; i++) {
     h ^= wordId.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
-  return KNOWN_STABILITY_MIN_DAYS + ((h >>> 0) % (KNOWN_STABILITY_MAX_DAYS - KNOWN_STABILITY_MIN_DAYS + 1));
+  return h >>> 0;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;

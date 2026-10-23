@@ -16,6 +16,7 @@ import { newFocusPlan } from "@/services/focusSession";
 import LearningInsightsCard from "@/components/LearningInsightsCard";
 import HabitInsightsCard from "@/components/HabitInsightsCard";
 import { logLearningEvent } from "@/services/learningEvents";
+import { addKnownChecks, markWordEasy, markWordsEasyBatch } from "@/services/easyWords";
 import AdvancedLearningSettings from "@/components/dashboard/AdvancedLearningSettings";
 import { buildReviewSession, getNewCardsIntroducedToday } from "@/services/smartReview";
 import { getDueWordsFromDb } from "@/services/db";
@@ -40,6 +41,7 @@ import { setStudyLevels, topUpNewWords } from "@/services/vocabFeed";
 import { loadCatalogDistractors } from "@/services/vocabCatalog";
 import LetterTilesExercise from "@/components/exercises/LetterTilesExercise";
 import ContextMatchExercise from "@/components/exercises/ContextMatchExercise";
+import MeaningMatchExercise from "@/components/exercises/MeaningMatchExercise";
 import ListeningDictationExercise from "@/components/exercises/ListeningDictationExercise";
 import { ensureCatalogSeeded } from "@/services/vocabCatalog";
 import type { WordDetail } from "@/types/database";
@@ -162,9 +164,28 @@ function Flash() {
         }
         await db.execute(`UPDATE srs_reviews SET next_review_date = $1 WHERE word_id = 'w-deploy'`, [iso(5 * DAY)]);
       }
+      // ?flash&easycheck: "banana" was marked "Đã biết" during a review 200 days ago and FSRS has it due (its timed
+      // check has come); 25 C1 words were marked 3 days ago (a level claim: sampled, 3 checks this session)
+      if (new URLSearchParams(location.search).has("easycheck")) {
+        const db = await getDatabase();
+        await markWordEasy("w-banana", new Date(Date.now() - 200 * DAY));
+        await db.execute(`UPDATE srs_reviews SET last_review = $1, next_review_date = $2 WHERE word_id = 'w-banana'`, [iso(-210 * DAY), iso(-30 * DAY)]);
+        const c1: string[] = [];
+        for (let i = 0; i < 25; i++) {
+          const id = `w-c1-${i}`;
+          c1.push(id);
+          await db.execute(
+            `INSERT OR REPLACE INTO words (id, word, part_of_speech, meaning_vn, synonyms, antonyms, topic, cefr_level, created_at) VALUES ($1,$2,'noun',$3,'[]','[]','C1','C1',$4)`,
+            [id, `ubiquity${i}`, `Sự có mặt khắp nơi ${i}`, iso(-5 * DAY)]
+          );
+          await db.execute(`INSERT OR REPLACE INTO srs_reviews (word_id, next_review_date, state, reps) VALUES ($1, $2, 0, 0)`, [id, iso(-5 * DAY)]);
+        }
+        await markWordsEasyBatch(c1, new Date(Date.now() - 3 * DAY));
+      }
       const due = await getDueWordsFromDb();
-      const session = buildReviewSession(due, await getNewCardsIntroducedToday());
       const all = await getAllWords();
+      // As the app starts a session: the checks of words marked "Đã biết" join it
+      const session = await addKnownChecks(buildReviewSession(due, await getNewCardsIntroducedToday()), all);
       // ?flash&focus: a 10-minute focus session (its extra practice reads the words store)
       useWordsStore.setState({ words: all });
       setState({ session, all });
@@ -646,6 +667,24 @@ function KnownView() {
         await db.execute(`INSERT INTO review_logs (id, word_id, exercise_type, response_time_ms, is_correct, wrong_attempts, rating, xp_earned, timestamp, is_scheduled) VALUES ($1,$2,'known',0,1,0,3,0,$3,0)`, [`k-${id}`, id, iso(-12 * DAY)]);
         await db.execute(`UPDATE srs_reviews SET reps = 2, lapses = $1, state = $2, stability = $3 WHERE word_id = $4`, [lapses, lapses ? 3 : 2, lapses ? 1 : 25, id]);
       }
+      // &easy: two words being learned marked during reviews; 30 C1 words marked as a level, 10 of them checked
+      // (7 right: "check more"); B1 was sent back to learning earlier
+      if (new URLSearchParams(location.search).has("easy")) {
+        await markWordEasy("w-deploy", new Date(Date.now() - 20 * DAY));
+        await markWordEasy("w-release");
+        const c1: string[] = [];
+        for (let i = 0; i < 30; i++) {
+          const id = `w-c1-${i}`;
+          c1.push(id);
+          await db.execute(`INSERT OR REPLACE INTO words (id, word, meaning_vn, synonyms, antonyms, topic, cefr_level, created_at) VALUES ($1,$2,$3,'[]','[]','C1','C1',$4)`, [id, `ubiquity${i}`, `Nghĩa C1 số ${i}`, iso(-5 * DAY)]);
+          await db.execute(`INSERT OR REPLACE INTO srs_reviews (word_id, next_review_date, state, reps) VALUES ($1, $2, 0, 0)`, [id, iso(-5 * DAY)]);
+        }
+        await markWordsEasyBatch(c1, new Date(Date.now() - 4 * DAY));
+        for (let i = 0; i < 10; i++)
+          await logLearningEvent("easy_check", { wordId: c1[i], meta: { ok: i < 7 }, at: new Date(Date.now() - (3 - i * 0.1) * DAY) });
+        await db.execute(`UPDATE words SET suspended = 0 WHERE id IN ('w-c1-7', 'w-c1-8', 'w-c1-9')`);
+        await logLearningEvent("easy_level_reset", { meta: { level: "B1", sent: 120, correct: 4, total: 10 }, at: new Date(Date.now() - 6 * DAY) });
+      }
       useWordsStore.setState({ words: await getAllWords() });
       setReady(true);
     })();
@@ -817,6 +856,31 @@ function ContextMatch() {
   );
 }
 
+// ?meaningmatch: "Nối từ với nghĩa" on four words already met; the result is exposed on window.__match
+function MeaningMatch() {
+  const words = React.useMemo(
+    () =>
+      [...MATCH_WORDS, ["latency", "độ trễ", ""] as [string, string, string]].map(([word, meaning]) => ({
+        id: word,
+        word,
+        meaning_vn: meaning,
+        srs: { word_id: word, state: 2, reps: 3, stability: 10, last_review: new Date().toISOString() },
+      })) as unknown as WordDetail[],
+    []
+  );
+  return (
+    <div className="p-6">
+      <MeaningMatchExercise
+        word={words[0]}
+        allWords={words}
+        onSpeak={() => {}}
+        onFallback={() => ((window as any).__matchFallback = true)}
+        onComplete={(ok, attempts, rating) => ((window as any).__match = { ok, attempts, rating })}
+      />
+    </div>
+  );
+}
+
 // ?reading: the reading tab with a sample text already pasted
 function Reading() {
   const [ready, setReady] = useState(false);
@@ -934,6 +998,7 @@ function App() {
   if (q.has("grammarhub")) return <GrammarHub />;
   if (q.has("tiles")) return <Tiles />;
   if (q.has("contextmatch")) return <ContextMatch />;
+  if (q.has("meaningmatch")) return <MeaningMatch />;
   if (q.has("listening")) return <Listening />;
   if (q.has("cloze")) return <Cloze />;
   if (q.has("placement"))

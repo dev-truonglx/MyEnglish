@@ -2,17 +2,21 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { logLearningEvent } from "@/services/learningEvents";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { Clock, Play, Zap, Flame, Check, X, Sparkles, Crosshair } from "lucide-react";
+import { Clock, Play, Zap, Flame, Check, X, Sparkles, Crosshair, CalendarClock } from "lucide-react";
 import { getFocusSettings } from "@/services/focusSettings";
 import {
   buildNudgePayload,
+  getReminderSettings,
   hideReviewNudge,
   NUDGE_AUTO_OPEN_SECONDS,
+  remindAt,
+  reminderTimeOptions,
   resetIgnoredNudges,
   snoozeIgnoredNudge,
   snoozeReminder,
   startFocusFromReminder,
   triggerReviewPopup,
+  type ReminderTimeOption,
   type ReviewNudgePayload,
 } from "@/services/reminderSettings";
 import {
@@ -29,12 +33,15 @@ interface ReviewNudgeProps {
 // Each tick asks Rust whether the cursor is over the card: twice a second is enough to pause the countdown
 const TICK_MS = 500;
 const QUIZ_COUNTDOWN_SECONDS = 30;
+/** Time to pick a reminder time: the countdown starts over when the choices open */
+const LATER_COUNTDOWN_SECONDS = 30;
 /** After a wrong quick answer the card stays up to show the right one, then closes by itself (N13) */
 const WRONG_ANSWER_CLOSE_MS = 60 * 1000;
 
 export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const [payload, setPayload] = useState<ReviewNudgePayload>(() => buildNudgePayload(0));
-  const [mode, setMode] = useState<"nudge" | "quiz">("nudge");
+  const [mode, setMode] = useState<"nudge" | "quiz" | "later">("nudge");
+  const [timeOptions, setTimeOptions] = useState<ReminderTimeOption[]>([]);
   const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
   // Length of the countdown that is running (the nudge and the quiz wait different times)
   const [countdownTotal, setCountdownTotal] = useState(NUDGE_AUTO_OPEN_SECONDS);
@@ -50,6 +57,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   const deadlineRef = useRef(0);
   const lastTickRef = useRef(0);
   const actedRef = useRef(false);
+  // The pointer was over the card at some point: the learner saw it. A card that times out unseen is "missed", not "ignored"
+  const seenRef = useRef(false);
   // Closes the card a moment after a quick answer: a newer reminder must not be closed by an older answer's timer
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const clearCloseTimer = useCallback(() => {
@@ -72,6 +81,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
     clearCloseTimer();
     beginSeqRef.current++;
     actedRef.current = false;
+    seenRef.current = false;
     hoverAtRef.current = 0;
     deadlineRef.current = Date.now() + next.autoOpenSeconds * 1000;
     lastTickRef.current = Date.now();
@@ -108,22 +118,38 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   }, [freshBar]);
 
   const finish = useCallback(
-    async (action: "start" | "focus" | "snooze" | "timeout" | "quiz-done") => {
+    async (action: "start" | "focus" | "snooze" | "timeout" | "quiz-done" | "later", at?: number) => {
       if (actedRef.current) return;
       actedRef.current = true;
       hoverAtRef.current = 0;
       setSecondsLeft(null);
 
       logLearningEvent(
-        action === "timeout" ? "nudge_ignored" : action === "snooze" ? "nudge_snoozed" : action === "quiz-done" ? "nudge_quiz" : "nudge_opened",
-        action === "focus" ? { meta: { focus: true } } : {}
+        action === "timeout"
+          ? "nudge_ignored"
+          : action === "snooze" || action === "later"
+            ? "nudge_snoozed"
+            : action === "quiz-done"
+              ? "nudge_quiz"
+              : "nudge_opened",
+        action === "focus"
+          ? { meta: { focus: true } }
+          : action === "timeout"
+            ? { meta: { seen: seenRef.current } }
+            : action === "later"
+              ? { meta: { until: at ?? null } }
+              : {}
       );
       if (action === "timeout") {
-        snoozeIgnoredNudge();
+        snoozeIgnoredNudge(seenRef.current);
         await hideReviewNudge();
       } else if (action === "snooze") {
         resetIgnoredNudges();
         snoozeReminder();
+        await hideReviewNudge();
+      } else if (action === "later" && at) {
+        resetIgnoredNudges();
+        remindAt(at);
         await hideReviewNudge();
       } else if (action === "quiz-done") {
         resetIgnoredNudges();
@@ -145,6 +171,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
   // Switch to quiz mode manually
   const switchToQuiz = () => {
     if (actedRef.current) return;
+    seenRef.current = true;
     if (payload.microQuiz) {
       setMode("quiz");
       quizStartTimeRef.current = Date.now();
@@ -153,6 +180,17 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
       setCountdownTotal(QUIZ_COUNTDOWN_SECONDS);
       deadlineRef.current = Date.now() + QUIZ_COUNTDOWN_SECONDS * 1000;
     }
+  };
+
+  // "Nhắc lúc…": the choices of a time replace the buttons, and the countdown starts over
+  const openLater = () => {
+    if (actedRef.current) return;
+    seenRef.current = true;
+    setTimeOptions(reminderTimeOptions(new Date(), getReminderSettings().anchors ?? []));
+    setMode("later");
+    deadlineRef.current = Date.now() + LATER_COUNTDOWN_SECONDS * 1000;
+    setSecondsLeft(LATER_COUNTDOWN_SECONDS);
+    setCountdownTotal(LATER_COUNTDOWN_SECONDS);
   };
 
   // Handle answering Micro-Quiz
@@ -220,6 +258,8 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         } else if (e.key === "3" && payload.microQuiz.options[2]) {
           handleAnswerQuiz(payload.microQuiz.options[2].id);
         }
+      } else if (mode === "later") {
+        if (e.key === "Escape") setMode("nudge");
       } else if (mode === "nudge") {
         if (e.key === "Enter") {
           finish("start");
@@ -283,6 +323,7 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
         const elapsed = now - lastTickRef.current;
         lastTickRef.current = now;
         if (hovered) {
+          seenRef.current = true;
           deadlineRef.current += elapsed;
           return;
         }
@@ -392,6 +433,15 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                 Tập trung {getFocusSettings().minutes} phút
               </button>
               <button
+                onClick={openLater}
+                aria-label="Chọn giờ nhắc lại"
+                title="Chọn giờ nhắc lại"
+                className="inline-flex items-center gap-1 px-1 py-0.5 rounded text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:underline font-medium"
+              >
+                <CalendarClock className="w-3 h-3" />
+                Nhắc lúc…
+              </button>
+              <button
                 onClick={() => finish("snooze")}
                 aria-label={`Hoãn nhắc ôn tập ${payload.snoozeMinutes} phút`}
                 title="Hoãn (Esc)"
@@ -401,6 +451,33 @@ export default function ReviewNudge({ onDone }: ReviewNudgeProps) {
                 Hoãn {payload.snoozeMinutes} phút
               </button>
             </div>
+          </div>
+        ) : mode === "later" ? (
+          /* ─── MODE 3: PICK A TIME TO BE REMINDED ─── */
+          <div className="p-3.5 flex flex-col gap-2.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[13px] font-bold text-slate-900 dark:text-white">Nhắc lại lúc nào?</span>
+              {secondsLeft !== null && (
+                <span className="text-[10px] text-slate-400 dark:text-zinc-500 tabular-nums font-mono">{secondsLeft}s</span>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {timeOptions.map((o) => (
+                <button
+                  key={o.at}
+                  onClick={() => finish("later", o.at)}
+                  className="px-3 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/60 hover:bg-slate-100 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700/80 text-slate-800 dark:text-zinc-200 text-[12px] font-semibold whitespace-nowrap transition-all active:scale-[0.98]"
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={() => setMode("nudge")}
+              className="self-start px-1 py-0.5 rounded text-[11px] text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 hover:underline font-medium"
+            >
+              Quay lại
+            </button>
           </div>
         ) : (
           /* ─── MODE 2: INSTANT MICRO-QUIZ ─── */

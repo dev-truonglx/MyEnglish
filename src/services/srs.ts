@@ -670,6 +670,9 @@ import {
   getNextReminderTime,
   reminderPause,
   getNudgesShownToday,
+  getEscalationsToday,
+  recordEscalation,
+  shouldEscalate,
 } from "./reminderSettings";
 import { productionUnlockDays } from "./learnerProfile";
 import {
@@ -677,6 +680,7 @@ import {
   countFadingWords,
   selectMicroQuizQuestion,
   getConsecutiveSkipCount,
+  getMissedNudgeStreak,
   sendDuoDesktopNotification,
 } from "./duoMotivation";
 import { computeStreak, getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
@@ -684,9 +688,13 @@ import {
   detectMoment,
   dueAnchor,
   markAnchorFired,
-  ANCHOR_TIMES,
+  anchorTime,
   type ReminderAnchor,
   getQuietHours,
+  bestHourGuaranteeOpen,
+  markBestHourGuarantee,
+  quietHourProbeOpen,
+  markQuietHourProbe,
   refreshQuietHours,
   MIN_GAP_AFTER_REMINDER_MS,
   MOMENT_WINDOW_MS,
@@ -694,6 +702,7 @@ import {
   type ReminderMoment,
 } from "./reminderMoments";
 import { isMainSessionActive, isPopupSessionActive } from "./activeSession";
+import { logLearningEvent } from "./learningEvents";
 
 /**
  * Background worker manager that periodically inspects due reviews
@@ -846,6 +855,9 @@ class SRSBackgroundWorker {
   /** The moment this tick's reminder is shown for (null = by the clock) */
   private activeMoment: ReminderMoment | null = null;
   private activeAnchor: ReminderAnchor | null = null;
+  /** This tick passed the daily cap through the best hour's guarantee / an hour learned as "always ignored" through the probe */
+  private usingBestHourGuarantee = false;
+  private probingQuietHour = false;
   /** Created on first use: srs.ts and reminderMoments.ts are in an import cycle (through db -> smartReview) */
   private fullscreenExit: FullscreenExitTracker | null = null;
 
@@ -873,6 +885,12 @@ class SRSBackgroundWorker {
     return this.pendingMoment?.kind ?? null;
   }
 
+  /** The reminder went out on the strength of the best-hour guarantee or the quiet-hour probe: that one is used for today */
+  private markExtraAllowancesUsed() {
+    if (this.usingBestHourGuarantee) markBestHourGuarantee();
+    if (this.probingQuietHour) markQuietHourProbe();
+  }
+
   public async tick(forceTrigger: boolean = false) {
     if (this.isTicking && !forceTrigger) return;
     // Only a normal tick owns the guard: a forced one running beside it must not clear it in its `finally`,
@@ -891,6 +909,8 @@ class SRSBackgroundWorker {
       }
       const settings = getReminderSettings();
       this.activeMoment = null;
+      this.usingBestHourGuarantee = false;
+      this.probingQuietHour = false;
       // N1: the wait for a quiet moment survives only a tick that is blocked by the focus checks below.
       // Any other outcome of this tick (not due, paused, nothing to show...) starts the wait over.
       const waitingSince = this.readySince;
@@ -907,7 +927,7 @@ class SRSBackgroundWorker {
         // Interval 0 turns off the automatic reminders, not the study times the learner chose (N10)
         const automaticOff = settings.intervalMinutes === 0;
         if (automaticOff && !anchor) return;
-        if (settings.avoidQuietHours && now - this.lastQuietRefresh > 60 * 60 * 1000) {
+        if (settings.smartReminders && now - this.lastQuietRefresh > 60 * 60 * 1000) {
           this.lastQuietRefresh = now;
           refreshQuietHours().catch(() => {});
         }
@@ -937,10 +957,14 @@ class SRSBackgroundWorker {
           goalReached: goalMet && goalWork?.reviews === 0 && grammarDue === 0,
           shownToday: getNudgesShownToday(),
         });
-        // A study time the learner chose is not cut by the daily cap (N4)
-        if (pause && !(pause === "daily_cap" && anchor)) return idle();
+        // A study time the learner chose is not cut by the daily cap (N4), nor is the day's reminder at the hour
+        // they answer reminders most (once a day: the cap must not use up the one that works)
+        const nowDate = new Date(now);
+        const bestHourReminder = settings.smartReminders && pause === "daily_cap" && bestHourGuaranteeOpen(nowDate);
+        if (pause && !(pause === "daily_cap" && (anchor || bestHourReminder))) return idle();
+        this.usingBestHourGuarantee = bestHourReminder && !anchor;
         // Read after the pauses: the first reading after one compares with nothing, as at launch
-        const moment = anchor ? ANCHOR_TIMES[anchor].moment : settings.contextMoments ? await this.observeMoment(now) : null;
+        const moment = anchor ? (anchorTime(anchor)?.moment ?? null) : settings.smartReminders ? await this.observeMoment(now) : null;
 
         const lastDisplay = getLastPopupDisplayTime();
 
@@ -959,8 +983,10 @@ class SRSBackgroundWorker {
           return; // Chưa đến giờ hiển thị tiếp theo
         }
         // A clock reminder in an hour where reminders are almost always ignored waits for a better hour
-        if (!momentReady && settings.avoidQuietHours && getQuietHours().includes(new Date(now).getHours())) {
-          return;
+        if (!momentReady && settings.smartReminders && getQuietHours().includes(new Date(now).getHours())) {
+          // Now and then one gets through, to learn whether the hour is still a bad one
+          if (!quietHourProbeOpen(nowDate)) return;
+          this.probingQuietHour = true;
         }
         this.activeMoment = momentReady ? moment : null;
         this.activeAnchor = momentReady ? anchor : null;
@@ -1037,6 +1063,22 @@ class SRSBackgroundWorker {
         console.warn("Error preparing Duo motivation payload:", err);
       }
 
+      // The last cards were never looked at (they close by themselves): this time a notification that stays in the
+      // Notification Center. It goes through every pause and block above, and counts in the daily cap.
+      if (shouldEscalate(settings, { missedStreak: getMissedNudgeStreak(), escalationsToday: getEscalationsToday() })) {
+        const title = motivation?.title || "Đến giờ ôn tập";
+        const message = motivation?.message || "Ôn nhanh vài câu, chỉ mất vài phút.";
+        const sent = await triggerDesktopNotification(title, dueCount > 0 ? `${message} (${dueCount} từ cần ôn)` : message);
+        if (sent) {
+          recordEscalation();
+          logLearningEvent("nudge_escalated", { meta: { dueCount, missed: getMissedNudgeStreak() } });
+          if (this.activeAnchor) markAnchorFired(this.activeAnchor);
+          this.markExtraAllowancesUsed();
+          this.pendingMoment = null;
+          return;
+        }
+      }
+
       const shown = await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
       // An OS notification only when the streak is at risk late in the day, at most once a day, and never
       // together with a corner card that just appeared (it already carries the same message, N20).
@@ -1051,6 +1093,7 @@ class SRSBackgroundWorker {
         } catch {}
       }
       if (this.activeAnchor) markAnchorFired(this.activeAnchor);
+      if (shown) this.markExtraAllowancesUsed();
       // The moment was used: the next one has to be a new transition
       this.pendingMoment = null;
     } catch (err) {

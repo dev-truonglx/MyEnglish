@@ -111,6 +111,108 @@ export function habitAdvice(f: ReminderFunnel, studyHours: number[]): string | n
   return null;
 }
 
+// ─── A study time of the learner's own ───────────────────────────────────────
+
+export interface StudyAnchorSuggestion {
+  hour: number;
+  minute: number;
+  /** Days (of the last 30) with a study session starting in the usual window */
+  days: number;
+  /** Days with any study at all */
+  activeDays: number;
+}
+
+/** Answers further apart than this start a new session */
+const SESSION_GAP_MS = 30 * 60 * 1000;
+/** A habit is a stretch this long in which sessions keep starting */
+const HABIT_WINDOW_MIN = 90;
+const HABIT_MIN_DAYS = 4;
+const HABIT_MIN_SHARE = 0.4;
+/** Not suggested outside the hours reminders are allowed in (nightQuiet runs 22:00 to 07:00) */
+const SUGGEST_FROM_MIN = 7 * 60;
+const SUGGEST_UNTIL_MIN = 22 * 60;
+/** An existing study time this close already covers the habit */
+const ALREADY_COVERED_MIN = 60;
+
+/**
+ * The time of day the learner usually starts studying, from when they actually answered cards (not from
+ * when reminders were shown). Looks for the 90-minute stretch in which sessions started on the most
+ * different days; it counts as a habit when that is at least 4 days and 40% of the days with any study.
+ * The suggested time is the earlier quarter of those starts (rounded down to 5 minutes): a reminder that
+ * comes just before the usual time, not in the middle of the session. Null when there is no habit, or an
+ * existing study time is already within an hour of it.
+ */
+export function suggestStudyAnchor(timestamps: string[], existing: Array<{ hour: number; minute: number }> = []): StudyAnchorSuggestion | null {
+  const times = timestamps.map((t) => new Date(t).getTime()).filter(Number.isFinite).sort((a, b) => a - b);
+  const starts: Array<{ day: string; min: number }> = [];
+  const activeDays = new Set<string>();
+  let prev = -Infinity;
+  for (const t of times) {
+    const d = new Date(t);
+    activeDays.add(dayKey(d));
+    if (t - prev > SESSION_GAP_MS) starts.push({ day: dayKey(d), min: d.getHours() * 60 + d.getMinutes() });
+    prev = t;
+  }
+  const inHours = starts.filter((s) => s.min >= SUGGEST_FROM_MIN && s.min < SUGGEST_UNTIL_MIN);
+  if (inHours.length === 0 || activeDays.size === 0) return null;
+
+  let best: typeof starts = [];
+  let bestDays = 0;
+  for (const edge of inHours) {
+    const inside = inHours.filter((s) => s.min >= edge.min && s.min < edge.min + HABIT_WINDOW_MIN);
+    const days = new Set(inside.map((s) => s.day)).size;
+    if (days > bestDays) {
+      best = inside;
+      bestDays = days;
+    }
+  }
+  if (bestDays < HABIT_MIN_DAYS || bestDays / activeDays.size < HABIT_MIN_SHARE) return null;
+
+  const mins = best.map((s) => s.min).sort((a, b) => a - b);
+  const early = mins[Math.floor((mins.length - 1) / 4)];
+  const at = Math.floor(early / 5) * 5;
+  if (existing.some((a) => Math.abs(a.hour * 60 + a.minute - at) < ALREADY_COVERED_MIN)) return null;
+  return { hour: Math.floor(at / 60), minute: at % 60, days: bestDays, activeDays: activeDays.size };
+}
+
+const ANCHOR_SUGGESTION_DISMISSED_KEY = "myenglish_anchor_suggestion_dismissed_v1";
+export const ANCHOR_SUGGESTION_SNOOZE_DAYS = 14;
+
+/** "No thanks": the suggestion stays away for two weeks (the habit may well be the same then) */
+export function dismissStudyAnchorSuggestion(now: number = Date.now()): void {
+  try {
+    localStorage.setItem(ANCHOR_SUGGESTION_DISMISSED_KEY, String(now + ANCHOR_SUGGESTION_SNOOZE_DAYS * 24 * 60 * 60 * 1000));
+  } catch {}
+}
+
+function suggestionDismissed(now: number): boolean {
+  try {
+    return Number(localStorage.getItem(ANCHOR_SUGGESTION_DISMISSED_KEY)) > now;
+  } catch {
+    return false;
+  }
+}
+
+/** The suggestion for the settings screen, from the last 30 days of answers (null while dismissed) */
+export async function loadStudyAnchorSuggestion(
+  existing: Array<{ hour: number; minute: number }>,
+  now: Date = new Date()
+): Promise<StudyAnchorSuggestion | null> {
+  if (suggestionDismissed(now.getTime())) return null;
+  const since = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+  const db = await getDatabase();
+  const rows = await db.select<Array<{ timestamp: string }>>(
+    // Same filter as the study hours: marking words "Đã biết" in bulk is not studying
+    `SELECT timestamp FROM review_logs
+     WHERE timestamp >= $1 AND exercise_type NOT IN ('intro', 'known') AND COALESCE(is_scheduled, 1) != 2`,
+    [since.toISOString()]
+  );
+  return suggestStudyAnchor(
+    rows.map((r) => r.timestamp),
+    existing
+  );
+}
+
 export interface HabitInsights {
   masteredWeeks: WeekCount[];
   masteredThisWeek: number;

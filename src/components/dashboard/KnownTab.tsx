@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BadgeCheck, ChevronLeft, ChevronRight, CircleHelp, Play, RotateCcw, Search, Volume2 } from "lucide-react";
+import { BadgeCheck, ChevronLeft, ChevronRight, CircleHelp, Play, RotateCcw, Search, Undo2, Volume2 } from "lucide-react";
 import type { WordDetail } from "@/types/database";
 import { useWordsStore } from "@/stores/wordsStore";
 import {
+  CEFR_LEVELS,
+  NO_LEVEL,
   classifyKnownWords,
   filterKnown,
   levelCounts,
@@ -15,7 +17,19 @@ import {
   type KnownSort,
   type KnownStatus,
 } from "@/services/knownWords";
-import { KNOWN_STABILITY_MAX_DAYS, KNOWN_STABILITY_MIN_DAYS } from "@/services/reviewRecorder";
+import {
+  easyStatesFromEvents,
+  KNOWN_CHECK_LABEL,
+  LEVEL_ACCEPT_AT,
+  LEVEL_MIN_CHECKS,
+  LEVEL_RELEARN_AT,
+  levelResetsFromEvents,
+  levelStatsFromEvents,
+  loadKnownEvents,
+  unmarkWordEasy,
+  type EasyEventRow,
+  type LevelStatus,
+} from "@/services/easyWords";
 import { formatNextReviewRelative } from "@/utils/reviewSchedule";
 import { handleSpeak, PAGE_CONTAINER } from "./shared";
 
@@ -38,14 +52,22 @@ const RESULT: Record<Exclude<KnownStatus, "waiting">, { label: string; cls: stri
   failed: { label: "Kiểm tra sai, đang học lại", cls: "bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800/60" },
 };
 
+const LEVEL_STATUS: Record<LevelStatus, { label: string; cls: string }> = {
+  verifying: { label: "Đang kiểm chứng", cls: "text-sky-700 dark:text-sky-300" },
+  checking: { label: "Cần kiểm tra thêm — hỏi nhiều hơn", cls: "text-amber-700 dark:text-amber-300" },
+  accepted: { label: "Đã công nhận", cls: "text-emerald-700 dark:text-emerald-300" },
+  relearn: { label: "Phải học lại", cls: "text-rose-700 dark:text-rose-300" },
+};
+
 /**
- * "Đã biết": the words marked as already known, waiting for their one check, and those already checked with
- * the result (see services/knownWords).
+ * "Đã biết": the words marked as already known, waiting for a check or checked with the result
+ * (services/knownWords), and how each level's checks are going (services/easyWords).
  */
 export default function KnownTab({ onCheckNow }: KnownTabProps) {
   const words = useWordsStore((s) => s.words);
   const setSelectedWord = useWordsStore((s) => s.setSelectedWord);
   const [marks, setMarks] = useState<Map<string, string> | null>(null);
+  const [events, setEvents] = useState<EasyEventRow[]>([]);
   const [view, setView] = useState<View>("waiting");
   const [query, setQuery] = useState("");
   const [level, setLevel] = useState("all");
@@ -56,17 +78,32 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
 
   useEffect(() => {
     let stale = false;
-    loadKnownMarks()
-      .then((m) => !stale && setMarks(m))
+    Promise.all([loadKnownMarks(), loadKnownEvents().catch(() => [] as EasyEventRow[])])
+      .then(([m, e]) => {
+        if (stale) return;
+        setEvents(e);
+        setMarks(m);
+      })
       .catch(() => !stale && setMarks(new Map()));
     return () => {
       stale = true;
     };
   }, [words]);
 
-  const entries = useMemo(() => (marks ? classifyKnownWords(words, marks) : []), [words, marks]);
+  const easy = useMemo(() => easyStatesFromEvents(events), [events]);
+  const levelStats = useMemo(() => levelStatsFromEvents(events), [events]);
+  const resets = useMemo(() => levelResetsFromEvents(events), [events]);
+  const entries = useMemo(() => (marks ? classifyKnownWords(words, marks, easy) : []), [words, marks, easy]);
   const waiting = entries.filter((e) => e.status === "waiting");
   const checked = entries.filter((e) => e.status !== "waiting");
+  // Each level with words marked (still aside) or checks: how its checks are going
+  const levelRows = useMemo(() => {
+    const aside = new Map<string, number>();
+    for (const e of entries) if (!e.legacy && e.status !== "failed") aside.set(levelOf(e.word), (aside.get(levelOf(e.word)) ?? 0) + 1);
+    return [...CEFR_LEVELS, NO_LEVEL]
+      .filter((l) => aside.has(l) || levelStats.has(l))
+      .map((l) => ({ level: l, aside: aside.get(l) ?? 0, stats: levelStats.get(l), reset: resets.find((r) => r.level === l) ?? null }));
+  }, [entries, levelStats, resets]);
   const confirmed = checked.filter((e) => e.status === "confirmed").length;
   const failed = checked.length - confirmed;
 
@@ -83,6 +120,11 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
   const checkLevel = view === "waiting" && level !== "all" ? level : null;
   const checkPool = checkLevel ? waiting.filter((e) => levelOf(e.word) === checkLevel) : waiting;
   const toCheck = checkPool.slice(0, CHECK_MAX).map((e) => e.word);
+  /** A marked word goes back to learning (its mark is undone) */
+  const sendBack = async (w: WordDetail) => {
+    setEvents((prev) => [...prev, { word_id: w.id, type: "easy_back", at: new Date().toISOString(), meta: null }]);
+    await unmarkWordEasy(w.id).catch((err) => console.warn("Failed to send a known word back:", err));
+  };
   const goTo = (p: number) => {
     setPage(p);
     listTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -105,8 +147,15 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
           <div className="min-w-0">
             <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Đã biết</h2>
             <p className="text-sm text-slate-600 dark:text-zinc-300">
-              Những từ bạn đã thành thạo (nghe, đọc, viết được) và đánh dấu "Đã biết". Chúng được tính là Nhớ lâu ngay, không có bài
-              luyện gõ từ, và app chỉ hỏi lại mỗi từ một lần sau khoảng {Math.round(KNOWN_STABILITY_MIN_DAYS / 30)}–{Math.round(KNOWN_STABILITY_MAX_DAYS / 30)} tháng: trả lời đúng thì từ ở lại Nhớ lâu và còn lâu mới gặp lại, sai thì học lại như từ thường.
+              Những từ bạn đã thuộc chắc: bấm "Tôi biết chắc từ này" (phím D) dưới thẻ giới thiệu hoặc thẻ ôn, hay đánh dấu cả một cấp độ. Chúng
+              không vào lịch ôn và không chiếm chỗ từ mới mỗi ngày. Thỉnh thoảng app hỏi lại ngẫu nhiên vài từ trong phiên ôn: đúng thì
+              từ vẫn là Đã biết và lần sau còn lâu hơn (sớm nhất sau khoảng {KNOWN_CHECK_LABEL}, không quá khoảng cách tối đa trong cài
+              đặt), sai thì từ quay lại học như bình thường.
+            </p>
+            <p className="text-sm text-slate-600 dark:text-zinc-300 mt-1">
+              Mỗi cấp độ được kiểm chứng riêng (2–3 câu mỗi phiên, cấp cao hỏi nhiều hơn). Sau ít nhất {LEVEL_MIN_CHECKS} câu: đúng từ{" "}
+              {Math.round(LEVEL_ACCEPT_AT * 100)}% thì cấp đó được công nhận; đúng {Math.round(LEVEL_RELEARN_AT * 100)}% trở xuống thì
+              các từ chưa được xác nhận của cấp đó quay lại học từ đầu; ở giữa thì app hỏi cấp đó nhiều hơn.
             </p>
           </div>
         </div>
@@ -140,6 +189,38 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
           </div>
         )}
       </div>
+
+      {levelRows.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 space-y-2" aria-label="Kiểm chứng theo cấp độ">
+          <div className="text-xs font-bold text-slate-700 dark:text-zinc-200">Kiểm chứng theo cấp độ</div>
+          <div className="divide-y divide-slate-100 dark:divide-zinc-800">
+            {levelRows.map(({ level: l, aside, stats, reset }) => {
+              const status = stats?.status ?? "verifying";
+              return (
+                <div key={l} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2 text-[11px]">
+                  <span className="w-10 font-bold text-slate-900 dark:text-white">{l}</span>
+                  <span className="w-32 text-slate-500 dark:text-zinc-400">{aside.toLocaleString("vi-VN")} từ đã biết</span>
+                  <span className="w-40 text-slate-500 dark:text-zinc-400">
+                    {stats && stats.total > 0
+                      ? `Đúng ${stats.correct}/${stats.total} câu gần đây (${Math.round((stats.correct / stats.total) * 100)}%)`
+                      : "Chưa kiểm tra câu nào"}
+                  </span>
+                  <span className={`font-semibold ${LEVEL_STATUS[status].cls}`}>
+                    {LEVEL_STATUS[status].label}
+                    {status === "verifying" && stats ? ` (${stats.total}/${LEVEL_MIN_CHECKS} câu)` : ""}
+                  </span>
+                  {reset && (
+                    <span className="basis-full text-rose-700 dark:text-rose-300">
+                      {dateVn(reset.at)}: chỉ đúng {reset.correct}/{reset.total} câu kiểm tra — {reset.sent.toLocaleString("vi-VN")} từ {l} chưa được
+                      xác nhận đã quay lại học từ đầu.
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-2">
         {(
@@ -213,7 +294,7 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
             onChange={(e) => setSort(e.target.value as KnownSort)}
             className="px-2 py-1 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200"
           >
-            <option value="check">{view === "waiting" ? "Sắp kiểm tra" : "Mới kiểm tra"}</option>
+            <option value="check">{view === "checked" ? "Mới kiểm tra" : "Sắp kiểm tra"}</option>
             <option value="marked">Mới đánh dấu</option>
             <option value="az">A → Z</option>
           </select>
@@ -227,7 +308,7 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
           {query || level !== "all" || result !== "all"
             ? "Không có từ nào khớp bộ lọc."
             : view === "waiting"
-              ? 'Không có từ nào đang chờ kiểm tra. Khi gặp từ mới mà bạn đã biết, bấm "Đã biết" để bỏ qua phần giới thiệu.'
+              ? 'Không có từ nào đang chờ kiểm tra. Khi gặp từ bạn đã thuộc chắc, bấm "Tôi biết chắc từ này" (phím D) dưới thẻ.'
               : "Chưa có từ nào được kiểm tra."}
         </div>
       ) : (
@@ -237,7 +318,13 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
           </div>
           <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 divide-y divide-slate-100 dark:divide-zinc-800">
             {current.items.map((e) => (
-              <KnownRow key={e.word.id} entry={e} onOpen={() => setSelectedWord(e.word)} onCheck={() => onCheckNow([e.word])} />
+              <KnownRow
+                key={e.word.id}
+                entry={e}
+                onOpen={() => setSelectedWord(e.word)}
+                onCheck={() => onCheckNow([e.word])}
+                onSendBack={() => sendBack(e.word)}
+              />
             ))}
           </div>
           {current.pages > 1 && (
@@ -286,8 +373,20 @@ export default function KnownTab({ onCheckNow }: KnownTabProps) {
   );
 }
 
-function KnownRow({ entry, onOpen, onCheck }: { entry: KnownEntry; onOpen: () => void; onCheck: () => void }) {
-  const { word: w, status, markedAt, checkAt, rememberedLong } = entry;
+function KnownRow({
+  entry,
+  onOpen,
+  onCheck,
+  onSendBack,
+}: {
+  entry: KnownEntry;
+  onOpen: () => void;
+  onCheck: () => void;
+  onSendBack: () => void;
+}) {
+  const { word: w, status, markedAt, checkAt, rememberedLong, passedChecks = 0, legacy } = entry;
+  // Still marked the current way (set aside): it can go back to learning
+  const aside = !legacy && status !== "failed";
   const check = checkAt ? formatNextReviewRelative(checkAt, false) : null;
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 px-4 py-3">
@@ -319,7 +418,7 @@ function KnownRow({ entry, onOpen, onCheck }: { entry: KnownEntry; onOpen: () =>
                   {check.diffMs <= 0 ? "Đến lượt kiểm tra" : check.label}
                 </span>
               ) : (
-                "—"
+                <span title="Được hỏi ngẫu nhiên trong các phiên ôn tới, theo cấp độ">Ngẫu nhiên</span>
               )}
             </div>
           </>
@@ -328,8 +427,14 @@ function KnownRow({ entry, onOpen, onCheck }: { entry: KnownEntry; onOpen: () =>
             <div className="text-slate-400 dark:text-zinc-500">Kết quả</div>
             <span className={`inline-block px-1.5 py-0.5 rounded border font-semibold ${RESULT[status].cls}`}>
               {RESULT[status].label}
+              {status === "confirmed" && passedChecks > 0 ? ` · đúng ${passedChecks} lần` : ""}
               {status === "confirmed" && rememberedLong ? " · Nhớ lâu" : ""}
             </span>
+            {status === "confirmed" && check && (
+              <div className="mt-0.5 text-slate-400 dark:text-zinc-500" title={check.exactDateStr}>
+                Hỏi lại {check.diffMs <= 0 ? "khi có dịp" : check.label}
+              </div>
+            )}
           </>
         )}
       </div>
@@ -349,6 +454,15 @@ function KnownRow({ entry, onOpen, onCheck }: { entry: KnownEntry; onOpen: () =>
             className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 inline-flex items-center gap-1"
           >
             <RotateCcw className="w-3 h-3" /> Kiểm tra ngay
+          </button>
+        )}
+        {aside && (
+          <button
+            onClick={onSendBack}
+            title="Bỏ đánh dấu Đã biết: từ quay lại học như bình thường"
+            className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-200 hover:bg-slate-200 dark:hover:bg-zinc-700 inline-flex items-center gap-1"
+          >
+            <Undo2 className="w-3 h-3" /> Học lại
           </button>
         )}
       </div>

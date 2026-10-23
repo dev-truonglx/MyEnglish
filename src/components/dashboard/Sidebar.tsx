@@ -69,7 +69,12 @@ export default function Sidebar({
   forgottenDue = 0,
 }: SidebarProps) {
   const words = useWordsStore((s) => s.words);
-  const knownWaitingCount = useMemo(() => words.filter((w) => isKnownOnly(w.srs)).length, [words]);
+  // Marked "Đã biết": the old way still waiting for its one review, or a new word set aside (suspended while still
+  // new, checked or not; a word marked during reviews keeps its FSRS history and is not counted here)
+  const knownWaitingCount = useMemo(
+    () => words.filter((w) => isKnownOnly(w.srs) || (!!w.suspended && (w.srs.reps ?? 0) === 0 && (w.srs.state ?? 0) === 0)).length,
+    [words]
+  );
   const [grammarDueCount, setGrammarDueCount] = useState<number>(0);
   const [currentTheme, setCurrentTheme] = useState<ThemeMode>(getSavedTheme);
   const [xpState, setXpState] = useState<XPState>(getXPState);

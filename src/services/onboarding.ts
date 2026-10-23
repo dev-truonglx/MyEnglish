@@ -55,7 +55,7 @@ export function applyDailyPlan(
     enabled: reminders,
     intervalMinutes: reminders ? interval : 0,
     anchors: reminders ? times.anchors : [],
-    contextMoments: times.transitions,
+    smartReminders: times.transitions,
     triggerCondition,
   });
   return plan;

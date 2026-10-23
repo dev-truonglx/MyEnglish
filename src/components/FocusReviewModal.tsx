@@ -39,10 +39,9 @@ import {
   postponeNewCard,
   recordCardAnswer,
   recordIntro,
-  markWordKnown,
   schedulingDecision,
-  KNOWN_RECHECK_LABEL,
 } from "@/services/reviewRecorder";
+import { markWordEasy } from "@/services/easyWords";
 import { setPopupSessionActive } from "@/services/activeSession";
 import {
   buildPopupChoices,
@@ -670,13 +669,13 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     }
   }, [currentIndex, queue.length, handleClose]);
 
-  /** A brand-new word the learner already knows: scheduled as Easy without a quiz, outside the daily budget */
+  /** A brand-new word the learner already knows: marked "Đã biết" (set aside, FSRS untouched), outside the daily budget */
   const markIntroKnown = useCallback(async () => {
     if (!currentWord || markingKnownRef.current) return;
     markingKnownRef.current = true;
     try {
       setIntroduced((prev) => new Set(prev).add(introKey));
-      await markWordKnown(currentWord.id).catch(() => false);
+      await markWordEasy(currentWord.id).catch((err) => console.warn("Failed to mark a word as known:", err));
       advanceNextItem();
     } finally {
       markingKnownRef.current = false;
@@ -1601,7 +1600,7 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
                   onClick={markIntroKnown}
                   className="w-full py-2 rounded-xl border border-emerald-300 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                 >
-                  ✓ Đã biết từ này (hỏi lại sau khoảng {KNOWN_RECHECK_LABEL})
+                  ✓ Tôi biết chắc từ này (thỉnh thoảng hỏi lại ngẫu nhiên)
                 </button>
               )}
             </div>

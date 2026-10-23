@@ -24,8 +24,10 @@ export interface ReminderSettings {
   grammarLevels?: GrammarLevel[]; // deprecated: popup uses selected book lessons
   respectFocus: boolean; // postpone the popup while full screen, sharing the screen, in Focus mode or idle
   preferPrimaryMonitor: boolean; // show the reminder on the primary monitor instead of the one under the cursor
-  contextMoments: boolean; // also remind at natural transitions: back at the computer, screen share / full screen over
-  avoidQuietHours: boolean; // skip clock-based reminders in hours where they are almost always ignored
+  // Learns from the learner's day: also remind at natural transitions (back at the computer, screen share / full
+  // screen over), and skip clock-based reminders in hours where they are almost always ignored
+  smartReminders: boolean;
+  escalateMissed: boolean; // cards missed twice in a row (never pointed at) come again as a system notification
   stopAfterGoal: boolean; // no more reminders today once the daily goal is reached
   nightQuiet: boolean; // no reminders from NIGHT_QUIET_START to NIGHT_QUIET_END
   maxNudgesPerDay: number; // at most this many reminders a day (0 = no limit)
@@ -49,8 +51,8 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   includeGrammar: true,
   respectFocus: true,
   preferPrimaryMonitor: false,
-  contextMoments: true,
-  avoidQuietHours: true,
+  smartReminders: true,
+  escalateMissed: true,
   stopAfterGoal: true,
   nightQuiet: true,
   maxNudgesPerDay: 8,
@@ -99,16 +101,55 @@ function countNudgeShown(now: Date = new Date()): void {
   } catch {}
 }
 
+/** Corner cards missed in a row before the next reminder comes as a system notification */
+export const MISSED_BEFORE_ESCALATION = 2;
+/** System notifications a day sent for missed cards (they also count in the daily cap) */
+export const MAX_ESCALATIONS_PER_DAY = 2;
+
+const ESCALATIONS_TODAY_KEY = "myenglish_escalations_today_v1";
+
+export function getEscalationsToday(now: Date = new Date()): number {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ESCALATIONS_TODAY_KEY) || "{}");
+    return parsed.day === localDay(now) && Number.isFinite(parsed.count) ? parsed.count : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Whether the next reminder should be a system notification instead of the corner card. The card closes by
+ * itself after a few seconds, so a learner who was not looking never sees it; a notification stays in the
+ * Notification Center until they do. Only after the card was missed twice in a row, at most twice a day.
+ * The pauses (night, goal, daily cap, snooze, focus) are checked before this, as for the card.
+ */
+export function shouldEscalate(
+  settings: Pick<ReminderSettings, "escalateMissed">,
+  ctx: { missedStreak: number; escalationsToday: number }
+): boolean {
+  return settings.escalateMissed && ctx.missedStreak >= MISSED_BEFORE_ESCALATION && ctx.escalationsToday < MAX_ESCALATIONS_PER_DAY;
+}
+
+/** A missed card was replaced by a system notification: counts as a reminder shown today and restarts the interval */
+export function recordEscalation(now: Date = new Date()): void {
+  try {
+    localStorage.setItem(ESCALATIONS_TODAY_KEY, JSON.stringify({ day: localDay(now), count: getEscalationsToday(now) + 1 }));
+  } catch {}
+  countNudgeShown(now);
+  recordPopupDisplayed(now.getTime());
+}
+
 /** Seconds the corner reminder waits before opening the review by itself */
 export const NUDGE_AUTO_OPEN_SECONDS = 20;
 /** Rough time per popup question, used for the "~N phút" estimate */
 const SECONDS_PER_QUESTION = 20;
 
 import type { DuoMotivationState, MicroQuizQuestion } from "./duoMotivation";
-import type { ReminderAnchor, ReminderMoment } from "./reminderMoments";
+import { anchorTime, type ReminderAnchor, type ReminderMoment } from "./reminderMoments";
 import {
   getConsecutiveSkipCount,
   incrementConsecutiveSkipCount,
+  incrementMissedNudgeStreak,
   resetConsecutiveSkipCount,
 } from "./duoMotivation";
 
@@ -160,9 +201,15 @@ export function getReminderSettings(): ReminderSettings {
         ? parsed.triggerCondition
         : "due_only";
 
+    // Settings saved before the two switches became one: it stays on unless the learner had turned one off
+    const { contextMoments, avoidQuietHours, ...rest } = parsed;
+    const smartReminders =
+      typeof rest.smartReminders === "boolean" ? rest.smartReminders : contextMoments !== false && avoidQuietHours !== false;
+
     return {
       ...DEFAULT_REMINDER_SETTINGS,
-      ...parsed,
+      ...rest,
+      smartReminders,
       triggerCondition,
       wordsPerSession,
       includeGrammar,
@@ -205,13 +252,72 @@ export function snoozeReminder(customMinutes?: number): number {
   return minutes;
 }
 
+export interface ReminderTimeOption {
+  label: string;
+  /** Timestamp (ms) the next reminder is asked for */
+  at: number;
+}
+
+/** Shortest wait offered on the card (a nearer time is what "Hoãn" is for) */
+const MIN_OPTION_MS = 30 * 60 * 1000;
+const MAX_TIME_OPTIONS = 4;
+/** Times of day offered when the learner has no study time of their own left today */
+const FALLBACK_SLOTS: Array<[number, number]> = [
+  [13, 15],
+  [17, 30],
+  [20, 0],
+];
+
+const clock = (d: Date) => `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+
+/**
+ * "Nhắc lúc…" on the reminder card: a few times the learner can pick without typing (the card never takes
+ * keyboard focus): in 1 or 2 hours, their own study times (or lunch / end of day / evening) still to come today,
+ * and tomorrow morning when little is left of the day. Never at night: those would be pushed to 07:00 anyway.
+ */
+export function reminderTimeOptions(now: Date, anchors: string[] = []): ReminderTimeOption[] {
+  const t = now.getTime();
+  const isNight = (d: Date) => d.getHours() >= NIGHT_QUIET_START || d.getHours() < NIGHT_QUIET_END;
+  const out: ReminderTimeOption[] = [];
+  const add = (label: string, at: number) => {
+    const d = new Date(at);
+    if (at - t < MIN_OPTION_MS || isNight(d)) return;
+    if (out.some((o) => Math.abs(o.at - at) < 15 * 60 * 1000)) return;
+    out.push({ label, at });
+  };
+  add("1 giờ nữa", t + 60 * 60 * 1000);
+  add("2 giờ nữa", t + 2 * 60 * 60 * 1000);
+
+  const today = (h: number, m: number) => new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).getTime();
+  const own = anchors
+    .map(anchorTime)
+    .filter((a): a is NonNullable<typeof a> => a !== null)
+    .map((a) => today(a.hour, a.minute));
+  const slots = (own.length > 0 ? own : FALLBACK_SLOTS.map(([h, m]) => today(h, m))).sort((a, b) => a - b);
+  for (const at of slots) add(clock(new Date(at)), at);
+
+  if (out.length < MAX_TIME_OPTIONS) {
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, NIGHT_QUIET_END, 30).getTime();
+    out.push({ label: `Sáng mai ${clock(new Date(tomorrow))}`, at: tomorrow });
+  }
+  return out.sort((a, b) => a.at - b.at).slice(0, MAX_TIME_OPTIONS);
+}
+
+/** The reminder comes back at `at`, picked on the card: a deliberate choice, so it never counts as ignored. Returns the minutes. */
+export function remindAt(at: number, now: number = Date.now()): number {
+  return snoozeReminder(Math.max(1, Math.ceil((at - now) / (60 * 1000))));
+}
+
 const IGNORED_NUDGES_KEY = "myenglish_ignored_nudges_v1";
 
-/** Reminders in a row that timed out without an answer (reset as soon as the user responds) */
-export function getIgnoredNudgeCount(): number {
+/**
+ * Reminders in a row that the learner saw and let time out (reset as soon as the user responds). Counted per
+ * day: yesterday's ignored cards must not slow down the first reminder of today.
+ */
+export function getIgnoredNudgeCount(now: Date = new Date()): number {
   try {
-    const n = parseInt(localStorage.getItem(IGNORED_NUDGES_KEY) || "0", 10);
-    return Number.isFinite(n) && n > 0 ? n : 0;
+    const parsed = JSON.parse(localStorage.getItem(IGNORED_NUDGES_KEY) || "null");
+    return parsed?.day === localDay(now) && Number.isFinite(parsed.count) && parsed.count > 0 ? parsed.count : 0;
   } catch {
     return 0;
   }
@@ -235,21 +341,30 @@ export function ignoredNudgeSnoozeMinutes(ignoredBefore: number, snoozeMinutes: 
   return Math.min(base * 2 ** Math.min(ignoredBefore, 3), Math.max(base, 240));
 }
 
-/** The reminder timed out unanswered: snooze it with backoff. Returns the minutes snoozed. */
-export function snoozeIgnoredNudge(): number {
+/**
+ * The reminder timed out unanswered: snooze it. Returns the minutes snoozed.
+ * `seen`: the learner pointed at the card before it closed, so it was ignored and the wait grows (backoff).
+ * A card nobody pointed at was most likely not seen (meeting, other screen): the wait stays the normal one and
+ * the miss only counts towards a system notification (shouldEscalate).
+ */
+export function snoozeIgnoredNudge(seen: boolean = true): number {
   const settings = getReminderSettings();
   const ignored = getIgnoredNudgeCount();
-  const minutes = ignoredNudgeSnoozeMinutes(ignored, settings.snoozeMinutes ?? 10, settings.intervalMinutes);
+  const minutes = ignoredNudgeSnoozeMinutes(seen ? ignored : 0, settings.snoozeMinutes ?? 10, settings.intervalMinutes);
   // A longer pause picked from the tray while the card was up stays: the card was not ignored (N9)
   const pausedMs = (settings.snoozedUntil ?? 0) - Date.now();
   if (settings.snoozedUntil === getTrayPauseEnd() && pausedMs > minutes * 60 * 1000) {
     return Math.ceil(pausedMs / (60 * 1000));
   }
-  try {
-    localStorage.setItem(IGNORED_NUDGES_KEY, String(ignored + 1));
-  } catch {}
-  // Timed out without any answer (unlike a deliberate snooze): offer the 1-question quiz next time
-  incrementConsecutiveSkipCount();
+  if (seen) {
+    try {
+      localStorage.setItem(IGNORED_NUDGES_KEY, JSON.stringify({ day: localDay(), count: ignored + 1 }));
+    } catch {}
+    // Timed out without any answer (unlike a deliberate snooze): offer the 1-question quiz next time
+    incrementConsecutiveSkipCount();
+  } else {
+    incrementMissedNudgeStreak();
+  }
   return snoozeReminder(minutes);
 }
 

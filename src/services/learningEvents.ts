@@ -1,7 +1,8 @@
 /**
  * Learning moments and reminder outcomes, stored in SQLite (`learning_events`):
  *  - "mastered": a card reached long-term memory (stability crossed MATURE_STABILITY_DAYS)
- *  - reminder funnel: nudge shown / opened / quiz answered / snoozed / ignored; popup shown / completed /
+ *  - reminder funnel: nudge shown / opened / quiz answered / snoozed / ignored (meta.seen: the pointer was over the card) /
+ *    escalated (a missed card replaced by a system notification); popup shown / completed /
  *    closed early / snoozed; flashcard session completed
  *  - "pretest": the meaning of a new word guessed before its introduction (meta.correct)
  *  - "encounter": a word being learned met in real text (reading mode), exposure only
@@ -10,6 +11,9 @@
  *  - "grammar_intro": first meeting with a grammar point in the popup (meta.lessonId, correct)
  *  - "known": a new word the learner said they already know (a Review card with a stability of
  *    KNOWN_STABILITY_MIN_DAYS to KNOWN_STABILITY_MAX_DAYS days, no quiz; "Nhớ lâu" until its one check says otherwise)
+ *  - "easy_skip" / "easy_check" (meta.ok) / "easy_back" / "easy_level_reset" (meta.level): a word marked "Đã biết"
+ *    (set aside), its occasional checks, its return to the normal schedule, and a level sent back to learning after
+ *    bad checks (see services/easyWords; FSRS and review_logs are never touched by them)
  *  - focus session: "focus_started" (meta.id, plannedMin, day), then "focus_completed" (meta.endedBy, activeSec,
  *    cards, firstTry, xp) or "focus_abandoned". A start with no end (app quit) counts as abandoned.
  * Used to celebrate progress that matters and to show when the learner actually studies.
@@ -24,6 +28,7 @@ export type LearningEventType =
   | "nudge_quiz"
   | "nudge_snoozed"
   | "nudge_ignored"
+  | "nudge_escalated"
   | "popup_shown"
   | "popup_completed"
   | "popup_closed_early"
@@ -35,6 +40,10 @@ export type LearningEventType =
   | "say_aloud"
   | "grammar_intro"
   | "known"
+  | "easy_skip"
+  | "easy_check"
+  | "easy_back"
+  | "easy_level_reset"
   | "focus_started"
   | "focus_completed"
   | "focus_abandoned";

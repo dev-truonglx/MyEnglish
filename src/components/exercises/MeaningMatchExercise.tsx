@@ -1,10 +1,11 @@
-import { useState, useEffect, useMemo, useRef } from "react";
-import { CheckCircle2, Link2, Eye } from "lucide-react";
+import { Fragment, useState, useEffect, useMemo, useRef, type ReactNode } from "react";
+import { CheckCircle2, Link2, Eye, AlertCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
 import { prepareMeaningMatch, type MeaningMatchPair } from "@/services/smartReview";
 import { playWrongTry } from "@/services/sound";
+import KeyBadge from "./KeyBadge";
 
 interface MeaningMatchExerciseProps {
   word: WordDetail;
@@ -23,7 +24,7 @@ const MIN_PAIRS = 3;
  * Word ↔ meaning matching game. Only the reviewed word is graded: a wrong pairing counts against it when
  * it involves the reviewed word or its meaning; mistakes between the other words are just corrected.
  * Each pair is checked as soon as it is made (correct pairs lock, wrong ones flash), so the learner always
- * knows which pairing was wrong.
+ * knows which pairing was wrong. Same layout and number keys as ContextMatchExercise.
  */
 export default function MeaningMatchExercise({
   word,
@@ -41,11 +42,15 @@ export default function MeaningMatchExercise({
   );
   const meanings = useMemo(() => shuffle(pairs), [pairs]);
 
-  const [selectedWordId, setSelectedWordId] = useState<string | null>(null);
+  // One side picked, waiting for the other: words are numbered 1..n, meanings n+1..2n (keyboard or click)
+  const [selected, setSelected] = useState<{ side: "word" | "meaning"; id: string } | null>(null);
   const [matched, setMatched] = useState<Set<string>>(new Set());
   const [wrongFlash, setWrongFlash] = useState<{ wordId: string; meaningId: string } | null>(null);
+  // What the last wrong pairing really was: kept until the next pair is made
+  const [wrongNote, setWrongNote] = useState<string | null>(null);
   const [targetMistakes, setTargetMistakes] = useState(0);
   const [done, setDone] = useState(false);
+  const [gaveUp, setGaveUp] = useState(false);
   // The target's pair was the last one left: found by elimination, so not a clean recall
   const [byElimination, setByElimination] = useState(false);
 
@@ -68,14 +73,24 @@ export default function MeaningMatchExercise({
     if (pairs.length < MIN_PAIRS) onFallbackRef.current();
   }, [pairs]);
 
+  // Number keys pick (words 1..n, meanings n+1..2n). Set below on every render, so the listener
+  // registered once always sees the current state.
+  const keyHandlerRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => keyHandlerRef.current(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   if (pairs.length < MIN_PAIRS) return null;
 
   const tryPair = (wordId: string, meaningId: string) => {
     if (done) return;
+    setSelected(null);
     if (wordId === meaningId) {
       const next = new Set(matched).add(wordId);
       setMatched(next);
-      setSelectedWordId(null);
+      setWrongNote(null);
       if (next.size === pairs.length) {
         setDone(true);
         // If the target's pair is the one made last, every other pair was already made: found by elimination
@@ -92,8 +107,10 @@ export default function MeaningMatchExercise({
     }
     if (wordId === word.id || meaningId === word.id) setTargetMistakes((n) => n + 1);
     playWrongTry();
+    // Say what the picked word really means: a wrong pairing still teaches something
+    const picked = pairs.find((p) => p.wordId === wordId);
+    setWrongNote(picked ? `"${picked.word}" nghĩa là "${picked.meaningVN}". Thử lại nhé!` : "Chưa khớp, thử lại nhé!");
     setWrongFlash({ wordId, meaningId });
-    setSelectedWordId(null);
     if (wrongFlashTimerRef.current) clearTimeout(wrongFlashTimerRef.current);
     wrongFlashTimerRef.current = setTimeout(() => {
       wrongFlashTimerRef.current = null;
@@ -101,118 +118,210 @@ export default function MeaningMatchExercise({
     }, 600);
   };
 
+  // Pick one side (number key or click): the same item again drops the pick, the other side completes a pair
+  const pick = (side: "word" | "meaning", id: string) => {
+    if (done || matched.has(id)) return;
+    if (selected?.side === side && selected.id === id) {
+      setSelected(null);
+      return;
+    }
+    if (selected && selected.side !== side) {
+      if (side === "word") tryPair(id, selected.id);
+      else tryPair(selected.id, id);
+      return;
+    }
+    setSelected({ side, id });
+  };
+
   const handleGiveUp = () => {
     if (done) return;
     setDone(true);
+    setGaveUp(true);
+    setSelected(null);
+    setWrongNote(null);
     setMatched(new Set(pairs.map((p) => p.wordId)));
     onSpeak(word.word);
     if (completeTimerRef.current) clearTimeout(completeTimerRef.current);
     onComplete(false, Math.max(targetMistakes, 1), Rating.Again);
   };
 
-  const handleWordClick = (wordId: string) => {
-    if (done || matched.has(wordId)) return;
-    setSelectedWordId((prev) => (prev === wordId ? null : wordId));
+  const meaningNumber = (meaningId: string) => pairs.length + meanings.findIndex((m) => m.wordId === meaningId) + 1;
+
+  keyHandlerRef.current = (e: KeyboardEvent) => {
+    if (done || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (!/^[1-9]$/.test(e.key)) return;
+    const n = Number(e.key);
+    if (n <= pairs.length) {
+      e.preventDefault();
+      pick("word", pairs[n - 1].wordId);
+    } else if (n <= pairs.length + meanings.length) {
+      e.preventDefault();
+      pick("meaning", meanings[n - pairs.length - 1].wordId);
+    }
   };
 
-  const handleMeaningClick = (meaningId: string) => {
-    if (done || matched.has(meaningId) || !selectedWordId) return;
-    tryPair(selectedWordId, meaningId);
-  };
-
-  const cell = (state: "matched" | "selected" | "wrong" | "idle") =>
-    state === "matched"
-      ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200 opacity-70"
-      : state === "selected"
-      ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
-      : state === "wrong"
-      ? "border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 animate-shake"
-      : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-slate-300 text-slate-800 dark:text-zinc-200";
+  const cellState = (side: "word" | "meaning", id: string): CellState =>
+    matched.has(id)
+      ? "matched"
+      : (side === "word" ? wrongFlash?.wordId : wrongFlash?.meaningId) === id
+      ? "wrong"
+      : selected?.side === side && selected.id === id
+      ? "selected"
+      : selected && selected.side !== side
+      ? "awaiting"
+      : "idle";
 
   return (
     <div className="w-full max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
+      {/* Exercise header */}
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-5 text-center space-y-2 shadow-sm">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400 border border-purple-200/50 dark:border-purple-800/40">
           <Link2 className="w-3 h-3" />
           <span>Nối từ với nghĩa</span>
         </div>
         <p className="text-xs text-slate-500 dark:text-zinc-400">
-          Chọn một từ tiếng Anh ở cột trái rồi chọn nghĩa tiếng Việt tương ứng ở cột phải.
+          Nhấn số của một từ rồi số của nghĩa tương ứng (hoặc bấm chuột) để nối thành cặp.
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-2.5">
-          <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
-          {pairs.map((p) => {
-            const state = matched.has(p.wordId)
-              ? "matched"
-              : wrongFlash?.wordId === p.wordId
-              ? "wrong"
-              : selectedWordId === p.wordId
-              ? "selected"
-              : "idle";
-            return (
-              <button
-                key={p.wordId}
-                onClick={() => handleWordClick(p.wordId)}
-                disabled={done || matched.has(p.wordId)}
-                className={`w-full p-3.5 rounded-xl border text-left transition-all flex items-center justify-between shadow-sm ${cell(state)}`}
+      {/* Matching grid: row i holds word i and meaning i, so both columns line up */}
+      <div className="grid grid-cols-[minmax(max-content,2fr)_minmax(0,3fr)] gap-x-3 gap-y-2.5">
+        <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
+        <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Nghĩa tiếng Việt</h4>
+        {pairs.map((p, idx) => {
+          const m = meanings[idx];
+          return (
+            <Fragment key={p.wordId}>
+              <MatchCell
+                number={idx + 1}
+                state={cellState("word", p.wordId)}
+                pairedWith={matched.has(p.wordId) ? `→ ${meaningNumber(p.wordId)}` : null}
+                disabled={done}
+                onClick={() => pick("word", p.wordId)}
               >
-                <span className="text-sm font-bold font-mono">{p.word}</span>
-                {matched.has(p.wordId) && <CheckCircle2 className="w-4 h-4 text-emerald-500" />}
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="space-y-2.5">
-          <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Nghĩa tiếng Việt</h4>
-          {meanings.map((m) => {
-            const state = matched.has(m.wordId) ? "matched" : wrongFlash?.meaningId === m.wordId ? "wrong" : "idle";
-            return (
-              <button
-                key={m.wordId}
-                onClick={() => handleMeaningClick(m.wordId)}
-                disabled={done || matched.has(m.wordId)}
-                className={`w-full p-3.5 rounded-xl border text-left transition-all shadow-sm text-xs font-medium leading-relaxed ${cell(state)} ${
-                  selectedWordId && state === "idle" ? "border-dashed border-cyan-300 dark:border-cyan-700" : ""
-                }`}
+                <span className="flex-1 text-sm font-bold whitespace-nowrap">{p.word}</span>
+              </MatchCell>
+              <MatchCell
+                number={pairs.length + idx + 1}
+                state={cellState("meaning", m.wordId)}
+                pairedWith={matched.has(m.wordId) ? `← ${pairs.findIndex((x) => x.wordId === m.wordId) + 1}` : null}
+                disabled={done}
+                onClick={() => pick("meaning", m.wordId)}
               >
-                {m.meaningVN}
-              </button>
-            );
-          })}
-        </div>
+                <span className="flex-1 min-w-0 text-[13px] font-medium leading-relaxed">{m.meaningVN}</span>
+              </MatchCell>
+            </Fragment>
+          );
+        })}
       </div>
 
-      <div className="flex items-center justify-between text-xs px-1 min-h-[40px]">
-        {done ? (
-          <span className="flex items-center gap-2 text-emerald-600 dark:text-emerald-400 font-semibold mx-auto">
-            <CheckCircle2 className="w-4 h-4" />
-            {targetMistakes === 0 && !byElimination
-              ? `Chính xác! "${word.word}" đã được nối đúng ngay.`
-              : targetMistakes === 0
-              ? `Đã nối xong. "${word.word}" là cặp cuối còn lại nên nối theo loại trừ, chưa tính là nhớ chắc.`
-              : `Đã nối xong. "${word.word}" cần ôn lại sớm.`}
-          </span>
+      {/* Action Bar */}
+      <div className="flex items-center justify-between gap-3 pt-2 text-xs">
+        {!done ? (
+          <button
+            type="button"
+            onClick={handleGiveUp}
+            className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold"
+            title="Xem đáp án các cặp nối"
+          >
+            <Eye className="w-3.5 h-3.5" />
+            <span>Không nhớ</span>
+          </button>
         ) : (
-          <>
-            <span className="text-slate-400 dark:text-zinc-500">
-              Chỉ cặp của từ <strong>{word.word}</strong> được tính điểm.
+          <span />
+        )}
+        <span className="text-slate-400 dark:text-zinc-500 text-right">
+          Chỉ cặp của từ <strong>{word.word}</strong> được tính điểm.
+        </span>
+      </div>
+
+      {/* Dedicated Stable Feedback Area - ALWAYS occupies 48px so layout NEVER jumps */}
+      <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
+        {done && !gaveUp ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+            <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
+            <span className="font-semibold">
+              {targetMistakes === 0 && !byElimination
+                ? `Chính xác! "${word.word}" đã được nối đúng ngay. Nhấn Enter hoặc Tiếp tục.`
+                : targetMistakes === 0
+                ? `Đã nối xong. "${word.word}" là cặp cuối còn lại nên nối theo loại trừ, chưa tính là nhớ chắc. Nhấn Enter hoặc Tiếp tục.`
+                : `Đã nối xong. "${word.word}" cần ôn lại sớm. Nhấn Enter hoặc Tiếp tục.`}
             </span>
-            <button
-              type="button"
-              onClick={handleGiveUp}
-              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 font-semibold transition-colors"
-              title="Xem đáp án các cặp nối"
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>Không nhớ</span>
-            </button>
-          </>
+          </div>
+        ) : done ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span className="font-semibold">
+              Đã hiển thị các cặp nối đúng. Từ "{word.word}" sẽ được ôn lại sớm. Nhấn Enter hoặc Tiếp tục.
+            </span>
+          </div>
+        ) : wrongNote ? (
+          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+            <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+            <span>{wrongNote}</span>
+          </div>
+        ) : (
+          <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
+            <span>
+              Gõ số của từ (1–{pairs.length}) rồi số của nghĩa ({pairs.length + 1}–{pairs.length * 2}) để nối, mỗi cặp được kiểm tra ngay
+            </span>
+          </div>
         )}
       </div>
     </div>
+  );
+}
+
+type CellState = "matched" | "selected" | "wrong" | "awaiting" | "idle";
+
+function MatchCell({
+  number,
+  state,
+  pairedWith,
+  disabled,
+  onClick,
+  children,
+}: {
+  number: number;
+  state: CellState;
+  /** Arrow and number of the other half once the pair is made */
+  pairedWith: string | null;
+  disabled: boolean;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled || state === "matched"}
+      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+        state === "matched"
+          ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200"
+          : state === "selected"
+          ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
+          : state === "wrong"
+          ? "border-rose-500 bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-200 animate-shake"
+          : state === "awaiting"
+          ? "border-dashed border-cyan-300 dark:border-cyan-700 bg-cyan-50/20 dark:bg-cyan-950/20 hover:border-cyan-400 text-slate-800 dark:text-zinc-200"
+          : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-slate-300 text-slate-800 dark:text-zinc-200"
+      }`}
+    >
+      <KeyBadge
+        number={number}
+        className={
+          state === "matched"
+            ? "bg-emerald-500 text-white border-transparent"
+            : state === "selected"
+            ? "bg-cyan-500 text-white border-transparent"
+            : state === "wrong"
+            ? "bg-rose-500 text-white border-transparent"
+            : "bg-slate-50 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300"
+        }
+      />
+      {children}
+      {pairedWith && <span className="shrink-0 text-[11px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">{pairedWith}</span>}
+    </button>
   );
 }

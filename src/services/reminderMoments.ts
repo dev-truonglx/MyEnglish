@@ -22,18 +22,43 @@ export type ReminderMoment =
   | "after_fullscreen"
   /** The time the learner chose to study at: after lunch / at the end of the work day */
   | "anchor_lunch"
-  | "anchor_evening";
+  | "anchor_evening"
+  /** A study time learned from when the learner actually studies and accepted by them (see habits.suggestStudyAnchor) */
+  | "anchor_custom";
 
 /**
  * Study times the learner picks at onboarding ("after lunch, I review"). Tying a habit to an existing
  * routine works better than a reminder every N minutes. Each anchor fires at most once a day, within
  * ANCHOR_WINDOW_MS of its time.
  */
-export type ReminderAnchor = "after_lunch" | "end_of_day";
-export const ANCHOR_TIMES: Record<ReminderAnchor, { hour: number; minute: number; moment: ReminderMoment; label: string }> = {
+export type PresetAnchor = "after_lunch" | "end_of_day";
+/** A time of the learner's own, stored as "at_HHMM" ("at_2040" = 20:40) */
+export type CustomAnchor = `at_${string}`;
+export type ReminderAnchor = PresetAnchor | CustomAnchor;
+export const ANCHOR_TIMES: Record<PresetAnchor, { hour: number; minute: number; moment: ReminderMoment; label: string }> = {
   after_lunch: { hour: 13, minute: 15, moment: "anchor_lunch", label: "Sau bữa trưa (13:15)" },
   end_of_day: { hour: 17, minute: 30, moment: "anchor_evening", label: "Cuối ngày làm việc (17:30)" },
 };
+/** Custom study times a learner can keep at once */
+export const MAX_CUSTOM_ANCHORS = 2;
+
+const CUSTOM_ANCHOR = /^at_([01]\d|2[0-3])([0-5]\d)$/;
+
+export function customAnchor(hour: number, minute: number): CustomAnchor {
+  return `at_${String(hour).padStart(2, "0")}${String(minute).padStart(2, "0")}`;
+}
+
+export function isCustomAnchor(a: string): a is CustomAnchor {
+  return CUSTOM_ANCHOR.test(a);
+}
+
+/** Clock time, moment and label of an anchor; null for anything that is not an anchor (a corrupted setting) */
+export function anchorTime(a: string): { hour: number; minute: number; moment: ReminderMoment; label: string } | null {
+  if (a in ANCHOR_TIMES) return ANCHOR_TIMES[a as PresetAnchor];
+  const m = CUSTOM_ANCHOR.exec(a);
+  if (!m) return null;
+  return { hour: Number(m[1]), minute: Number(m[2]), moment: "anchor_custom", label: `Giờ bạn hay học (${m[1]}:${m[2]})` };
+}
 export const ANCHOR_WINDOW_MS = 90 * 60 * 1000;
 const ANCHOR_FIRED_KEY = "myenglish_anchor_fired_v1";
 
@@ -50,7 +75,7 @@ function firedToday(now: Date): ReminderAnchor[] {
 export function dueAnchor(now: Date, anchors: ReminderAnchor[]): ReminderAnchor | null {
   const done = firedToday(now);
   for (const a of anchors) {
-    const t = ANCHOR_TIMES[a];
+    const t = anchorTime(a);
     if (!t || done.includes(a)) continue;
     const at = new Date(now.getFullYear(), now.getMonth(), now.getDate(), t.hour, t.minute).getTime();
     if (now.getTime() >= at && now.getTime() < at + ANCHOR_WINDOW_MS) return a;
@@ -190,20 +215,99 @@ export function quietHours(events: LearningEvent[]): number[] {
   return shown.map((n, h) => (n >= QUIET_MIN_SHOWN && rate(h) < QUIET_MAX_RATE ? h : -1)).filter((h) => h >= 0);
 }
 
-export function getQuietHours(): number[] {
-  try {
-    const raw = JSON.parse(localStorage.getItem(QUIET_KEY) || "null") as { hours?: number[] } | null;
-    return Array.isArray(raw?.hours) ? raw!.hours : [];
-  } catch {
-    return [];
+/**
+ * The hour where reminders get answered most: at least 3 shown and 40%+ acted on, the best rate first (null when
+ * no hour qualifies). One reminder a day is kept for it even when the daily cap is used up.
+ */
+export function bestReminderHour(events: LearningEvent[]): number | null {
+  const shown = new Array<number>(24).fill(0);
+  const acted = new Array<number>(24).fill(0);
+  for (const e of events) {
+    const h = new Date(e.at).getHours();
+    if (e.type === "nudge_shown") shown[h]++;
+    if (e.type === "nudge_opened" || e.type === "nudge_quiz") acted[h]++;
   }
+  let best: number | null = null;
+  let bestRate = 0;
+  for (let h = 0; h < 24; h++) {
+    if (shown[h] < 3) continue;
+    const rate = acted[h] / shown[h];
+    if (rate >= GOOD_RATE && (best === null || rate > bestRate || (rate === bestRate && shown[h] > shown[best]))) {
+      best = h;
+      bestRate = rate;
+    }
+  }
+  return best;
+}
+
+function readQuietRecord(): { day?: string; hours?: number[]; best?: number | null } | null {
+  try {
+    return JSON.parse(localStorage.getItem(QUIET_KEY) || "null");
+  } catch {
+    return null;
+  }
+}
+
+export function getQuietHours(): number[] {
+  const raw = readQuietRecord();
+  return Array.isArray(raw?.hours) ? raw!.hours : [];
+}
+
+export function getBestReminderHour(): number | null {
+  const best = readQuietRecord()?.best;
+  return typeof best === "number" && best >= 0 && best < 24 ? best : null;
+}
+
+const BEST_HOUR_USED_KEY = "myenglish_best_hour_nudge_v1";
+const QUIET_PROBE_USED_KEY = "myenglish_quiet_probe_v1";
+
+function usedToday(key: string, now: Date): boolean {
+  try {
+    return JSON.parse(localStorage.getItem(key) || "null")?.day === getLocalDateString(now);
+  } catch {
+    return false;
+  }
+}
+
+function markUsedToday(key: string, now: Date): void {
+  try {
+    localStorage.setItem(key, JSON.stringify({ day: getLocalDateString(now) }));
+  } catch {}
+}
+
+/** The day's reminder at the best hour may go past the daily cap, once a day */
+export function bestHourGuaranteeOpen(now: Date): boolean {
+  const best = getBestReminderHour();
+  return best !== null && now.getHours() === best && !usedToday(BEST_HOUR_USED_KEY, now);
+}
+export function markBestHourGuarantee(now: Date = new Date()): void {
+  markUsedToday(BEST_HOUR_USED_KEY, now);
+}
+
+/** Every Nth day a reminder may come in an hour that was learned as "always ignored" */
+export const QUIET_PROBE_EVERY_DAYS = 5;
+
+function dayNumber(d: Date): number {
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86_400_000);
+}
+
+/**
+ * A skipped hour is learned from reminders that were ignored there, and no reminder is shown there afterwards:
+ * the learner's habits can change (a new schedule) with nothing left to show it. So every few days one
+ * clock reminder is let through in such an hour. If it is answered, the hour leaves the list at the next refresh.
+ */
+export function quietHourProbeOpen(now: Date): boolean {
+  return dayNumber(now) % QUIET_PROBE_EVERY_DAYS === 0 && !usedToday(QUIET_PROBE_USED_KEY, now);
+}
+export function markQuietHourProbe(now: Date = new Date()): void {
+  markUsedToday(QUIET_PROBE_USED_KEY, now);
 }
 
 /** Recompute the hours to avoid from the last 30 days, at most once a day */
 export async function refreshQuietHours(now: Date = new Date()): Promise<number[]> {
   const today = getLocalDateString(now);
   try {
-    const raw = JSON.parse(localStorage.getItem(QUIET_KEY) || "null") as { day?: string; hours?: number[] } | null;
+    const raw = readQuietRecord();
     if (raw?.day === today && Array.isArray(raw.hours)) return raw.hours;
   } catch {}
   const events = await getLearningEventsSince(new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000), [
@@ -213,7 +317,7 @@ export async function refreshQuietHours(now: Date = new Date()): Promise<number[
   ]);
   const hours = quietHours(events);
   try {
-    localStorage.setItem(QUIET_KEY, JSON.stringify({ day: today, hours }));
+    localStorage.setItem(QUIET_KEY, JSON.stringify({ day: today, hours, best: bestReminderHour(events) }));
     persistKeyNow(QUIET_KEY);
   } catch {}
   return hours;

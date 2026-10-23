@@ -92,9 +92,10 @@ import DeleteWordModal from "./dashboard/DeleteWordModal";
 import type { WordCardMeta } from "./dashboard/WordCard";
 import { WORDS_CHANGED_WHILE_HIDDEN_EVENT, type WordsChangedDetail } from "@/services/reviewRecorder";
 import { getFocusSettings, newFocusPlan, saveFocusSettings, type FocusPlan } from "@/services/focusSession";
-import { START_FOCUS_EVENT } from "@/services/reminderSettings";
+import { resetIgnoredNudges, START_FOCUS_EVENT } from "@/services/reminderSettings";
 import { loadForgottenWords } from "@/services/forgottenWords";
 import { checkKnownNow } from "@/services/knownWords";
+import { addKnownChecks, knownCheckCard } from "@/services/easyWords";
 import {
   GALLERY_PAGE_SIZE,
   type DashboardTab,
@@ -596,6 +597,8 @@ export default function MainDashboard({
     listen<{ auto_start?: boolean }>("open-review-tab", (event) => {
       if (isCancelled) return;
       const autoStart = event.payload?.auto_start ?? false;
+      // Coming here from a notification (or the tray) is an answer to the reminders: missed cards start over
+      resetIgnoredNudges();
       setActiveTab("review");
       setGlobalToast(null);
       // Never abort a session in progress: just show it
@@ -749,12 +752,12 @@ export default function MainDashboard({
    * A session over chosen words ("Từ hay quên", one word from Tiến độ): a due card is graded as usual, a word
    * not due is practice (schedulingDecision records it without touching FSRS). Due words first.
    */
-  const startWordListSession = (list: WordDetail[], focus?: FocusPlan) => {
+  const startWordListSession = (list: WordDetail[], focus?: FocusPlan, extra: ReviewCard[] = []) => {
     if (isReviewingRef.current) {
       if (!autoFinishCompletedReview()) {
         setConfirmExitNav({
           pendingStart: () => {
-            startWordListSession(list, focus);
+            startWordListSession(list, focus, extra);
           },
           title: "Thoát bài đang học để ôn nhóm từ này?",
           body: "Bạn đang có một phiên học chưa hoàn thành. Bạn có muốn thoát bài đang học để ôn nhóm từ này không? Các câu đã trả lời vẫn được lưu.",
@@ -774,7 +777,7 @@ export default function MainDashboard({
       if (dueCard) due.push(dueCard);
       else practice.push(practiceCards([w])[0]);
     }
-    const session = [...due, ...practice];
+    const session = [...due, ...practice, ...extra];
     if (session.length === 0) return false;
     // Not a practice session as a whole: each card decides (a card not due is never graded)
     setIsPracticeSession(false);
@@ -834,6 +837,14 @@ export default function MainDashboard({
       session = buildReviewSession(due, newToday, now, {
         maxCards: Number.isFinite(cap) ? cap : undefined,
         comebackNewCards: plan ? plan.newWordsPerDay : undefined,
+      });
+    }
+
+    // Words marked "Đã biết" whose check has come join a real session, or make one when nothing else is due
+    if (onlyDue && maxCards === undefined) {
+      session = await addKnownChecks(session, pool, now).catch((err) => {
+        console.warn("Failed to add known-word checks:", err);
+        return session;
       });
     }
 
@@ -1425,10 +1436,13 @@ export default function MainDashboard({
         {activeTab === "known" && (
           <KnownTab
             onCheckNow={(list) => {
-              // The checks become due now, then the words are reviewed for real (graded, not practice)
-              checkKnownNow(list.map((w) => w.id))
+              // Marked the current way (set aside): asked as checks. Marked before (an FSRS schedule of their own):
+              // their review becomes due now, then the words are reviewed for real (graded, not practice)
+              const aside = list.filter((w) => !!w.suspended);
+              const legacy = list.filter((w) => !w.suspended);
+              checkKnownNow(legacy.map((w) => w.id))
                 .then(() => refreshWords())
-                .then(() => startWordListSession(list))
+                .then(() => startWordListSession(legacy, undefined, aside.map(knownCheckCard)))
                 .catch((err) => setMessage(`Không bắt đầu được phần kiểm tra: ${err}`));
             }}
           />

@@ -72,7 +72,7 @@ async function setup(opts: Partial<ReminderSettings> & { lastPopupAgoMs?: number
     intervalMinutes: 60,
     triggerCondition: "due_only",
     respectFocus: false,
-    contextMoments: false,
+    smartReminders: false,
     snoozedUntil: null,
     ...settings,
   });
