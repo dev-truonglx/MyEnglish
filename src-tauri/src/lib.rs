@@ -986,7 +986,7 @@ fn secondary_window(app: &AppHandle, label: &str) -> Result<tauri::WebviewWindow
     let builder = if label == REVIEW_NUDGE {
         builder
             .title("MyEnglish Reminder")
-            .inner_size(NUDGE_WIDTH, 230.0)
+            .inner_size(NUDGE_WIDTH, 275.0)
             .resizable(false)
             .focused(false)
             .focusable(false)

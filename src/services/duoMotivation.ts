@@ -7,6 +7,7 @@ import {
   isNewCard,
   isSuspended,
   needsRelearnIntro,
+  pickExample,
 } from "./smartReview";
 import { getWordsByIds, isPlaceholderMeaning } from "./db";
 import { getDueCards, toCard } from "./cards";
@@ -46,6 +47,14 @@ export interface MicroQuizQuestion {
   partOfSpeech?: string;
   targetMeaning: string;
   options: MicroQuizOption[];
+  /** Current FSRS recall probability R ∈ [0, 1] */
+  retrievability?: number;
+  /** Rounded FSRS stability (days) accumulated so far */
+  stabilityDays?: number;
+  /** True when a studied card's recall probability dropped below FADING_RETRIEVABILITY */
+  isFading?: boolean;
+  /** Optional example sentence in English to provide contextual cue on the reminder quiz */
+  contextSentence?: string;
 }
 
 export interface DuoMotivationState {
@@ -73,6 +82,10 @@ export interface MotivationEvaluationParams {
   now?: Date;
   /** Due words already studied whose recall chance fell under FADING_RETRIEVABILITY (countFadingWords) */
   fadingCount?: number;
+  /** Specific fading word with highest stability at risk (for Loss Aversion copy) */
+  fadingWord?: string;
+  /** Stability in days of fadingWord */
+  fadingStabilityDays?: number;
   /** New words the daily budget still allows today */
   newToday?: number;
   /** Daily quests not done yet today */
@@ -159,6 +172,8 @@ export interface ReminderCopyFacts {
   dailyGoal: number;
   /** 0: unknown or none, the wording then says something else */
   fadingCount: number;
+  fadingWord?: string;
+  fadingStabilityDays?: number;
   newToday: number;
   questsLeft: number;
 }
@@ -185,6 +200,10 @@ const dueMinutes = (f: ReminderCopyFacts) => minutesFor(Math.max(1, f.dueCount))
 /** A moment asks for a short round: at most 10 cards */
 const roundMinutes = (f: ReminderCopyFacts) => minutesFor(Math.min(Math.max(1, f.dueCount), 10));
 const goalLeft = (f: ReminderCopyFacts) => Math.max(0, f.dailyGoal - f.todayCount);
+const fadingWordNote = (f: ReminderCopyFacts) =>
+  f.fadingWord
+    ? ` (như '${f.fadingWord}'${f.fadingStabilityDays && f.fadingStabilityDays >= 2 ? ` đã nhớ ${f.fadingStabilityDays} ngày` : ""})`
+    : "";
 
 /** A moment keeps its title (it says why now); only the message varies */
 const momentVariants = (title: string, messages: Array<(f: ReminderCopyFacts, minutes: number) => string>): Variant[] =>
@@ -211,7 +230,7 @@ const COPY: Record<ReminderBranch, Variant[]> = {
     () => ({ title: "Bận thì cứ hoãn nhé", message: "Xong việc rồi quay lại cũng được. Lúc đó 1 câu ngay trong thẻ này là đủ." }),
     (f) =>
       f.fadingCount > 0
-        ? { title: `${f.fadingCount} từ đang phai dần`, message: "Trả lời 1 câu là kéo lại được một từ, không cần mở cả phiên học." }
+        ? { title: `${f.fadingCount} từ đang phai dần`, message: `Trả lời 1 câu là kéo lại được một từ${fadingWordNote(f)}, không cần mở cả phiên học.` }
         : { title: "Một câu cũng được tính", message: "Mỗi câu trả lời đều cộng vào tiến độ hôm nay, kể cả khi chỉ làm 1 câu." },
     () => ({ title: "Giữa hai việc ☕", message: "Đang chờ build hay chờ họp? 1 câu ~10 giây vừa khít khoảng trống đó." }),
   ],
@@ -261,7 +280,7 @@ const COPY: Record<ReminderBranch, Variant[]> = {
     () => ({ title: "Đang chờ build? ⏳", message: "Tranh thủ lúc chờ: 1 câu ôn nhanh ngay trong thẻ này." }),
     (f) =>
       f.fadingCount > 0
-        ? { title: `${f.fadingCount} từ sắp quên`, message: "Ôn đúng lúc sắp quên là nhớ lâu nhất. 1 câu nhanh nhé?" }
+        ? { title: `${f.fadingCount} từ sắp quên`, message: `Ôn đúng lúc sắp quên${fadingWordNote(f)} là nhớ lâu nhất. 1 câu nhanh nhé?` }
         : { title: "Không vội đâu", message: "Thẻ sẽ quay lại sau. Còn nếu đang rảnh, 1 câu ~10 giây thôi." },
     (f) => ({
       title: "Tiến độ hôm nay",
@@ -354,7 +373,7 @@ const COPY: Record<ReminderBranch, Variant[]> = {
     () => ({ title: "Chờ CI chạy? ⏳", message: "Tranh thủ lúc chờ build hay deploy: vài câu ôn là vừa." }),
     (f) =>
       f.fadingCount > 0
-        ? { title: `${f.fadingCount} từ sắp quên`, message: "Ôn ngay lúc này là đúng thời điểm: chúng đang bắt đầu phai." }
+        ? { title: `${f.fadingCount} từ sắp quên`, message: `Ôn ngay lúc này${fadingWordNote(f)} là đúng thời điểm: chúng đang bắt đầu phai.` }
         : f.streak > 0
         ? { title: `Chuỗi ${f.streak} ngày 🔥`, message: "Vài câu ôn nhẹ để giữ nhịp, chẳng mất bao lâu." }
         : { title: "Vài phút cho tiếng Anh", message: "Đều đặn mỗi ngày một ít là cách nhớ từ lâu nhất." },
@@ -488,6 +507,8 @@ export function evaluateMotivationState(params: MotivationEvaluationParams): Duo
     todayCount,
     dailyGoal,
     fadingCount: Math.max(0, params.fadingCount ?? 0),
+    fadingWord: params.fadingWord,
+    fadingStabilityDays: params.fadingStabilityDays,
     newToday: Math.max(0, params.newToday ?? 0),
     questsLeft: Math.max(0, params.questsLeft ?? 0),
   };
@@ -578,6 +599,105 @@ export function countFadingWords(dueWords: readonly WordDetail[], now: Date = ne
 }
 
 /**
+ * Find the due word with the highest stability that is currently fading (retrievability < FADING_RETRIEVABILITY).
+ * Naming a specific word the learner invested days into triggers healthy loss aversion on the reminder card.
+ */
+export function findMostFadingDueWord(
+  dueWords: readonly WordDetail[],
+  now: Date = new Date()
+): { word: string; retrievability: number; stabilityDays: number } | null {
+  let best: { word: string; retrievability: number; stabilityDays: number; stabilityRaw: number } | null = null;
+  for (const w of dueWords) {
+    if (isSuspended(w) || isPlaceholderMeaning(w.meaning_vn)) continue;
+    for (const c of getDueCards(w, now)) {
+      if (isNewCard(c)) continue;
+      const r = calculateRetrievability(c.srs, now);
+      if (r >= FADING_RETRIEVABILITY) continue;
+      const stabilityRaw = c.srs?.stability ?? 0;
+      const stabilityDays = Math.max(1, Math.round(stabilityRaw));
+      if (
+        !best ||
+        stabilityRaw > best.stabilityRaw ||
+        (stabilityRaw === best.stabilityRaw && r < best.retrievability)
+      ) {
+        best = { word: w.word, retrievability: r, stabilityDays, stabilityRaw };
+      }
+    }
+  }
+  return best ? { word: best.word, retrievability: best.retrievability, stabilityDays: best.stabilityDays } : null;
+}
+
+export type NudgeMascotIcon = "flame" | "hourglass" | "target" | "sun" | "coffee" | "sparkles" | "owl";
+
+export interface NudgeMascotVisual {
+  icon: NudgeMascotIcon;
+  gradient: string;
+  label: string;
+}
+
+/**
+ * Contextual visual identity for the corner reminder card so it doesn't look identical every time (anti-habituation).
+ */
+export function resolveNudgeMascot(params: {
+  mood?: DuoMascotMood;
+  moment?: ReminderMoment | null;
+  fadingCount?: number;
+  todayCount?: number;
+  dailyGoal?: number;
+  hour?: number;
+}): NudgeMascotVisual {
+  const { mood, moment, fadingCount = 0, todayCount = 0, dailyGoal = 0, hour } = params;
+  if (mood === "alarm") {
+    return {
+      icon: "flame",
+      gradient: "from-amber-400 to-orange-500",
+      label: "Giữ chuỗi ngày học",
+    };
+  }
+  const goalLeft = dailyGoal - todayCount;
+  if (dailyGoal > 0 && todayCount > 0 && goalLeft > 0 && goalLeft <= 3) {
+    return {
+      icon: "target",
+      gradient: "from-cyan-500 to-blue-600",
+      label: `Còn ${goalLeft} câu đạt mục tiêu`,
+    };
+  }
+  if (fadingCount > 0) {
+    return {
+      icon: "hourglass",
+      gradient: "from-amber-500 to-rose-500",
+      label: `${fadingCount} từ đang phai dần`,
+    };
+  }
+  if (moment === "morning") {
+    return {
+      icon: "sun",
+      gradient: "from-amber-400 to-yellow-500",
+      label: "Khởi động buổi sáng",
+    };
+  }
+  if (moment === "anchor_lunch" || (hour !== undefined && hour >= 11 && hour <= 13)) {
+    return {
+      icon: "coffee",
+      gradient: "from-orange-400 to-amber-500",
+      label: "Ôn nhẹ giờ trưa",
+    };
+  }
+  if (moment === "after_share" || moment === "after_fullscreen" || moment === "back") {
+    return {
+      icon: "sparkles",
+      gradient: "from-indigo-500 to-violet-500",
+      label: "Chuyển nhịp công việc",
+    };
+  }
+  return {
+    icon: "owl",
+    gradient: "from-emerald-500 to-teal-500",
+    label: "Nhắc ôn tập",
+  };
+}
+
+/**
  * The nudge's one-question quiz: "what does <English word> mean?" with 3 options. It is a recognition
  * question, so only recognition cards are asked:
  *  - a due recognition card that was already studied (never a brand-new word: it has not been introduced)
@@ -589,10 +709,12 @@ export function countFadingWords(dueWords: readonly WordDetail[], now: Date = ne
 export function selectMicroQuizQuestion(
   dueWords: WordDetail[],
   allWords: WordDetail[],
-  now: Date = new Date()
+  now: Date = new Date(),
+  excludeWordIds?: ReadonlySet<string>
 ): MicroQuizQuestion | null {
   if (allWords.length === 0) return null;
-  const usable = (w: WordDetail) => !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w);
+  const usable = (w: WordDetail) =>
+    !isPlaceholderMeaning(w.meaning_vn) && !isSuspended(w) && (!excludeWordIds || !excludeWordIds.has(w.id));
 
   const dueCards = dueWords
     .filter(usable)
@@ -608,10 +730,12 @@ export function selectMicroQuizQuestion(
         .filter((c) => !needsRelearnIntro(c));
   if (candidatePool.length === 0) return null;
 
-  const RECENT_COOLDOWN_MS = 45 * 60 * 1000;
+  const RECENT_COOLDOWN_MS = 2 * 60 * 60 * 1000;
   const nonRecent = candidatePool.filter((c) => {
-    const lastRev = c.srs?.last_review;
-    return !lastRev || now.getTime() - new Date(lastRev).getTime() > RECENT_COOLDOWN_MS;
+    const recLast = c.srs?.last_review ? new Date(c.srs.last_review).getTime() : 0;
+    const prodLast = c.srsProduction?.last_review ? new Date(c.srsProduction.last_review).getTime() : 0;
+    const latestRev = Math.max(recLast, prodLast);
+    return latestRev === 0 || now.getTime() - latestRev > RECENT_COOLDOWN_MS;
   });
   const active = nonRecent.length > 0 ? nonRecent : candidatePool;
 
@@ -636,6 +760,10 @@ export function selectMicroQuizQuestion(
   const correctOpt = mcq.options.find((o) => o.isCorrect);
   // 3 options (not 4): the 400×230 reminder card has room for three full-width meanings
   const compactOptions = shuffle([...mcq.options.filter((o) => !o.isCorrect).slice(0, 2), ...(correctOpt ? [correctOpt] : [])]);
+  const retrievability = calculateRetrievability(targetCard.srs, now);
+  const stabilityDays = Math.max(0, Math.round(targetCard.srs?.stability ?? 0));
+  const isFading = !isNewCard(targetCard) && retrievability < FADING_RETRIEVABILITY;
+  const example = pickExample(targetCard);
 
   return {
     wordId: targetCard.id,
@@ -647,7 +775,36 @@ export function selectMicroQuizQuestion(
     partOfSpeech: targetCard.part_of_speech || undefined,
     targetMeaning: targetCard.meaning_vn,
     options: compactOptions.map((o) => ({ id: o.id, text: o.text, isCorrect: o.isCorrect })),
+    retrievability: Number(retrievability.toFixed(2)),
+    stabilityDays,
+    isFading,
+    contextSentence: example?.sentence_en || undefined,
   };
+}
+
+/**
+ * Build a short chain of distinct micro-quiz questions (up to `maxCount`, default 3) so a learner who
+ * answers the first question on the corner card can keep their momentum going with 1–2 more right there.
+ */
+export function selectMicroQuizQueue(
+  dueWords: WordDetail[],
+  allWords: WordDetail[],
+  maxCount: number = 3,
+  now: Date = new Date()
+): MicroQuizQuestion[] {
+  const queue: MicroQuizQuestion[] = [];
+  const used = new Set<string>();
+  const cap = Math.max(1, Math.min(5, maxCount));
+  for (let i = 0; i < cap; i++) {
+    // Only chain scheduled due questions after the first one if due words exist, so we don't mix practice unexpectedly
+    const poolDue = dueWords.filter((w) => !used.has(w.id));
+    if (i > 0 && dueWords.length > 0 && poolDue.length === 0) break;
+    const q = selectMicroQuizQuestion(poolDue, allWords, now, used);
+    if (!q) break;
+    queue.push(q);
+    used.add(q.wordId);
+  }
+  return queue;
 }
 
 export interface MicroQuizEvaluationResult {

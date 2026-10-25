@@ -10,7 +10,7 @@
  */
 import { persistKeyNow } from "./storageBackup";
 
-export type SoundKind = "correct" | "wrong" | "combo" | "complete" | "tick" | "tierUp" | "timeOut";
+export type SoundKind = "correct" | "wrong" | "combo" | "complete" | "tick" | "tierUp" | "timeOut" | "nudge";
 
 export const SOUND_SETTINGS_KEY = "myenglish_sound_v1";
 /** A combo sound at every this many right answers in a row */
@@ -128,6 +128,11 @@ const SOUNDS: Record<SoundKind, Note[]> = {
   ],
   // Descending buzz when timer runs out
   timeOut: [{ freq: 280, to: 160, at: 0, dur: 0.35, type: "sawtooth", gain: 0.45 }],
+  // Subtle two-note warm chime when a corner reminder card appears
+  nudge: [
+    { freq: 587.33, at: 0, dur: 0.09, type: "sine", gain: 0.35 },
+    { freq: A5, at: 0.065, dur: 0.14, type: "sine", gain: 0.45 },
+  ],
 };
 
 /** Loudest note at volume 1: keeps the tones well under speech and music */

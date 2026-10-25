@@ -1,0 +1,551 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Sơ đồ tổng hợp toàn diện: Kiến trúc, Vòng đời, Lộ trình, Dạng bài tập & Lối tắt Đã biết (MyEnglish FSRS)",
+    "output": ".archify/workflow-master-with-known-20261025-100700/master-learning-system.html",
+    "quality_profile": "showcase",
+    "visual_preset": "signal-flow",
+    "animation": "trace",
+    "repository": {
+      "url": "https://github.com/dev-truonglx/MyEnglish.git",
+      "provider": "github",
+      "revision": "3038eecb4a205c35ad2058e84a267a3db0c31df7"
+    }
+  },
+  "lanes": [
+    {
+      "id": "arch",
+      "label": "Kiến trúc & Hạ tầng dữ liệu"
+    },
+    {
+      "id": "recognition",
+      "label": "Lộ trình Nhận diện (EN → VN)"
+    },
+    {
+      "id": "production",
+      "label": "Lộ trình Sản sinh & Lối tắt Đã biết"
+    },
+    {
+      "id": "lapse",
+      "label": "Nhánh Quên & Sổ tay lỗi",
+      "variant": "exception"
+    }
+  ],
+  "phases": [
+    {
+      "id": "phase_intake",
+      "label": "GĐ 1: Tiếp nhận (Phút 0 → 1m)",
+      "fromCol": 0,
+      "toCol": 1,
+      "variant": "default"
+    },
+    {
+      "id": "phase_consolidation",
+      "label": "GĐ 2: Củng cố & Mở Recall (Phút 10 → Ngày 3)",
+      "fromCol": 2,
+      "toCol": 3,
+      "variant": "emphasis"
+    },
+    {
+      "id": "phase_mastery",
+      "label": "GĐ 3: Thử thách sâu & Nhớ lâu (Ngày 4 → 150d+)",
+      "fromCol": 4,
+      "toCol": 5,
+      "variant": "dashed"
+    }
+  ],
+  "mainPath": [
+    "intro_ui",
+    "quiz_1m",
+    "quiz_10m",
+    "review_2d",
+    "review_prep",
+    "mature_12d"
+  ],
+  "nodes": [
+    {
+      "id": "sys_catalog",
+      "lane": "arch",
+      "col": 0,
+      "type": "database",
+      "label": "Vocab Catalog",
+      "sublabel": "SQLite + JSON data",
+      "tag": "Nguồn từ",
+      "sources": [
+        {
+          "path": "src/services/db.ts",
+          "line": 8,
+          "end_line": 32,
+          "label": "Kho từ vựng SQLite"
+        }
+      ]
+    },
+    {
+      "id": "sys_fsrs",
+      "lane": "arch",
+      "col": 2,
+      "type": "backend",
+      "label": "ts-fsrs Engine",
+      "sublabel": "Lập lịch bước học",
+      "tag": "Client FSRS",
+      "sources": [
+        {
+          "path": "src/services/srs.ts",
+          "line": 189,
+          "end_line": 204,
+          "label": "Thuật toán ts-fsrs"
+        }
+      ]
+    },
+    {
+      "id": "sys_storage",
+      "lane": "arch",
+      "col": 3,
+      "type": "database",
+      "label": "SQLite (WAL)",
+      "sublabel": "myenglish.db",
+      "tag": "Lưu cục bộ",
+      "sources": [
+        {
+          "path": "src/services/db.ts",
+          "line": 94,
+          "end_line": 105,
+          "label": "SQLite WAL mode"
+        }
+      ]
+    },
+    {
+      "id": "sys_rust",
+      "lane": "arch",
+      "col": 4,
+      "type": "backend",
+      "label": "Rust Optimizer",
+      "sublabel": "Rayon worker fit W",
+      "tag": "Tauri v2",
+      "sources": [
+        {
+          "path": "src-tauri/src/lib.rs",
+          "line": 2146,
+          "end_line": 2158,
+          "label": "FSRS Rust optimizer"
+        }
+      ]
+    },
+    {
+      "id": "sys_sync",
+      "lane": "arch",
+      "col": 5,
+      "type": "cloud",
+      "label": "Supabase Sync",
+      "sublabel": "Postgres Delta sync",
+      "tag": "Bảo vệ đám mây",
+      "sources": [
+        {
+          "path": "src/services/supabase.ts",
+          "line": 10,
+          "end_line": 28,
+          "label": "Supabase Cloud Sync"
+        }
+      ]
+    },
+    {
+      "id": "intro_ui",
+      "lane": "recognition",
+      "col": 0,
+      "type": "external",
+      "label": "0m: Thẻ Intro",
+      "sublabel": "Audio + IPA + Nghĩa",
+      "tag": "Xuất hiện",
+      "sources": [
+        {
+          "path": "src/services/cards.ts",
+          "line": 69,
+          "end_line": 84,
+          "label": "Thẻ Intro và Cooldown"
+        }
+      ]
+    },
+    {
+      "id": "known_mark",
+      "lane": "production",
+      "col": 0,
+      "type": "security",
+      "label": "Đã biết (Bypass)",
+      "sublabel": "Khởi tạo S >= 21d",
+      "tag": "Lối tắt",
+      "sources": [
+        {
+          "path": "src/services/knownWords.ts",
+          "line": 1,
+          "end_line": 20,
+          "label": "Đánh dấu từ đã biết"
+        }
+      ]
+    },
+    {
+      "id": "quiz_1m",
+      "lane": "recognition",
+      "col": 1,
+      "type": "frontend",
+      "label": "1m: Quiz 1",
+      "sublabel": "Trắc nghiệm / Flip",
+      "tag": "+60s nghỉ",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1570,
+          "end_line": 1574,
+          "label": "Quiz nhận diện lần 1"
+        }
+      ]
+    },
+    {
+      "id": "quiz_10m",
+      "lane": "recognition",
+      "col": 2,
+      "type": "frontend",
+      "label": "10m: Quiz 2",
+      "sublabel": "Nghe / Trắc nghiệm",
+      "tag": "+10m FSRS",
+      "sources": [
+        {
+          "path": "src/services/srs.ts",
+          "line": 189,
+          "end_line": 204,
+          "label": "Quiz ngắn hạn lần 2"
+        }
+      ]
+    },
+    {
+      "id": "review_2d",
+      "lane": "recognition",
+      "col": 3,
+      "type": "backend",
+      "label": "Ngày 2: Ôn lần 1",
+      "sublabel": "Ghép câu / MC đảo",
+      "tag": "+2 ngày",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1603,
+          "end_line": 1608,
+          "label": "Ôn nhận diện chu kỳ"
+        }
+      ]
+    },
+    {
+      "id": "unlock_gate",
+      "lane": "production",
+      "col": 3,
+      "type": "security",
+      "label": "S >= 3 ngày",
+      "sublabel": "Mở thang Recall",
+      "tag": "Tự động",
+      "sources": [
+        {
+          "path": "src/services/learnerProfile.ts",
+          "line": 64,
+          "end_line": 67,
+          "label": "Điều kiện mở Recall"
+        }
+      ]
+    },
+    {
+      "id": "prod_day3",
+      "lane": "production",
+      "col": 4,
+      "type": "frontend",
+      "label": "Ngày 3: Recall",
+      "sublabel": "Ghép chữ / Điền từ",
+      "tag": "Production",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1575,
+          "end_line": 1582,
+          "label": "Thẻ sản sinh bậc 1"
+        }
+      ]
+    },
+    {
+      "id": "review_prep",
+      "lane": "recognition",
+      "col": 4,
+      "type": "backend",
+      "label": "Ngày 4: Củng cố",
+      "sublabel": "Đọc hiểu / Nghe",
+      "tag": "Đang học",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1604,
+          "end_line": 1608,
+          "label": "Củng cố nhận diện"
+        }
+      ]
+    },
+    {
+      "id": "mature_12d",
+      "lane": "recognition",
+      "col": 5,
+      "type": "database",
+      "label": "Ngày 12: Nhớ lâu",
+      "sublabel": "Nối nghĩa / Nghe sâu",
+      "tag": "Mastered",
+      "sources": [
+        {
+          "path": "src/services/progress.ts",
+          "line": 11,
+          "end_line": 15,
+          "label": "Mốc Nhớ lâu 21 ngày"
+        }
+      ]
+    },
+    {
+      "id": "prod_long",
+      "lane": "production",
+      "col": 5,
+      "type": "database",
+      "label": "Ngày 14+: Phản xạ",
+      "sublabel": "Tự gõ / Đặt câu",
+      "tag": "Song song",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1598,
+          "end_line": 1600,
+          "label": "Gõ từ tự do hoàn chỉnh"
+        }
+      ]
+    },
+    {
+      "id": "lapse_step",
+      "lane": "lapse",
+      "col": 2,
+      "type": "security",
+      "label": "Quên (Again)",
+      "sublabel": "Hạ về ghép chữ / MC",
+      "tag": "Học lại",
+      "sources": [
+        {
+          "path": "src/services/smartReview.ts",
+          "line": 1577,
+          "end_line": 1579,
+          "label": "Cơ chế hạ cấp khi quên"
+        }
+      ]
+    },
+    {
+      "id": "maintenance_40d",
+      "lane": "lapse",
+      "col": 5,
+      "type": "cloud",
+      "label": "40d .. 150d+",
+      "sublabel": "Hậu kiểm & Bảo dưỡng",
+      "tag": "Dài hạn",
+      "sources": [
+        {
+          "path": "src/utils/reviewSchedule.ts",
+          "line": 155,
+          "end_line": 175,
+          "label": "Lịch ôn dài hạn FSRS"
+        }
+      ]
+    }
+  ],
+  "edges": [
+    {
+      "id": "edge_cat_intro",
+      "from": "sys_catalog",
+      "to": "intro_ui",
+      "label": "Nạp từ",
+      "variant": "default"
+    },
+    {
+      "id": "edge_intro_quiz1",
+      "from": "intro_ui",
+      "to": "quiz_1m",
+      "label": "Sau 60s",
+      "variant": "default"
+    },
+    {
+      "id": "edge_intro_known",
+      "from": "intro_ui",
+      "to": "known_mark",
+      "label": "Bấm Đã biết",
+      "variant": "security"
+    },
+    {
+      "id": "edge_quiz1_quiz2",
+      "from": "quiz_1m",
+      "to": "quiz_10m",
+      "label": "Good (+10m)",
+      "variant": "default"
+    },
+    {
+      "id": "edge_quiz1_lapse",
+      "from": "quiz_1m",
+      "to": "lapse_step",
+      "label": "Again",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "edge_quiz2_fsrs",
+      "from": "quiz_10m",
+      "to": "sys_fsrs",
+      "label": "Ghi nhận",
+      "variant": "default"
+    },
+    {
+      "id": "edge_quiz2_review",
+      "from": "quiz_10m",
+      "to": "review_2d",
+      "label": "Good (+2d)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_quiz2_lapse",
+      "from": "quiz_10m",
+      "to": "lapse_step",
+      "label": "Again",
+      "variant": "security",
+      "role": "error"
+    },
+    {
+      "id": "edge_review_db",
+      "from": "review_2d",
+      "to": "sys_storage",
+      "label": "Lưu WAL",
+      "variant": "default"
+    },
+    {
+      "id": "edge_review_gate",
+      "from": "review_2d",
+      "to": "unlock_gate",
+      "label": "Đạt S >= 3d",
+      "variant": "security"
+    },
+    {
+      "id": "edge_gate_prod",
+      "from": "unlock_gate",
+      "to": "prod_day3",
+      "label": "Lên lịch",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_review_prep",
+      "from": "review_2d",
+      "to": "review_prep",
+      "label": "Củng cố (+2d)",
+      "variant": "default"
+    },
+    {
+      "id": "edge_review_lapse",
+      "from": "review_2d",
+      "to": "lapse_step",
+      "label": "Again",
+      "variant": "security",
+      "role": "return"
+    },
+    {
+      "id": "edge_storage_rust",
+      "from": "sys_storage",
+      "to": "sys_rust",
+      "label": "Tối ưu W",
+      "variant": "default"
+    },
+    {
+      "id": "edge_prod_long",
+      "from": "prod_day3",
+      "to": "prod_long",
+      "label": "Good (+11d)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_prep_mature",
+      "from": "review_prep",
+      "to": "mature_12d",
+      "label": "S >= 21d (+8d)",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_mature_sync",
+      "from": "mature_12d",
+      "to": "sys_sync",
+      "label": "Đồng bộ mây",
+      "variant": "emphasis"
+    },
+    {
+      "id": "edge_mature_maint",
+      "from": "mature_12d",
+      "to": "maintenance_40d",
+      "label": "+42d .. 150d",
+      "variant": "dashed"
+    },
+    {
+      "id": "edge_lapse_retry",
+      "from": "lapse_step",
+      "to": "quiz_10m",
+      "label": "Làm lại 10m",
+      "variant": "dashed",
+      "role": "return"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "1. Kiến Trúc Hạ Tầng Hỗ Trợ (Architecture Tier)",
+      "items": [
+        "Vocab Catalog & SQLite: Quản lý nạp từ vựng ban đầu và lưu trữ trạng thái cục bộ chế độ WAL.",
+        "ts-fsrs Engine: Thuật toán ở client tính toán độ bền (S), độ khó (D) và khoảng cách từng bước học.",
+        "Rust Rayon Worker: Tối ưu hóa đa nhân tham số FSRS cá nhân hóa dựa trên dữ liệu ôn tập thực tế.",
+        "Supabase Cloud Sync: Đồng bộ hai chiều Delta sync lưu trữ an toàn khi đạt mốc trí nhớ dài hạn."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "2. Vòng Đời & Trạng Thái Học (FSRS Lifecycle)",
+      "items": [
+        "State.New (Từ mới): Xuất hiện qua thẻ Intro với 60s cooldown đo lường trí nhớ thực tế.",
+        "State.Learning (Bước ngắn hạn): Vượt qua 2 quiz 1m & 10m để hoàn tất nạp từ vào bộ nhớ đệm.",
+        "State.Review (Ôn chu kỳ ngày): Giãn cách ngày theo thuật toán ngắt quãng (Ngày 2 -> Ngày 4 -> Ngày 12).",
+        "Mở khóa Production: Khi S >= 3 ngày, tự động tách thẻ thứ hai để rèn luyện phản xạ 2 chiều.",
+        "Mốc Nhớ lâu (Mastered): Đạt khi thẻ nhận diện ở State.Review và Stability >= 21 ngày."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "3. Lộ Trình & Mốc Thời Gian Xuất Hiện (Timeline)",
+      "items": [
+        "T = 0m: Thẻ Intro xuất hiện đầy đủ phiên âm, audio, nghĩa tiếng Việt, câu ví dụ.",
+        "T = 1m: Quiz 1 kiểm tra nhận diện sau 60s nghỉ để đánh giá trí nhớ tức thời.",
+        "T = 10m: Quiz 2 kiểm tra lại trong cùng buổi học để ghim từ vào bộ nhớ làm việc.",
+        "T = Ngày 2 (+48h): Ôn chu kỳ lần đầu; đạt Good sẽ đưa Stability lên >= 3 ngày.",
+        "T = Ngày 3 (+24h): Thẻ Production mở khóa, xuất hiện dưới dạng tự gõ chính tả.",
+        "T = Ngày 12 (+8-10d): Ôn chu kỳ lần 2; vượt qua sẽ đạt mốc Nhớ lâu (S >= 21 ngày).",
+        "T = Ngày 40+ đến 150d+: Các mốc bảo dưỡng dài hạn giãn cách nhiều tháng."
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "4. Thang Độ Khó Bài Tập & Hạ Cấp Khi Quên (Recall Ladder & Lapse)",
+      "items": [
+        "Nhận diện (EN -> VN): Flip Card -> Multiple Choice -> Listening -> Context Match -> Meaning Match.",
+        "Sản sinh (VN -> EN): Thang bậc thang: Letter Tiles (ghép chữ) -> Cloze (điền từ) -> Spelling (gõ tự do) -> Free Writing.",
+        "Cơ chế hạ cấp khi quên (Lapse): Chọn 'Again' sẽ hạ cấp bài tập (Spelling -> Letter Tiles/MC), tăng lapse, rơi về State.Relearning và lưu vào Sổ tay lỗi."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "5. Lối Tắt 'Đã Biết' & Cơ Chế Hậu Kiểm (Known Bypass & Verification)",
+      "items": [
+        "Bypass thông minh: Người học bấm 'Đã biết' tại thẻ Intro để bỏ qua toàn bộ giai đoạn học ngắn hạn.",
+        "Khởi tạo S >= 21 ngày: Thẻ được đưa thẳng vào nhóm 'Nhớ lâu · Đã biết', không gây áp lực ôn tập hàng ngày.",
+        "Cơ chế Hậu kiểm (Random Check): Hệ thống vẫn kiểm tra ngẫu nhiên sau vài tháng để xác thực trí nhớ thật.",
+        "Nếu trả lời đúng, xác nhận giữ lại ở nhóm Nhớ lâu; nếu trả lời sai, lập tức hạ về State.Relearning và đưa vào quy trình học lại từ đầu."
+      ]
+    }
+  ]
+}

@@ -104,6 +104,8 @@ export type ReviewCard = WordDetail & {
   srsRecognition: SRSReview;
   /** A word set aside as too easy, drawn for its occasional check (services/easyWords) */
   easyCheck?: boolean;
+  /** How many times this card was requeued in the current session after an Again answer */
+  requeueCount?: number;
 };
 
 export interface CreateWordInput {

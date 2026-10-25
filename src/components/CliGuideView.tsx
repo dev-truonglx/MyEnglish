@@ -1136,6 +1136,22 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   <VolumeX className="w-3.5 h-3.5 shrink-0" />
                   <span>Đã tắt âm thanh tự động khi hiển thị từ để không làm phiền bạn.</span>
                 </div>
+                <label className="pt-2 border-t border-slate-200/80 dark:border-zinc-800/80 flex items-start justify-between gap-3 cursor-pointer">
+                  <span className="space-y-0.5">
+                    <span className="text-xs font-bold text-slate-800 dark:text-zinc-200 block">
+                      Âm báo nhẹ khi hiện thẻ nhắc
+                    </span>
+                    <span className="text-[11px] text-slate-500 dark:text-zinc-400 block leading-snug">
+                      Phát một tiếng chuông gió ngắn và êm khi thẻ nhắc xuất hiện ở góc màn hình để bạn dễ nhận biết.
+                    </span>
+                  </span>
+                  <input
+                    type="checkbox"
+                    className="mt-0.5 h-4 w-4 accent-cyan-600 shrink-0"
+                    checked={reminderSettings.nudgeSound !== false}
+                    onChange={(e) => handleUpdateReminder({ nudgeSound: e.target.checked })}
+                  />
+                </label>
               </div>
             </div>
           </div>

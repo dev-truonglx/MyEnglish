@@ -4,10 +4,12 @@ import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import {
   generateMultipleChoiceQuestion,
+  isLeech,
   multipleChoiceDirection,
   type MultipleChoiceQuestion,
   type MultipleChoiceOption,
 } from "@/services/smartReview";
+import { getStoredMnemonic } from "@/services/aiMnemonic";
 import { getConciseMeaning } from "@/services/meaningText";
 import { playWrongTry } from "@/services/sound";
 
@@ -40,12 +42,17 @@ export default function MultipleChoiceExercise({
     };
   }, []);
 
+  const requeueCount = (word as { requeueCount?: number }).requeueCount ?? 0;
   // Young cards are asked English -> Vietnamese; older ones sometimes Vietnamese -> English
   const questionData: MultipleChoiceQuestion = useMemo(
-    () => generateMultipleChoiceQuestion(word, allWords, multipleChoiceDirection(word)),
+    () => generateMultipleChoiceQuestion(word, allWords, multipleChoiceDirection(word, requeueCount)),
     // Options must not reshuffle while answering
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [word.id]
+    [word.id, requeueCount]
+  );
+  const leechMnemonic = useMemo(
+    () => (isLeech(word.srs) && questionData.promptType === "en_to_vn" ? getStoredMnemonic(word.id, word.meaning_vn) : null),
+    [word.id, word.meaning_vn, word.srs, questionData.promptType]
   );
 
   // Reset state on word change
@@ -155,6 +162,12 @@ export default function MultipleChoiceExercise({
           <p className="text-xs italic text-slate-400 dark:text-zinc-500">
             {questionData.partOfSpeech}
           </p>
+        )}
+
+        {leechMnemonic && (
+          <div className="mt-2 px-3 py-1.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300">
+            💡 <span className="font-semibold">Mẹo nhớ:</span> {leechMnemonic}
+          </div>
         )}
       </div>
 

@@ -46,7 +46,7 @@ import {
   schedulingDecision,
   type PracticeReason,
 } from "@/services/reviewRecorder";
-import { levelOf, markWordEasy, recordKnownCheck, unmarkWordEasy } from "@/services/easyWords";
+import { levelOf, markWordEasy, recordKnownCheck, unmarkWordEasy, knownCheckDays } from "@/services/easyWords";
 import { nextWaitingWord } from "@/services/vocabFeed";
 import { loadCatalogMeanings } from "@/services/vocabCatalog";
 import { setMainSessionActive } from "@/services/activeSession";
@@ -62,7 +62,7 @@ import { practiceExerciseType } from "@/services/practicePicker";
 
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
-const INTRO_GAP = 4; // Cards shown between a new word's introduction and its first quiz
+const INTRO_GAP = 6; // Cards shown between a new word's introduction and its first quiz
 /**
  * Exercises about one word that is plain to see (or to recall): "Đã biết" is offered on them. Not on matching
  * several words (context / meaning match) nor on ordering a sentence: there the card's word is one among others.
@@ -442,10 +442,21 @@ export function useReviewSession({
     if (type === "free_writing" && aiReadyRef.current !== true) return "spelling";
     const pool = distractorPool && distractorPool.length >= 4 ? distractorPool : (wordsToReview as WordDetail[]);
     const upcoming = new Set(queue.slice(currentIndex + 1).map((c) => c.id));
+    const allInSession = new Set(queue.map((c) => c.id));
+    const matchExclude =
+      type === "context_match"
+        ? prepareContextMatch(card, pool, allInSession).length >= 3
+          ? allInSession
+          : upcoming
+        : type === "meaning_match"
+          ? prepareMeaningMatch(card, pool, allInSession).length >= 3
+            ? allInSession
+            : upcoming
+          : upcoming;
     if (type === "cloze" && !pickExample(card)) return "spelling";
     if (type === "reverse_cloze" && !pickExample(card)) return "multiple_choice";
-    if (type === "context_match" && prepareContextMatch(card, pool, upcoming).length < 3) return "multiple_choice";
-    if (type === "meaning_match" && prepareMeaningMatch(card, pool, upcoming).length < 3) return "multiple_choice";
+    if (type === "context_match" && prepareContextMatch(card, pool, matchExclude).length < 3) return "multiple_choice";
+    if (type === "meaning_match" && prepareMeaningMatch(card, pool, matchExclude).length < 3) return "multiple_choice";
     return type;
   };
 
@@ -584,9 +595,11 @@ export function useReviewSession({
   };
 
   /**
-   * "Đã biết" (services/easyWords): on a new word's introduction (not on a word being relearned), or on any other
-   * card before it is answered, when its exercise is about that one word (KNOWN_MARK_EXERCISES). The word is set aside without touching FSRS and its cards leave the session; a new
-   * word's place goes to the next word waiting, so the day's new words stay words the learner does not know yet.
+   * "Đã biết" (services/easyWords): on a new word's introduction (not on a word being relearned), or on an
+   * exercise card AFTER the user selects/enters the correct answer (KNOWN_MARK_EXERCISES). The user must answer
+   * correctly first, after which they can decide whether they already know it for sure.
+   * The word is set aside without touching FSRS and its cards leave the session; a new word's place goes
+   * to the next word waiting, so the day's new words stay words the learner does not know yet.
    */
   const canMarkKnown =
     !!currentWord &&
@@ -594,14 +607,19 @@ export function useReviewSession({
     !currentWord.easyCheck &&
     (isIntroCard
       ? currentWord.direction === "recognition" && (currentWord.srs.reps ?? 0) === 0
-      : KNOWN_MARK_EXERCISES.has(effectiveExerciseType) && !pendingAnswer && !hasCheckedAnswer);
-  // The word just marked, shown (with an undo) on the next card only
+      : KNOWN_MARK_EXERCISES.has(effectiveExerciseType) &&
+        pendingAnswer !== null &&
+        isCorrect === true &&
+        pendingAnswer.rating !== Rating.Again &&
+        (pendingAnswer.attempts ?? 0) === 0);
+  // The word just marked, shown (with an undo and interval notification) on the next card only
   const [knownMark, setKnownMark] = useState<{
     card: ReviewCard;
     removed: ReviewCard[];
     index: number;
     replacementId: string | null;
     fromIntro: boolean;
+    checkDays: number;
   } | null>(null);
   // The answer to a marked word's check, shown on its card (with what it changed for its level)
   const [knownCheckResult, setKnownCheckResult] = useState<{
@@ -614,12 +632,17 @@ export function useReviewSession({
   } | null>(null);
 
   const handleMarkKnown = async () => {
-    if (!currentWord || !canMarkKnown || gradingLockRef.current || answerLockedRef.current || sessionCompleted || sessionEndedRef.current) return;
-    gradingLockRef.current = true;
+    if (!currentWord || !canMarkKnown || isAdvancing || continuingRef.current || sessionCompleted || sessionEndedRef.current) return;
+    continuingRef.current = true;
+    setIsAdvancing(true);
     const word = currentWord;
     const index = currentIndex;
     const fromIntro = isIntroCard;
     if (fromIntro) introducedAtRef.current.set(currentKey, Date.now());
+
+    // Await any pending background recordAnswer to finish cleanly
+    await (pendingRecordRef.current ?? Promise.resolve(null));
+
     const done = await markWordEasy(word.id).then(
       () => true,
       (err) => {
@@ -630,7 +653,8 @@ export function useReviewSession({
     if (sessionEndedRef.current) return;
     if (!done) {
       if (fromIntro) introducedAtRef.current.delete(currentKey);
-      gradingLockRef.current = false;
+      continuingRef.current = false;
+      setIsAdvancing(false);
       setFeedbackMessage({ text: "Chưa đánh dấu được từ này, thử lại nhé.", type: "error" });
       return;
     }
@@ -649,13 +673,14 @@ export function useReviewSession({
     const nextQueue = added ? [...kept, added] : kept;
     queueRef.current = nextQueue;
     setQueue(nextQueue);
-    setKnownMark({ card: word, removed, index, replacementId: added?.id ?? null, fromIntro });
+    const checkDays = knownCheckDays(word.id, 0);
+    setKnownMark({ card: word, removed, index, replacementId: added?.id ?? null, fromIntro, checkDays });
     // Nothing left after this card: end the session the way the last answer does (advance), instead of
     // moving past the end of the queue with no summary
     resetCardState();
     advance({ nextQueueLength: nextQueue.length, reviewCountAfter: reviewCountRef.current });
   };
-  const knownMarkShown = knownMark && currentIndex === knownMark.index + 1 ? knownMark : null;
+  const knownMarkShown = knownMark && (currentIndex === knownMark.index + 1 || (sessionCompleted && currentIndex === knownMark.index)) ? knownMark : null;
 
   /** Undo "Đã biết": back on the schedule and next in this session; its replacement waits for another time */
   const undoMarkKnown = async () => {
@@ -855,7 +880,10 @@ export function useReviewSession({
       const graded: ReviewCard =
         result && result.direction === currentWord.direction ? cardWithResult(currentWord, result) : currentWord;
       // A missed easy check comes back as an ordinary card: the word is on the schedule again
-      const updatedWord: ReviewCard = graded.easyCheck ? { ...graded, easyCheck: false } : graded;
+      const updatedWord: ReviewCard = {
+        ...(graded.easyCheck ? { ...graded, easyCheck: false } : graded),
+        requeueCount: requeued + 1,
+      };
       const index = currentIndex;
       setQueue((prev) => {
         const insertAt = requeuePosition(prev.length, index, REQUEUE_GAP);
@@ -1152,8 +1180,10 @@ export function useReviewSession({
    * An exercise was answered (multiple choice, letter tiles, matching…): keep it on screen with the right
    * answer until the learner continues, instead of jumping to the next card.
    */
-  const holdExerciseAnswer = (rating: Rating, exerciseType: ExerciseType, attempts: number) => {
+  const holdExerciseAnswer = (rating: Rating, exerciseType: ExerciseType, attempts: number, correct?: boolean) => {
     if (!currentWord || gradingLockRef.current || pendingAnswer) return;
+    const isAnsCorrect = correct ?? (attempts === 0 && rating !== Rating.Again);
+    setIsCorrect(isAnsCorrect);
     // Recognition is capped at Good (as when it is recorded), so the "see it again in…" preview is right
     const shown = currentWord.direction === "recognition" && rating === Rating.Easy ? Rating.Good : rating;
     holdAnswer({ rating: shown, exerciseType, attempts, responseTimeMs: Date.now() - cardStartTime.current });
@@ -1183,11 +1213,23 @@ export function useReviewSession({
       // Hidden behind another tab: the keys belong to that tab
       if (!active || sessionCompleted || isAdvancing) return;
 
-      // Answer waiting (any exercise): Enter, from the input or anywhere, moves to the next card
+      // Answer waiting (any exercise): Enter moves to next card, D marks known if available
       if (pendingAnswer) {
         if (e.key === "Enter") {
           e.preventDefault();
           confirmCorrectAnswer();
+          return;
+        }
+        if (
+          (e.key === "d" || e.key === "D") &&
+          !e.metaKey &&
+          !e.ctrlKey &&
+          !e.altKey &&
+          canMarkKnown
+        ) {
+          e.preventDefault();
+          handleMarkKnown();
+          return;
         }
         return;
       }

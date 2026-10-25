@@ -5,6 +5,9 @@ import {
   incrementConsecutiveSkipCount,
   resetConsecutiveSkipCount,
   selectMicroQuizQuestion,
+  selectMicroQuizQueue,
+  findMostFadingDueWord,
+  resolveNudgeMascot,
   evaluateMicroQuizAnswer,
   copyVariantIndex,
   localDayNumber,
@@ -13,6 +16,10 @@ import {
   type ReminderBranch,
   type ReminderCopyFacts,
 } from "@/services/duoMotivation";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReviewNudge from "@/components/ReviewNudge";
+import { buildNudgePayload } from "@/services/reminderSettings";
 import { Rating } from "ts-fsrs";
 import type { WordDetail } from "@/types/database";
 
@@ -298,6 +305,117 @@ describe("duoMotivation algorithm", () => {
       const words = dummyWords.map((w) => ({ ...w, srs: { ...w.srs, next_review_date: future } })) as WordDetail[];
       const q = selectMicroQuizQuestion([], words);
       expect(q?.scheduled).toBe(false);
+    });
+
+    it("builds a distinct queue of up to 3 questions for the in-nudge momentum chain", () => {
+      const due = new Date(Date.now() - 60_000).toISOString();
+      const words = dummyWords.map((w) => ({ ...w, srs: { ...w.srs, next_review_date: due } })) as WordDetail[];
+      const queue = selectMicroQuizQueue(words, words, 3);
+      expect(queue).toHaveLength(3);
+      expect(new Set(queue.map((q) => q.wordId)).size).toBe(3);
+      for (const q of queue) {
+        expect(q.options).toHaveLength(3);
+        expect(typeof q.retrievability).toBe("number");
+        expect(typeof q.stabilityDays).toBe("number");
+      }
+    });
+
+    it("finds the fading word with the highest stability at risk and weaves its name into copy", () => {
+      const now = new Date("2026-10-25T11:00:00Z");
+      const due = new Date(now.getTime() - 10 * 86_400_000).toISOString();
+      const longAgo = new Date(now.getTime() - 45 * 86_400_000).toISOString();
+      const fadingWords: WordDetail[] = [
+        {
+          ...dummyWords[0],
+          id: "f1",
+          word: "ephemeral",
+          srs: { state: 2, reps: 4, lapses: 0, difficulty: 5, stability: 4, scheduled_days: 4, elapsed_days: 45, last_review: longAgo, next_review_date: due },
+        },
+        {
+          ...dummyWords[1],
+          id: "f2",
+          word: "concurrent",
+          srs: { state: 2, reps: 6, lapses: 0, difficulty: 5, stability: 14, scheduled_days: 14, elapsed_days: 45, last_review: longAgo, next_review_date: due },
+        },
+      ];
+      const top = findMostFadingDueWord(fadingWords, now);
+      expect(top?.word).toBe("concurrent");
+      expect(top?.stabilityDays).toBe(14);
+
+      const variants = reminderVariants("default", {
+        ...factsOf({ dueCount: 5, streak: 3, todayCount: 2, dailyGoal: 10 }),
+        fadingCount: 2,
+        fadingWord: top?.word,
+        fadingStabilityDays: top?.stabilityDays,
+      });
+      expect(variants.some((v) => v.message.includes("concurrent") && v.message.includes("14 ngày"))).toBe(true);
+    });
+
+    it("varies mascot icon and gradient by context to avoid visual habituation", () => {
+      expect(resolveNudgeMascot({ mood: "alarm" }).icon).toBe("flame");
+      expect(resolveNudgeMascot({ mood: "happy", todayCount: 8, dailyGoal: 10 }).icon).toBe("target");
+      expect(resolveNudgeMascot({ mood: "happy", fadingCount: 3, todayCount: 2, dailyGoal: 10 }).icon).toBe("hourglass");
+      expect(resolveNudgeMascot({ mood: "happy", moment: "morning" }).icon).toBe("sun");
+      expect(resolveNudgeMascot({ mood: "happy", hour: 12 }).icon).toBe("coffee");
+      expect(resolveNudgeMascot({ mood: "happy", moment: "after_share" }).icon).toBe("sparkles");
+      expect(resolveNudgeMascot({ mood: "happy", hour: 15 }).icon).toBe("owl");
+    });
+
+    it("renders Word Teaser hook, Goal Gradient chip, and Fading badge on ReviewNudge", () => {
+      const due = new Date(Date.now() - 60_000).toISOString();
+      const words = dummyWords.map((w) => ({ ...w, srs: { ...w.srs, next_review_date: due } })) as WordDetail[];
+      const queue = selectMicroQuizQueue(words, words, 3);
+      queue[0] = { ...queue[0], isFading: true, stabilityDays: 12 };
+
+      // 1. Nudge mode with Word Teaser + Goal Gradient (8/10 = 2 left)
+      const nudgeHtml = renderToStaticMarkup(
+        createElement(ReviewNudge, {
+          initialPayload: buildNudgePayload(5, undefined, {
+            microQuiz: queue[0],
+            microQuizQueue: queue,
+            todayCount: 8,
+            dailyGoal: 10,
+            fadingCount: 2,
+          }),
+        })
+      );
+      expect(nudgeHtml).toContain('data-testid="nudge-word-teaser"');
+      expect(nudgeHtml).toContain(queue[0].word);
+      expect(nudgeHtml).toContain("Đang phai · 12d");
+      expect(nudgeHtml).toContain('data-testid="nudge-goal-gradient"');
+      expect(nudgeHtml).toContain("Còn 2 câu");
+
+      // 2. Attention pulse in the last 5 seconds
+      const pulseHtml = renderToStaticMarkup(
+        createElement(ReviewNudge, {
+          initialPayload: buildNudgePayload(5, undefined, {
+            autoOpenSeconds: 4,
+            microQuiz: queue[0],
+          }),
+        })
+      );
+      expect(pulseHtml).toContain('data-testid="nudge-attention-countdown"');
+      expect(pulseHtml).toContain("4s");
+
+      // 3. Quiz mode showing chain counter "Câu 1/3"
+      const quizHtml = renderToStaticMarkup(
+        createElement(ReviewNudge, {
+          initialPayload: buildNudgePayload(5, undefined, {
+            microQuiz: queue[0],
+            microQuizQueue: queue,
+            fadingCount: 3,
+            motivation: {
+              tone: "level_2_playful_guilt",
+              title: "Một câu nhanh?",
+              message: "Thử 1 câu nhanh",
+              mascotMood: "happy",
+              isMicroQuizPreferred: true,
+            },
+          }),
+        })
+      );
+      expect(quizHtml).toContain("Câu 1/3");
+      expect(quizHtml).toContain('data-testid="nudge-fading-badge"');
     });
   });
 

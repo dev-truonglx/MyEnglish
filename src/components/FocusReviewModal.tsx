@@ -308,7 +308,11 @@ export default function FocusReviewModal({ onClose, isPreview = false }: FocusRe
     const count = retryCountRef.current.get(key) ?? 0;
     if (count >= MAX_POPUP_RETRIES) return false;
     retryCountRef.current.set(key, count + 1);
-    setQueue((prev) => [...prev, item]);
+    const nextItem: FocusReviewItem =
+      item.kind === "word"
+        ? { ...item, word: { ...item.word, requeueCount: count + 1 } }
+        : item;
+    setQueue((prev) => [...prev, nextItem]);
     return true;
   };
 

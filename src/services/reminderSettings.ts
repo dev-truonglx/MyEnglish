@@ -32,6 +32,7 @@ export interface ReminderSettings {
   nightQuiet: boolean; // no reminders from NIGHT_QUIET_START to NIGHT_QUIET_END
   maxNudgesPerDay: number; // at most this many reminders a day (0 = no limit)
   anchors: ReminderAnchor[]; // study times chosen by the learner ("after lunch"), see reminderMoments
+  nudgeSound?: boolean; // subtle two-note chime when the corner reminder card appears
 }
 
 /** Storage key of the reminder settings (shared by the windows: a write in one fires `storage` in the others) */
@@ -57,6 +58,7 @@ export const DEFAULT_REMINDER_SETTINGS: ReminderSettings = {
   nightQuiet: true,
   maxNudgesPerDay: 8,
   anchors: [],
+  nudgeSound: true,
 };
 
 /** Night hours without reminders (local time): from 22:00 to 07:00 */
@@ -162,8 +164,21 @@ export interface ReviewNudgePayload {
   consecutiveSkips?: number;
   motivation?: DuoMotivationState;
   microQuiz?: MicroQuizQuestion | null;
+  /** Up to 3 distinct questions so the learner can chain 1–3 quick answers directly on the nudge card */
+  microQuizQueue?: MicroQuizQuestion[];
   /** Shown at a natural transition (see reminderMoments.ts) rather than by the clock */
   moment?: ReminderMoment | null;
+  /** Learner's progress today, for the Goal Gradient chip on the reminder card */
+  todayCount?: number;
+  dailyGoal?: number;
+  streak?: number;
+  /** Due studied words whose recall probability fell below FADING_RETRIEVABILITY */
+  fadingCount?: number;
+  /** Highest-stability fading word to highlight on the card */
+  fadingWord?: string | null;
+  fadingStabilityDays?: number | null;
+  /** Whether to play a subtle chime when the reminder card appears */
+  nudgeSound?: boolean;
 }
 
 export function buildNudgePayload(
@@ -179,6 +194,7 @@ export function buildNudgePayload(
     autoOpenSeconds: NUDGE_AUTO_OPEN_SECONDS,
     snoozeMinutes: settings.snoozeMinutes ?? 10,
     consecutiveSkips: getConsecutiveSkipCount(),
+    nudgeSound: settings.nudgeSound !== false,
     ...extra,
   };
 }

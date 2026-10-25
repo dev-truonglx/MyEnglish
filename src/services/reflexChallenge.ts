@@ -174,6 +174,7 @@ interface CandidateItem {
   phonetic?: string | null;
   pos?: string | null;
   category: WordCategory;
+  recentlyReviewed?: boolean;
 }
 
 /**
@@ -204,6 +205,32 @@ function wasMet(w: WordDetail): boolean {
   return (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || !!w.srs?.last_review || (w.srsProduction?.reps ?? 0) > 0;
 }
 
+/** Cooldown window (3 hours) so words just reviewed in a study session are deprioritized in Reflex Challenge */
+export const RECENT_REFLEX_COOLDOWN_MS = 3 * 60 * 60 * 1000;
+
+function wasReviewedRecentlyForReflex(w: WordDetail, nowMs: number = Date.now()): boolean {
+  const recLast = w.srs?.last_review ? new Date(w.srs.last_review).getTime() : 0;
+  const prodLast = w.srsProduction?.last_review ? new Date(w.srsProduction.last_review).getTime() : 0;
+  const latest = Math.max(
+    Number.isFinite(recLast) ? recLast : 0,
+    Number.isFinite(prodLast) ? prodLast : 0
+  );
+  return latest > 0 && nowMs - latest <= RECENT_REFLEX_COOLDOWN_MS;
+}
+
+/**
+ * Shuffle a list of words while keeping words not reviewed in the last 3 hours ahead of recently reviewed ones.
+ */
+function shufflePreferringFresh<T>(items: readonly T[], isRecent: (item: T) => boolean): T[] {
+  const fresh: T[] = [];
+  const recent: T[] = [];
+  for (const item of items) {
+    if (isRecent(item)) recent.push(item);
+    else fresh.push(item);
+  }
+  return [...shuffle(fresh), ...shuffle(recent)];
+}
+
 /** How many of the learner's words one run is built from: 37 targets plus enough same-POS distractors. */
 export const REFLEX_SAMPLE_SIZE = 160;
 
@@ -211,8 +238,14 @@ export const REFLEX_SAMPLE_SIZE = 160;
  * A random sample of the learner's words for one run, so building the deck stays cheap with thousands of words
  * (a whole level marked "Đã biết" adds every word of it). Each met category gets an equal share first, the
  * rest of the met words fill what a small category leaves, and words never met only top it up.
+ * Words not reviewed in the last 3 hours are prioritized ahead of recently reviewed words within each category.
  */
-export function sampleReflexWords(words: readonly WordDetail[], limit = REFLEX_SAMPLE_SIZE): WordDetail[] {
+export function sampleReflexWords(
+  words: readonly WordDetail[],
+  limit = REFLEX_SAMPLE_SIZE,
+  now: Date = new Date()
+): WordDetail[] {
+  const nowMs = now.getTime();
   if (words.length <= limit) return [...words];
   const met: Record<Exclude<WordCategory, "catalog">, WordDetail[]> = { leech: [], learning: [], remembered_long: [], known: [] };
   const unmet: WordDetail[] = [];
@@ -224,12 +257,16 @@ export function sampleReflexWords(words: readonly WordDetail[], limit = REFLEX_S
   const picked: WordDetail[] = [];
   const leftover: WordDetail[] = [];
   for (const list of Object.values(met)) {
-    const mixed = shuffle(list);
+    const mixed = shufflePreferringFresh(list, (w) => wasReviewedRecentlyForReflex(w, nowMs));
     picked.push(...mixed.slice(0, share));
     leftover.push(...mixed.slice(share));
   }
-  if (picked.length > limit) return shuffle(picked).slice(0, limit);
-  picked.push(...shuffle(leftover).slice(0, limit - picked.length));
+  if (picked.length > limit) {
+    return shufflePreferringFresh(picked, (w) => wasReviewedRecentlyForReflex(w, nowMs)).slice(0, limit);
+  }
+  picked.push(
+    ...shufflePreferringFresh(leftover, (w) => wasReviewedRecentlyForReflex(w, nowMs)).slice(0, limit - picked.length)
+  );
   picked.push(...shuffle(unmet).slice(0, limit - picked.length));
   return picked;
 }
@@ -260,6 +297,7 @@ export function buildCandidatePool(
       pos: w.part_of_speech,
       // A word still waiting in the deck (never introduced) is not being learnt: it only fills, like deck words
       category: wasMet(w) ? classifyWord(w) : "catalog",
+      recentlyReviewed: wasReviewedRecentlyForReflex(w),
     });
   }
 
@@ -315,12 +353,24 @@ export function generateReflexQuestions(
     );
   }
 
-  // Categorize pool into distinct buckets
+  // Categorize pool into distinct buckets, prioritizing words not reviewed in the last 3 hours
   const buckets: Record<WordCategory, CandidateItem[]> = {
-    leech: shuffle(workingPool.filter((w) => w.category === "leech")),
-    learning: shuffle(workingPool.filter((w) => w.category === "learning")),
-    remembered_long: shuffle(workingPool.filter((w) => w.category === "remembered_long")),
-    known: shuffle(workingPool.filter((w) => w.category === "known")),
+    leech: shufflePreferringFresh(
+      workingPool.filter((w) => w.category === "leech"),
+      (w) => !!w.recentlyReviewed
+    ),
+    learning: shufflePreferringFresh(
+      workingPool.filter((w) => w.category === "learning"),
+      (w) => !!w.recentlyReviewed
+    ),
+    remembered_long: shufflePreferringFresh(
+      workingPool.filter((w) => w.category === "remembered_long"),
+      (w) => !!w.recentlyReviewed
+    ),
+    known: shufflePreferringFresh(
+      workingPool.filter((w) => w.category === "known"),
+      (w) => !!w.recentlyReviewed
+    ),
     catalog: shuffle(workingPool.filter((w) => w.category === "catalog")),
   };
 

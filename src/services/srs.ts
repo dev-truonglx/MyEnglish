@@ -678,10 +678,12 @@ import { productionUnlockDays } from "./learnerProfile";
 import {
   evaluateMotivationState,
   countFadingWords,
-  selectMicroQuizQuestion,
+  findMostFadingDueWord,
+  selectMicroQuizQueue,
   getConsecutiveSkipCount,
   getMissedNudgeStreak,
   sendDuoDesktopNotification,
+  type MicroQuizQuestion,
 } from "./duoMotivation";
 import { computeStreak, getActivityLogs, getDailyGoal, getLocalDateString } from "./streak";
 import {
@@ -1030,35 +1032,52 @@ class SRSBackgroundWorker {
       const todayWork = work ?? (await countTodayWork());
       const { total: dueCount, comeback } = todayWork;
       let motivation = undefined;
-      let microQuiz = undefined;
+      let microQuiz: MicroQuizQuestion | null | undefined = undefined;
+      let microQuizQueue: MicroQuizQuestion[] | undefined = undefined;
+      let todayCount = 0;
+      let dailyGoal = 10;
+      let streakCount = 0;
+      let fadingCount = 0;
+      let topFading: { word: string; retrievability: number; stabilityDays: number } | null = null;
 
       try {
         // The question needs schedules and meanings only: the whole collection without examples or stats. The due
         // words also tell the wording how many are fading (countFadingWords).
-        const [dueWords, allWords] = dueCount > 0 ? await Promise.all([getDueWordsLite(), getWordsLite()]) : [[], []];
+        const [dueWords, allWords] = await Promise.all([
+          dueCount > 0 ? getDueWordsLite() : Promise.resolve([]),
+          getWordsLite(),
+        ]);
         const activityLogs = getActivityLogs();
         const streakRes = computeStreak(Object.keys(activityLogs));
         const todayStr = getLocalDateString();
-        const todayCount = activityLogs[todayStr] || 0;
-        const dailyGoal = getDailyGoal();
+        todayCount = activityLogs[todayStr] || 0;
+        dailyGoal = getDailyGoal();
+        streakCount = streakRes.current;
         const consecutiveSkips = getConsecutiveSkipCount();
+        fadingCount = countFadingWords(dueWords);
+        topFading = findMostFadingDueWord(dueWords);
 
         motivation = evaluateMotivationState({
           dueCount,
           consecutiveSkips,
-          streak: streakRes.current,
+          streak: streakCount,
           todayCount,
           dailyGoal,
           hour: new Date().getHours(),
           comeback,
           moment: this.activeMoment,
           freezes: streakRes.freezes,
-          fadingCount: countFadingWords(dueWords),
+          fadingCount,
+          fadingWord: topFading?.word,
+          fadingStabilityDays: topFading?.stabilityDays,
           newToday: todayWork.newToday,
         });
 
-        if (dueCount > 0) microQuiz = selectMicroQuizQuestion(dueWords, allWords);
-
+        const queue = selectMicroQuizQueue(dueWords, allWords, 3);
+        if (queue.length > 0) {
+          microQuiz = queue[0];
+          microQuizQueue = queue;
+        }
       } catch (err) {
         console.warn("Error preparing Duo motivation payload:", err);
       }
@@ -1079,7 +1098,18 @@ class SRSBackgroundWorker {
         }
       }
 
-      const shown = await triggerReviewNudge(dueCount, { motivation, microQuiz, moment: this.activeMoment });
+      const shown = await triggerReviewNudge(dueCount, {
+        motivation,
+        microQuiz,
+        microQuizQueue,
+        moment: this.activeMoment,
+        todayCount,
+        dailyGoal,
+        streak: streakCount,
+        fadingCount,
+        fadingWord: topFading?.word ?? null,
+        fadingStabilityDays: topFading?.stabilityDays ?? null,
+      });
       // An OS notification only when the streak is at risk late in the day, at most once a day, and never
       // together with a corner card that just appeared (it already carries the same message, N20).
       // Snoozing / skipping is the learner's choice and is never escalated into more notifications.

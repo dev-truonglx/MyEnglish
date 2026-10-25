@@ -11,7 +11,7 @@ import FreeWritingExercise from "./exercises/FreeWritingExercise";
 import { getUserOverrideLevel } from "@/services/userProficiency";
 import { useReviewSession } from "@/hooks/useReviewSession";
 import { useStandingStore } from "@/stores/standingStore";
-import { formInSentence, pickExample, wordFormsPattern } from "@/services/smartReview";
+import { formInSentence, pickExample, prepareContextMatch, prepareMeaningMatch, wordFormsPattern } from "@/services/smartReview";
 import { handleSpeak } from "./review/speech";
 import SayAloudPrompt from "./review/SayAloudPrompt";
 import SessionSummary from "./review/SessionSummary";
@@ -226,8 +226,19 @@ export default function FlashcardReview({
     () => (currentWord ? (formInSentence(originalSentence, currentWord.word) ?? currentWord.word) : ""),
     [currentWord, originalSentence]
   );
-  // Words still to come in this session: never shown inside another card's exercise
+  // Words in this session: upcoming words are strictly excluded; earlier session words are also excluded
+  // whenever the pool has enough other studied words so the same words don't reappear as filler pairs.
   const upcomingIds = useMemo(() => new Set(queue.slice(currentIndex + 1).map((c) => c.id)), [queue, currentIndex]);
+  const allSessionIds = useMemo(() => new Set(queue.map((c) => c.id)), [queue]);
+  const matchPool = distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview;
+  const contextMatchExcludeIds = useMemo(
+    () => (currentWord && prepareContextMatch(currentWord, matchPool, allSessionIds).length >= 3 ? allSessionIds : upcomingIds),
+    [currentWord, matchPool, allSessionIds, upcomingIds]
+  );
+  const meaningMatchExcludeIds = useMemo(
+    () => (currentWord && prepareMeaningMatch(currentWord, matchPool, allSessionIds).length >= 3 ? allSessionIds : upcomingIds),
+    [currentWord, matchPool, allSessionIds, upcomingIds]
+  );
 
   // Hidden behind another tab: the exercises are unmounted so their window key listeners stop
   if (!active) return null;
@@ -235,30 +246,55 @@ export default function FlashcardReview({
   // Session Completed view with Learning Evaluation Metrics
   if (sessionCompleted) {
     return (
-      <SessionSummary
-        wordsToReview={wordsToReview}
-        sessionStats={sessionStats}
-        reviewCount={reviewCount}
-        xpState={xpState}
-        lastResult={lastResult}
-        onFinish={onFinish}
-        onRetryMissed={onRetryMissed}
-        bonusXp={focusSession.result?.xp ?? 0}
-        // A focus session's own summary already says when the next review is
-        nextReview={focusSession.result ? undefined : nextReview}
-        header={
-          focusSession.result ? (
-            <FocusSummary
-              result={focusSession.result}
-              next={nextReview}
-              onExtend={() => onStartFocus?.(5)}
-              onNavigate={(tab) => onNavigate?.(tab)}
-            />
-          ) : !focus && !practiceMode && onStartFocus ? (
-            <FocusTip onStart={onStartFocus} />
-          ) : null
-        }
-      />
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+        {knownMark && (
+          <div
+            role="status"
+            className="w-full mb-2.5 px-4 py-2.5 rounded-2xl shadow-lg border text-left animate-in fade-in slide-in-from-top-2 duration-200 shrink-0 bg-emerald-600/95 border-emerald-400 text-white shadow-emerald-500/20 flex items-center justify-between gap-3"
+          >
+            <div className="min-w-0">
+              <div className="text-xs font-bold flex items-center gap-1.5">
+                <span>✓</span>
+                <span className="truncate">Đã ghi nhận bạn biết chắc "{knownMark.card.word}"</span>
+              </div>
+              <div className="text-[11px] opacity-90 pl-5">
+                Từ này sẽ được nhắc lại ôn tập sau {knownMark.checkDays} ngày
+                {knownMark.replacementId ? " (đã thêm một từ mới khác thay chỗ)" : ""}.
+              </div>
+            </div>
+            <button
+              onClick={undoMarkKnown}
+              className="shrink-0 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
+            >
+              Hoàn tác
+            </button>
+          </div>
+        )}
+        <SessionSummary
+          wordsToReview={wordsToReview}
+          sessionStats={sessionStats}
+          reviewCount={reviewCount}
+          xpState={xpState}
+          lastResult={lastResult}
+          onFinish={onFinish}
+          onRetryMissed={onRetryMissed}
+          bonusXp={focusSession.result?.xp ?? 0}
+          // A focus session's own summary already says when the next review is
+          nextReview={focusSession.result ? undefined : nextReview}
+          header={
+            focusSession.result ? (
+              <FocusSummary
+                result={focusSession.result}
+                next={nextReview}
+                onExtend={() => onStartFocus?.(5)}
+                onNavigate={(tab) => onNavigate?.(tab)}
+              />
+            ) : !focus && !practiceMode && onStartFocus ? (
+              <FocusTip onStart={onStartFocus} />
+            ) : null
+          }
+        />
+      </div>
     );
   }
 
@@ -331,6 +367,31 @@ export default function FlashcardReview({
         </div>
       )}
 
+      {/* Floating Known Word Banner / Notification */}
+      {knownMark && (
+        <div
+          role="status"
+          className="w-full mb-2.5 px-4 py-2.5 rounded-2xl shadow-lg border text-left animate-in fade-in slide-in-from-top-2 duration-200 shrink-0 bg-emerald-600/95 border-emerald-400 text-white shadow-emerald-500/20 flex items-center justify-between gap-3"
+        >
+          <div className="min-w-0">
+            <div className="text-xs font-bold flex items-center gap-1.5">
+              <span>✓</span>
+              <span className="truncate">Đã ghi nhận bạn biết chắc "{knownMark.card.word}"</span>
+            </div>
+            <div className="text-[11px] opacity-90 pl-5">
+              Từ này sẽ được nhắc lại ôn tập sau {knownMark.checkDays} ngày
+              {knownMark.replacementId ? " (đã thêm một từ mới khác thay chỗ)" : ""}.
+            </div>
+          </div>
+          <button
+            onClick={undoMarkKnown}
+            className="shrink-0 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
+          >
+            Hoàn tác
+          </button>
+        </div>
+      )}
+
       {/* FLASHCARD BODY CONTAINER: takes the height left between the top bar and the grading bar (so the grading
           bar is always on screen, even in a short window or with bigger text) and scrolls when the content is taller */}
       <div
@@ -380,16 +441,7 @@ export default function FlashcardReview({
             Dạng bài này không kiểm tra {currentWord.direction === "production" ? "khả năng tự nhớ ra từ" : "việc hiểu nghĩa"} của thẻ này — chỉ tính là luyện thêm, lịch ôn không đổi.
           </div>
         ) : null}
-        {/* The word just marked "Đã biết" (on the next card only), with an undo */}
-        {knownMark && (
-          <div role="status" className="mt-1 text-center text-[11px] text-emerald-700 dark:text-emerald-300">
-            Đã ghi nhận bạn biết chắc "{knownMark.card.word}" (mục Đã biết) — từ không vào lịch ôn, thỉnh thoảng app hỏi lại ngẫu nhiên để kiểm chứng
-            {knownMark.replacementId ? " (đã thêm một từ mới khác thay chỗ)" : ""}.
-            <button onClick={undoMarkKnown} className="ml-1.5 font-semibold underline hover:no-underline">
-              Hoàn tác
-            </button>
-          </div>
-        )}
+
         {currentWord.easyCheck && (
           <div className="mt-1 text-center text-[11px] text-violet-700 dark:text-violet-300">
             {knownCheckOutcome
@@ -415,8 +467,8 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("multiple_choice", attempts, rating), "multiple_choice", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("multiple_choice", attempts, rating), "multiple_choice", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
             />
@@ -429,8 +481,8 @@ export default function FlashcardReview({
             <LetterTilesExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("letter_tiles", attempts, rating), "letter_tiles", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("letter_tiles", attempts, rating), "letter_tiles", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
             />
@@ -443,8 +495,8 @@ export default function FlashcardReview({
             <SentenceBuilderExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("sentence_builder", attempts, rating), "sentence_builder", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("sentence_builder", attempts, rating), "sentence_builder", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("flip")}
@@ -459,9 +511,9 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
-              excludeIds={upcomingIds}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("context_match", attempts, rating), "context_match", attempts);
+              excludeIds={contextMatchExcludeIds}
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("context_match", attempts, rating), "context_match", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("multiple_choice")}
@@ -476,9 +528,9 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
-              excludeIds={upcomingIds}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("meaning_match", attempts, rating), "meaning_match", attempts);
+              excludeIds={meaningMatchExcludeIds}
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("meaning_match", attempts, rating), "meaning_match", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("multiple_choice")}
@@ -493,8 +545,8 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("listening", attempts, rating), "listening", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("listening", attempts, rating), "listening", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t, rate) => handleSpeak(t, rate)}
             />
@@ -508,8 +560,8 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               level={getUserOverrideLevel() ?? undefined}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(rating, "free_writing", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(rating, "free_writing", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("spelling")}
@@ -524,8 +576,8 @@ export default function FlashcardReview({
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
               allWords={distractorPool && distractorPool.length >= 4 ? distractorPool : wordsToReview}
-              onComplete={(_isCorrect, attempts, rating) => {
-                holdExerciseAnswer(gradeExercise("reverse_cloze", attempts, rating), "reverse_cloze", attempts);
+              onComplete={(isCorrect, attempts, rating) => {
+                holdExerciseAnswer(gradeExercise("reverse_cloze", attempts, rating), "reverse_cloze", attempts, isCorrect && attempts === 0);
               }}
               onSpeak={(t) => handleSpeak(t)}
               onFallback={() => setFallbackMode("flip")}

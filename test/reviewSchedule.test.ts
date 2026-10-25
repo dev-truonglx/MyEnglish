@@ -95,6 +95,39 @@ describe("reviewSchedule utils", () => {
     }
   });
 
+  it("steps through short-term same-day learning steps and marks production unlock on word projections", () => {
+    const newWord: WordDetail = {
+      id: "word-new",
+      word: "resilient",
+      meaning_vn: "kiên cường",
+      image_url: null,
+      synonyms: "[]",
+      antonyms: "[]",
+      created_at: baseNow.toISOString(),
+      examples: [],
+      srs: {
+        word_id: "word-new",
+        ease_factor: 2.5,
+        interval: 0,
+        repetitions: 0,
+        reps: 0,
+        state: 0,
+        stability: 0,
+        difficulty: 0,
+        next_review_date: baseNow.toISOString(),
+      },
+    };
+
+    const projections = predictFutureWordReviews(newWord, 4, baseNow);
+    expect(projections).toHaveLength(4);
+    // Steps 2..4 should each advance by at least 1 day (not get stuck in same-day minute learning steps)
+    for (let i = 1; i < projections.length; i++) {
+      expect(projections[i].intervalDays).toBeGreaterThanOrEqual(1);
+      expect(projections[i].exerciseHint).toBeTruthy();
+    }
+    expect(projections.some((p) => p.unlocksProduction)).toBe(true);
+  });
+
   it("predicts future 4 reviews for a grammar lesson", () => {
     const mockProgress: GrammarProgress = {
       lessonId: "present-simple",

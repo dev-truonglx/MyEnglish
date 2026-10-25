@@ -1,7 +1,8 @@
 import { srsRowToCard, getFSRSScheduler, getGrammarScheduler, Rating, State } from "@/services/srs";
-import type { WordDetail, SRSReview, FSRSState } from "@/types/database";
+import type { WordDetail, SRSReview, FSRSState, CardDirection } from "@/types/database";
 import type { GrammarProgress } from "@/types/grammar";
 import { getNextReviewDate } from "@/services/cards";
+import { productionUnlockDays } from "@/services/learnerProfile";
 
 /** "waiting": a recall card waiting for room in the daily new-card budget (see services/librarySchedule) */
 export type ReviewTimeBucket = "all" | "due" | "today" | "1-3d" | "4-7d" | "future" | "waiting" | "new";
@@ -24,6 +25,9 @@ export interface ReviewStepProjection {
   relativeLabel: string;
   intervalDays: number;
   isCurrentSchedule?: boolean;
+  direction?: CardDirection;
+  exerciseHint?: string;
+  unlocksProduction?: boolean;
 }
 
 /**
@@ -184,9 +188,32 @@ export function formatNextReviewRelative(
   };
 }
 
+function describeProjectedExercise(
+  direction: CardDirection,
+  stability: number,
+  reps: number,
+  isNewStep: boolean
+): string {
+  if (direction === "production") {
+    if (stability < 2 || reps === 0) return "Ghép chữ cái (Letter Tiles)";
+    if (stability < 7) return "Điền từ vào câu (Cloze)";
+    return "Điền câu / Chính tả (Spelling)";
+  }
+  if (isNewStep) return "Giới thiệu + Trắc nghiệm (En → Vn)";
+  if (stability < 3) {
+    return reps <= 1 ? "Trắc nghiệm (En → Vn)" : "Đoán nghĩa trong câu / Trắc nghiệm";
+  }
+  if (stability < 21) {
+    return "Nghe / Điền ngữ cảnh / Trắc nghiệm 2 chiều";
+  }
+  return "Nghe / Ghép cặp / Điền ngữ cảnh";
+}
+
 /**
  * Predict next 4 scheduled review appearances according to FSRS algorithm.
  * Assumes the learner rates "Good" at each upcoming review.
+ * Short-term same-day learning steps (scheduled_days === 0) are stepped through so each projected
+ * milestone represents a distinct future review day.
  */
 export function predictFutureWordReviews(
   word: WordDetail,
@@ -197,8 +224,12 @@ export function predictFutureWordReviews(
   const isNew = (word.srs.reps ?? word.srs.repetitions ?? 0) === 0;
   // The next review comes from the earlier of the two cards (getNextReviewDate): simulate that same card
   const prod = word.srsProduction;
-  const srs =
-    !isNew && prod && new Date(prod.next_review_date).getTime() < new Date(word.srs.next_review_date).getTime() ? prod : word.srs;
+  const useProd =
+    !isNew && prod && new Date(prod.next_review_date).getTime() < new Date(word.srs.next_review_date).getTime();
+  const srs = useProd ? prod : word.srs;
+  const activeDirection: CardDirection = useProd ? "production" : "recognition";
+  const prodThreshold = productionUnlockDays();
+  let prodUnlocked = Boolean(prod) || (word.srs.stability ?? 0) >= prodThreshold;
 
   try {
     const scheduler = getFSRSScheduler();
@@ -231,22 +262,47 @@ export function predictFutureWordReviews(
       relativeLabel: step1Relative,
       intervalDays: srs.interval || srs.scheduled_days || 0,
       isCurrentSchedule: true,
+      direction: activeDirection,
+      exerciseHint: describeProjectedExercise(activeDirection, currentCard.stability, currentCard.reps, isNew),
     });
 
     // Simulate subsequent appearances (Step 2 .. maxSteps)
     let simDate = step1Date > now ? step1Date : now;
     for (let i = 2; i <= maxSteps; i++) {
-      const nextResult = scheduler.next(currentCard, simDate, Rating.Good);
+      let nextResult = scheduler.next(currentCard, simDate, Rating.Good);
       currentCard = nextResult.card;
-      const scheduledDays = Math.max(1, Math.round(currentCard.scheduled_days));
       simDate = new Date(currentCard.due.getTime());
 
+      // Step through intra-day learning/relearning steps (scheduled_days === 0) so each projected
+      // milestone represents a distinct future review day
+      let guard = 0;
+      while (
+        currentCard.scheduled_days === 0 &&
+        (currentCard.state === State.Learning || currentCard.state === State.Relearning) &&
+        guard < 3
+      ) {
+        nextResult = scheduler.next(currentCard, simDate, Rating.Good);
+        currentCard = nextResult.card;
+        simDate = new Date(currentCard.due.getTime());
+        guard++;
+      }
+
+      const scheduledDays = Math.max(1, Math.round(currentCard.scheduled_days));
       const totalDiffMs = simDate.getTime() - now.getTime();
       const totalDays = Math.max(1, Math.round(totalDiffMs / 86400000));
 
       let rel = `+${scheduledDays} ngày (sau ${totalDays}d)`;
       if (scheduledDays >= 30) {
         rel = `+${Math.round(scheduledDays / 30)} tháng (sau ${totalDays}d)`;
+      }
+
+      const unlocksProduction =
+        activeDirection === "recognition" &&
+        !prodUnlocked &&
+        currentCard.state === State.Review &&
+        currentCard.stability >= prodThreshold;
+      if (unlocksProduction) {
+        prodUnlocked = true;
       }
 
       steps.push({
@@ -260,6 +316,9 @@ export function predictFutureWordReviews(
         }),
         relativeLabel: rel,
         intervalDays: scheduledDays,
+        direction: activeDirection,
+        exerciseHint: describeProjectedExercise(activeDirection, currentCard.stability, currentCard.reps, false),
+        unlocksProduction,
       });
     }
   } catch (err) {

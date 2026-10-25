@@ -50,12 +50,13 @@ export const POPUP_LISTEN_STABILITY_DAYS = 7;
  */
 export function popupMcVariant(card: ReviewCard, canSpeak: boolean): PopupMcVariant {
   const { state = 0, stability = 0, reps = 0 } = card.srs || {};
+  const step = reps + (card.requeueCount ?? 0);
   if (card.direction !== "recognition" || state !== 2 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs)) {
     return multipleChoiceDirection(card);
   }
   const variants: PopupMcVariant[] =
     canSpeak && stability >= POPUP_LISTEN_STABILITY_DAYS ? ["en_to_vn", "vn_to_en", "listen"] : ["en_to_vn", "vn_to_en"];
-  return variants[reps % variants.length];
+  return variants[step % variants.length];
 }
 
 /** The exercise a popup multiple-choice answer is logged as */

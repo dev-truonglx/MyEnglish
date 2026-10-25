@@ -162,6 +162,22 @@ describe("exercise choice follows memory strength and direction", () => {
     expect(pickExample(w, 1)?.id).toBe("a");
     expect(pickExample(w, 2)?.id).toBe("u");
   });
+
+  it("alternates reverse_cloze and multiple_choice for young/leech recognition cards from the 2nd touch or on retry, while keeping 1st touch as multiple_choice", () => {
+    const firstTouch = toCard(
+      makeWord("cache", { ...ex, srs: { ...reviewSrs(1.2, 1), state: 1, reps: 1 } as never }),
+      "recognition"
+    );
+    expect(selectExerciseType(firstTouch)).toBe("multiple_choice");
+    // On an in-session retry (requeueCount = 1), firstTouch switches to reverse_cloze
+    expect(selectExerciseType({ ...firstTouch, requeueCount: 1 })).toBe("reverse_cloze");
+
+    const secondTouch = toCard(
+      makeWord("cache", { ...ex, srs: { ...reviewSrs(1.5, 1), state: 2, reps: 2 } as never }),
+      "recognition"
+    );
+    expect(selectExerciseType(secondTouch)).toBe("reverse_cloze");
+  });
 });
 
 describe("review priority and new-card allowance", () => {

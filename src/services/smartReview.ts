@@ -654,12 +654,13 @@ function isSameLocalDay(iso: string | null | undefined, now: Date): boolean {
 }
 
 /**
- * The other card of the same word was reviewed (on schedule) today: a review card waits until tomorrow,
- * otherwise it would be answered from a memory refreshed minutes ago (Anki's "bury siblings").
- * Learning cards are never buried: their short steps must run.
+ * The other card of the same word was reviewed (on schedule) today: a review card or a newly unlocked
+ * production card waits until tomorrow, otherwise it would be answered from a memory refreshed minutes
+ * ago (Anki's "bury siblings"). Learning cards are never buried: their short steps must run.
  */
 export function isBuriedBySibling(card: ReviewCard, now: Date = new Date()): boolean {
-  if ((card.srs.state ?? 0) !== 2) return false;
+  const state = card.srs.state ?? 0;
+  if (state !== 2 && !(card.direction === "production" && state === 0)) return false;
   const sibling = card.direction === "recognition" ? card.srsProduction : card.srsRecognition;
   return !!sibling && isSameLocalDay(sibling.last_review, now);
 }
@@ -860,7 +861,7 @@ export function requeuePosition(queueLength: number, currentIndex: number, gap: 
 }
 
 /** Cards looked at past a new word's quiz that comes too soon (see bringReadyCardForward) */
-export const READY_CARD_LOOKAHEAD = 6;
+export const READY_CARD_LOOKAHEAD = 12;
 
 /**
  * Before the session moves to `index`: a new word's first quiz less than INTRO_READY_MS after its introduction
@@ -1583,41 +1584,59 @@ export const TYPING_STABILITY_DAYS = 7;
  * Within a band the format rotates with the review count (no randomness).
  * Sentence building is practice only (it does not test the meaning) and is never picked here.
  */
-export function selectExerciseType(card: WordDetail & { direction?: CardDirection }): ExerciseType {
+export function selectExerciseType(
+  card: WordDetail & { direction?: CardDirection; requeueCount?: number },
+  retryOffset: number = card.requeueCount ?? 0
+): ExerciseType {
   const { state = 0, reps = 0, stability = 0 } = card.srs || {};
   const hasExamples = (card.examples || []).some((e) => e.sentence_en?.trim() && maskWordInSentence(e.sentence_en, card.word));
-  const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
+  const leech = isLeech(card.srs);
+  const young = state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || leech;
+  const step = reps + retryOffset;
 
   if ((card.direction ?? "recognition") === "production") {
     if (state === 1 || state === 3) {
       if (stability < TILES_STABILITY_DAYS) return "letter_tiles";
       return hasExamples ? "cloze" : "spelling";
     }
-    if (state === 0 || reps === 0 || stability < TILES_STABILITY_DAYS || isLeech(card.srs)) return "letter_tiles";
+    if (state === 0 || reps === 0 || stability < TILES_STABILITY_DAYS || leech) return "letter_tiles";
     if (stability < TYPING_STABILITY_DAYS) return hasExamples ? "cloze" : "spelling";
-    if (stability < MATURE_STABILITY_DAYS) return hasExamples ? rotate<ExerciseType>(["cloze", "spelling"], reps) : "spelling";
+    if (stability < MATURE_STABILITY_DAYS) return hasExamples ? rotate<ExerciseType>(["cloze", "spelling"], step) : "spelling";
     return "spelling";
   }
 
   if (state === 0 || reps === 0) return "flip";
-  if (young) return "multiple_choice";
-  if (stability < MATURE_STABILITY_DAYS) {
-    return rotate<ExerciseType>(hasExamples ? ["multiple_choice", "listening", "context_match", "reverse_cloze"] : ["multiple_choice", "listening"], reps);
+  if (young) {
+    // First touch right after Intro stays single-word multiple choice; from the 2nd touch (reps >= 2),
+    // on an in-session retry (retryOffset > 0), or for leeches, alternate with contextual reverse_cloze
+    // (4-option meaning pick with the target word highlighted inside an example sentence) so it stays
+    // just as approachable while preventing single-word MC monotony.
+    if (hasExamples && (reps >= 2 || retryOffset > 0 || leech)) {
+      return rotate<ExerciseType>(["reverse_cloze", "multiple_choice"], step);
+    }
+    return "multiple_choice";
   }
-  return rotate<ExerciseType>(hasExamples ? ["listening", "context_match", "reverse_cloze", "meaning_match"] : ["listening", "meaning_match", "multiple_choice"], reps);
+  if (stability < MATURE_STABILITY_DAYS) {
+    return rotate<ExerciseType>(hasExamples ? ["multiple_choice", "listening", "context_match", "reverse_cloze"] : ["multiple_choice", "listening"], step);
+  }
+  return rotate<ExerciseType>(hasExamples ? ["listening", "context_match", "reverse_cloze", "meaning_match"] : ["listening", "meaning_match", "multiple_choice"], step);
 }
 
 /**
- * Direction of a multiple-choice question. A young card (learning, relearning, stability under 3 days,
- * leech) is always asked English -> Vietnamese, the easier recognition step; older cards are asked
- * Vietnamese -> English one review in three.
+ * Direction of a multiple-choice question. A card in learning/relearning, first review, or leech is
+ * asked English -> Vietnamese, the easier recognition step; graduated Review cards from their 2nd review
+ * onward are asked Vietnamese -> English one review in three.
  */
-export function multipleChoiceDirection(card: WordDetail): "en_to_vn" | "vn_to_en" {
+export function multipleChoiceDirection(
+  card: WordDetail & { requeueCount?: number },
+  retryOffset: number = card.requeueCount ?? 0
+): "en_to_vn" | "vn_to_en" {
   const { state = 0, stability = 0, reps = 0 } = card.srs || {};
-  const young = state === 0 || state === 1 || state === 3 || stability < YOUNG_STABILITY_DAYS || isLeech(card.srs);
-  if (young) return "en_to_vn";
+  const needsEasyPrompt =
+    state === 0 || state === 1 || state === 3 || isLeech(card.srs) || (stability < YOUNG_STABILITY_DAYS && reps < 2);
+  if (needsEasyPrompt) return "en_to_vn";
   // One review in three asks the other way round (deterministic, see selectExerciseType)
-  return reps % 3 === 2 ? "vn_to_en" : "en_to_vn";
+  return (reps + retryOffset) % 3 === 2 ? "vn_to_en" : "en_to_vn";
 }
 
 // ─── 8. EXERCISE DATA GENERATORS ────────────────────────────────────────────
@@ -1663,7 +1682,10 @@ export function cleanMeaningForOption(meaning: string): string {
  * learner originally met the word in (source "user_context") comes first in the rotation.
  * Only sentences that actually contain the word (so it can be blanked) are used.
  */
-export function pickExample(word: WordDetail, rotation: number = word.srs?.reps ?? 0): WordExample | undefined {
+export function pickExample(
+  word: WordDetail & { requeueCount?: number },
+  rotation: number = (word.srs?.reps ?? 0) + (word.requeueCount ?? 0)
+): WordExample | undefined {
   const usable = (word.examples || []).filter((e) => e.sentence_en?.trim() && maskWordInSentence(e.sentence_en, word.word));
   if (usable.length === 0) return undefined;
   const ordered = [...usable.filter((e) => e.source === "user_context"), ...usable.filter((e) => e.source !== "user_context")];
@@ -2152,17 +2174,28 @@ export function prepareContextMatch(
   // Only words already met: a word still waiting in the buffer (never introduced) would be shown, with its
   // meaning given away, before its own introduction (M16)
   const met = (w: WordDetail) => (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || Boolean(w.srs?.last_review);
-  const shuffledOthers = shuffle(
-    allWords.filter(
-      (w) =>
-        w.id !== primaryWord.id &&
-        !excludeIds.has(w.id) &&
-        met(w) &&
-        !isPlaceholderMeaning(w.meaning_vn) &&
-        w.examples &&
-        w.examples.length > 0
-    )
+  const nowMs = Date.now();
+  const RECENT_MATCH_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+  const isRecentlyReviewed = (w: WordDetail) => {
+    const r = w.srs?.last_review ? new Date(w.srs.last_review).getTime() : 0;
+    const p = w.srsProduction?.last_review ? new Date(w.srsProduction.last_review).getTime() : 0;
+    const last = Math.max(Number.isFinite(r) ? r : 0, Number.isFinite(p) ? p : 0);
+    return last > 0 && nowMs - last < RECENT_MATCH_COOLDOWN_MS;
+  };
+  const candidates = allWords.filter(
+    (w) =>
+      w.id !== primaryWord.id &&
+      !excludeIds.has(w.id) &&
+      met(w) &&
+      !isPlaceholderMeaning(w.meaning_vn) &&
+      w.examples &&
+      w.examples.length > 0
   );
+  // Prefer words not reviewed in the last 2 hours so the same words aren't repeated as filler pairs
+  const shuffledOthers = [
+    ...shuffle(candidates.filter((w) => !isRecentlyReviewed(w))),
+    ...shuffle(candidates.filter((w) => isRecentlyReviewed(w))),
+  ];
   for (const other of shuffledOthers) {
     if (pairs.length >= 3) break;
     tryAdd(other);
@@ -2605,8 +2638,18 @@ export function prepareMeaningMatch(
   // Only words already met (M16, same rule as prepareContextMatch): a word still waiting in the buffer
   // would have its meaning given away before its own introduction
   const met = (w: WordDetail) => (w.srs?.reps ?? 0) > 0 || (w.srs?.state ?? 0) > 0 || Boolean(w.srs?.last_review);
+  const nowMs = Date.now();
+  const RECENT_MATCH_COOLDOWN_MS = 2 * 60 * 60 * 1000;
+  const isRecentlyReviewed = (w: WordDetail) => {
+    const r = w.srs?.last_review ? new Date(w.srs.last_review).getTime() : 0;
+    const p = w.srsProduction?.last_review ? new Date(w.srsProduction.last_review).getTime() : 0;
+    const last = Math.max(Number.isFinite(r) ? r : 0, Number.isFinite(p) ? p : 0);
+    return last > 0 && nowMs - last < RECENT_MATCH_COOLDOWN_MS;
+  };
   const candidates = shuffle(allWords.filter((w) => w.id !== primaryWord.id && !excludeIds.has(w.id) && met(w))).sort(
-    (a, b) => Number((b.srs?.reps ?? 0) > 0) - Number((a.srs?.reps ?? 0) > 0)
+    (a, b) =>
+      Number((b.srs?.reps ?? 0) > 0) - Number((a.srs?.reps ?? 0) > 0) ||
+      Number(isRecentlyReviewed(a)) - Number(isRecentlyReviewed(b))
   );
   for (const w of candidates) {
     if (pairs.length >= MEANING_MATCH_PAIRS) break;

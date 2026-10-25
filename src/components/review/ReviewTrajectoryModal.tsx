@@ -283,8 +283,14 @@ export default function ReviewTrajectoryModal({
           <div className="flex items-center gap-2 flex-wrap text-[11px]">
             <span className="text-slate-500 dark:text-zinc-400 font-medium">Chỉ số trí nhớ:</span>
             <span className="px-2 py-0.5 rounded-md bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/60 font-mono">
-              Độ bền (S): {stability ? `${Number(stability).toFixed(1)}d` : "0d"}
+              {word ? "Nhận diện (S): " : "Độ bền (S): "}
+              {stability ? `${Number(stability).toFixed(1)}d` : "0d"}
             </span>
+            {word?.srsProduction && (
+              <span className="px-2 py-0.5 rounded-md bg-teal-50 dark:bg-teal-950/50 text-teal-700 dark:text-teal-300 border border-teal-200 dark:border-teal-800/60 font-mono">
+                Gợi nhớ (S): {word.srsProduction.stability ? `${Number(word.srsProduction.stability).toFixed(1)}d` : "Mới mở"}
+              </span>
+            )}
             <span className="px-2 py-0.5 rounded-md bg-purple-50 dark:bg-purple-950/50 text-purple-700 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 font-mono">
               Độ khó (D): {difficulty ? `${Number(difficulty).toFixed(1)}/10` : "Mặc định"}
             </span>
@@ -468,7 +474,7 @@ export default function ReviewTrajectoryModal({
                     </div>
 
                     <div className="space-y-0.5">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="text-xs font-bold text-slate-800 dark:text-zinc-200">
                           {item.label}
                         </span>
@@ -477,10 +483,20 @@ export default function ReviewTrajectoryModal({
                             Hiện tại
                           </span>
                         )}
+                        {item.unlocksProduction && (
+                          <span className="px-1.5 py-0.2 rounded text-[9.5px] font-semibold bg-amber-100 dark:bg-amber-950/80 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60">
+                            🔓 Mở khóa Gợi nhớ
+                          </span>
+                        )}
                       </div>
-                      <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono flex items-center gap-1.5">
-                        <Clock className="w-3 h-3 text-slate-400" />
+                      <div className="text-[11px] text-slate-500 dark:text-zinc-400 font-mono flex items-center gap-1.5 flex-wrap">
+                        <Clock className="w-3 h-3 text-slate-400 shrink-0" />
                         <span>{item.dateFormatted}</span>
+                        {item.exerciseHint && (
+                          <span className="font-sans text-[10.5px] text-slate-500 dark:text-zinc-400">
+                            • {item.exerciseHint}
+                          </span>
+                        )}
                       </div>
                     </div>
 

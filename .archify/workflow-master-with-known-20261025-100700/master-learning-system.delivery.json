@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "f108848d-fcb8-4415-bfa7-5b74b9db170b",
+  "status": "current",
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/truonglx/Documents/coder/MyEnglish/.archify/workflow-master-with-known-20261025-100700/candidate.json",
+  "output": "/Users/truonglx/Documents/coder/MyEnglish/.archify/workflow-master-with-known-20261025-100700/master-learning-system.html",
+  "specification": {
+    "sha256": "274875bdd19e4518c021a69610f88c8372eb1404923b10fb1b2f23d4dc306c26",
+    "bytes": 15333
+  },
+  "artifact": {
+    "sha256": "532af2696d50057db90aabf79deaa3cca71d294f1ec17bbf67eef971eda9a62d",
+    "bytes": 859484
+  }
+}

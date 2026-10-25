@@ -88,22 +88,25 @@ export default function GradingBar({
           </button>
         </div>
       ) : pendingRating !== null ? (
-        <button
-          onClick={onContinue}
-          disabled={isAdvancing}
-          autoFocus
-          className="w-full h-full rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md"
-        >
-          <span>Tiếp tục</span>
-          <span className="text-[11px] opacity-70">
-            {isPractice
-              ? "(luyện tập củng cố)"
-              : pendingRating === Rating.Again
-              ? "(gặp lại ở cuối phiên)"
-              : `(gặp lại sau ${intervalPreviews[pendingRating as keyof IntervalPreviews]})`}
-          </span>
-          <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
-        </button>
+        <div className="w-full h-full flex gap-2">
+          {onKnown && knownButton("flex-1 h-full")}
+          <button
+            onClick={onContinue}
+            disabled={isAdvancing}
+            autoFocus
+            className={`${onKnown ? "flex-[2]" : "w-full"} h-full rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md`}
+          >
+            <span>Tiếp tục</span>
+            <span className="text-[11px] opacity-70">
+              {isPractice
+                ? "(luyện tập củng cố)"
+                : pendingRating === Rating.Again
+                ? "(gặp lại ở cuối phiên)"
+                : `(gặp lại sau ${intervalPreviews[pendingRating as keyof IntervalPreviews]})`}
+            </span>
+            <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
+          </button>
+        </div>
       ) : ["multiple_choice", "sentence_builder", "context_match", "meaning_match", "listening", "reverse_cloze", "free_writing", "letter_tiles"].includes(
         effectiveExerciseType
       ) ? (
@@ -116,9 +119,7 @@ export default function GradingBar({
             <SkipForward className="w-3.5 h-3.5" />
             <span>Chưa nhớ từ này, bỏ qua</span>
           </button>
-          {knownButton("h-10 px-4") || (
-            <div className="text-[11px] text-slate-400 dark:text-zinc-500">{EXERCISE_LABEL_VN[effectiveExerciseType]}</div>
-          )}
+          <div className="text-[11px] text-slate-400 dark:text-zinc-500">{EXERCISE_LABEL_VN[effectiveExerciseType]}</div>
         </div>
       ) : (effectiveExerciseType === "flip" ? isFlipped : hasCheckedAnswer) ? (
         <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150 [&>button:disabled]:opacity-40 [&>button:disabled]:cursor-not-allowed">
@@ -209,12 +210,11 @@ export default function GradingBar({
           </button>
         </div>
       ) : effectiveExerciseType === "cloze" ? (
-        <div className="w-full h-full flex gap-2">
-          {knownButton("flex-1 h-full")}
+        <div className="w-full h-full">
           <button
             onClick={handleCheckAnswer}
             disabled={!userInput.trim() || isAdvancing}
-            className="flex-[2] h-full rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20"
+            className="w-full h-full rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20"
           >
             <span>Kiểm tra đáp án</span>
             <kbd className="px-2 py-0.5 rounded bg-indigo-700/60 border border-indigo-400/40 text-[11px] font-mono text-indigo-100">
@@ -223,12 +223,11 @@ export default function GradingBar({
           </button>
         </div>
       ) : (
-        <div className="w-full h-full flex gap-2">
-          {knownButton("flex-1 h-full")}
+        <div className="w-full h-full">
           <button
             onClick={handleCheckAnswer}
             disabled={!userInput.trim() || isAdvancing}
-            className="flex-[2] h-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20"
+            className="w-full h-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20"
           >
             <span>Kiểm tra chính tả</span>
             <kbd className="px-2 py-0.5 rounded bg-emerald-700/60 border border-emerald-400/40 text-[11px] font-mono text-emerald-100">

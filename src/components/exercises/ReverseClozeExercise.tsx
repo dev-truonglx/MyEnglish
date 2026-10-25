@@ -2,7 +2,8 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
-import { cleanMeaningForOption, generateMultipleChoiceQuestion, pickExample, wordFormsPattern } from "@/services/smartReview";
+import { cleanMeaningForOption, generateMultipleChoiceQuestion, isLeech, pickExample, wordFormsPattern } from "@/services/smartReview";
+import { getStoredMnemonic } from "@/services/aiMnemonic";
 import { pickSenseForExample, sharesSense } from "@/utils/exerciseHints";
 import { playWrongTry } from "@/services/sound";
 
@@ -21,8 +22,13 @@ export default function ReverseClozeExercise({
   onSpeak,
   onFallback,
 }: ReverseClozeExerciseProps) {
+  const requeueCount = (word as { requeueCount?: number }).requeueCount ?? 0;
   // Rotated example (the learner's own sentence first), only sentences that contain the word
-  const example = useMemo(() => pickExample(word), [word]);
+  const example = useMemo(() => pickExample(word), [word, requeueCount]);
+  const leechMnemonic = useMemo(
+    () => (isLeech(word.srs) ? getStoredMnemonic(word.id, word.meaning_vn) : null),
+    [word.id, word.meaning_vn, word.srs]
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [isAnswered, setIsAnswered] = useState(false);
   const [wrongAttempts, setWrongAttempts] = useState(0);
@@ -47,7 +53,7 @@ export default function ReverseClozeExercise({
     }));
     // Options must not reshuffle while answering
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [word.id, example?.id]);
+  }, [word.id, example?.id, requeueCount]);
 
   useEffect(() => {
     setSelectedId(null);
@@ -164,6 +170,12 @@ export default function ReverseClozeExercise({
         <p className="text-xs text-slate-400 dark:text-zinc-500 border-t border-slate-100 dark:border-zinc-800 pt-3">
           Từ được gạch chân mang nghĩa là gì trong câu trên?
         </p>
+
+        {leechMnemonic && (
+          <div className="mt-2 px-3 py-1.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300">
+            💡 <span className="font-semibold">Mẹo nhớ:</span> {leechMnemonic}
+          </div>
+        )}
       </div>
 
       {/* 4 Choices */}
