@@ -106,7 +106,7 @@ describe("LetterTilesExercise - buildTiles and slot verification", () => {
     expect(completed).toBe(false);
     expect(html).toContain("Làm lại");
     expect(html).toContain("Không nhớ");
-    expect(html).toContain("Xếp chữ cái thành từ tiếng Anh");
+    expect(html).toContain("Con mèo");
 
     // Even when hideHints is true (e.g. FocusReviewModal), "Không nhớ" must still be visible
     const htmlNoHints = renderToStaticMarkup(

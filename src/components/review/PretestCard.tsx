@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { HelpCircle, Search } from "lucide-react";
+import { HelpCircle } from "lucide-react";
 import type { PretestQuestion, PretestResult } from "@/services/pretest";
 import { highlightWord } from "./highlightWord";
 
@@ -40,16 +40,6 @@ export default function PretestCard({ question, phonetic, onDone }: PretestCardP
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1">
-        <div className="flex items-center gap-1.5 font-bold uppercase tracking-wider text-[11px] text-violet-600 dark:text-violet-400">
-          <Search className="w-3.5 h-3.5" />
-          <span>Từ mới · Đoán nghĩa trước khi học</span>
-        </div>
-        <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-          Đoán sai cũng không sao: đoán trước rồi mới xem nghĩa giúp nhớ lâu hơn đọc thẳng. Lượt này không tính điểm.
-        </p>
-      </div>
-
       <div className="p-4 md:p-5 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
         <div className="flex items-baseline gap-2.5 flex-wrap">
           <span className="text-2xl break-words font-black text-slate-900 dark:text-white tracking-tight">{question.word}</span>

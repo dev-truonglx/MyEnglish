@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Volume2, CheckCircle2, XCircle, Sparkles, HelpCircle } from "lucide-react";
+import { Volume2, CheckCircle2, XCircle, HelpCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import {
@@ -130,11 +130,6 @@ export default function MultipleChoiceExercise({
     <div className="w-full max-w-xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
       {/* Question Card */}
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-8 text-center space-y-3 shadow-sm relative overflow-hidden">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 border border-cyan-200/50 dark:border-cyan-800/40">
-          <Sparkles className="w-3 h-3" />
-          <span>{questionData.subPrompt}</span>
-        </div>
-
         <div className="flex items-center justify-center gap-3">
           <h2 className="text-xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight">
             {questionData.question}
@@ -241,11 +236,7 @@ export default function MultipleChoiceExercise({
           <span className="text-amber-600 dark:text-amber-400 font-semibold animate-in fade-in duration-150 text-center md:text-right">
             {wrongNote}
           </span>
-        ) : (
-          <span className="text-[11px] text-slate-400 dark:text-zinc-500 text-center md:text-right">
-            Chọn 1 trong 4 đáp án
-          </span>
-        )}
+        ) : null}
       </div>
     </div>
   );

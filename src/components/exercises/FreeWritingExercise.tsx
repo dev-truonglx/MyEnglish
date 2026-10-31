@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { PenLine, Sparkles, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react";
+import { Sparkles, CheckCircle2, AlertCircle, Lightbulb } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { gradeSentenceWithAI, markAiCliUnavailable, type SentenceGrade } from "@/services/ai";
@@ -76,15 +76,8 @@ export default function FreeWritingExercise({ word, level, onComplete, onSpeak, 
 
   return (
     <div className="w-full max-w-xl mx-auto space-y-3 md:space-y-4 animate-in fade-in duration-200">
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 space-y-2.5 md:space-y-3 shadow-sm">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-violet-50 dark:bg-violet-950/60 text-violet-700 dark:text-violet-300 border border-violet-200/50 dark:border-violet-800/40">
-          <PenLine className="w-3 h-3" />
-          <span>Tự viết câu (AI chấm)</span>
-        </div>
-        <p className="text-sm text-slate-700 dark:text-zinc-200">
-          Viết <strong>một câu tiếng Anh</strong> dùng từ có nghĩa:
-        </p>
-        <p className="text-base font-semibold text-slate-900 dark:text-white">{getConciseMeaning(word.meaning_vn, word.word)}</p>
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 space-y-2 shadow-sm text-center">
+        <p className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white">{getConciseMeaning(word.meaning_vn, word.word)}</p>
         {word.part_of_speech && <p className="text-[11px] text-slate-500 dark:text-zinc-400">({word.part_of_speech})</p>}
         {hintShown && (
           <p className="text-xs font-mono text-amber-700 dark:text-amber-300">

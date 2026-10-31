@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Volume2, CheckCircle2, Snail, Music, XCircle } from "lucide-react";
+import { Volume2, CheckCircle2, Snail, XCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { generateListeningQuestion, type MultipleChoiceOption, type MultipleChoiceQuestion } from "@/services/smartReview";
@@ -123,11 +123,6 @@ export default function ListeningDictationExercise({
   return (
     <div className="w-full max-w-xl mx-auto space-y-4 md:space-y-5 animate-in fade-in duration-200">
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-6 text-center space-y-3 md:space-y-4 shadow-sm">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/40">
-          <Music className="w-3 h-3" />
-          <span>Nghe từ và chọn nghĩa đúng</span>
-        </div>
-
         <div className="flex justify-center">
           <button
             onClick={() => playAudio()}
@@ -157,15 +152,13 @@ export default function ListeningDictationExercise({
           <span className="hidden md:inline text-[11px] text-slate-400 dark:text-zinc-500">Phím R: nghe lại · S: nghe chậm · 1–4: chọn</span>
         </div>
 
-        <div className="min-h-[28px] text-sm">
-          {isAnswered ? (
+        {isAnswered && (
+          <div className="text-sm">
             <span className="font-bold text-slate-900 dark:text-white">
               {word.word} {word.phonetic ? <span className="font-mono text-cyan-600 dark:text-cyan-400 text-xs">{word.phonetic}</span> : null}
             </span>
-          ) : (
-            <span className="text-[11px] text-slate-400 dark:text-zinc-500">Từ sẽ hiện sau khi bạn trả lời</span>
-          )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className="grid gap-2 md:gap-2.5">

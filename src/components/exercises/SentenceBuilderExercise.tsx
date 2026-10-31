@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { Volume2, CheckCircle2, RotateCcw, Sparkles, AlertCircle, Eye } from "lucide-react";
+import { Volume2, CheckCircle2, RotateCcw, AlertCircle, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { normalizeTypedText, prepareSentenceBuilder, type SentenceBuilderData } from "@/services/smartReview";
@@ -173,11 +173,6 @@ export default function SentenceBuilderExercise({
     <div className="w-full max-w-xl mx-auto space-y-3 md:space-y-4 animate-in fade-in duration-200">
       {/* Target meaning prompt - fixed height block */}
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 text-center space-y-2 shadow-sm shrink-0">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/50 dark:border-amber-800/40">
-          <Sparkles className="w-3 h-3" />
-          <span>Sắp xếp thành câu hoàn chỉnh</span>
-        </div>
-
         <p className="text-base md:text-lg font-semibold text-slate-900 dark:text-white leading-relaxed line-clamp-2">
           "{data.meaningVN}"
         </p>
@@ -210,11 +205,7 @@ export default function SentenceBuilderExercise({
             : "border-dashed border-slate-300 dark:border-zinc-700 bg-slate-50/50 dark:bg-zinc-900/40"
         } ${shake ? "animate-shake" : ""}`}
       >
-        {placedTokens.length === 0 ? (
-          <p className="text-xs text-slate-400 dark:text-zinc-500 mx-auto select-none">
-            Chạm vào các từ bên dưới để ghép câu theo đúng ngữ pháp...
-          </p>
-        ) : (
+        {placedTokens.length === 0 ? null : (
           placedTokens.map((token) => (
             <button
               key={token.id}
@@ -238,8 +229,7 @@ export default function SentenceBuilderExercise({
 
       {/* Available Word Bank - constant min-height matching placed zone */}
       <div className="space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400 px-1">
-          <span>Ngân hàng từ vựng:</span>
+        <div className="flex items-center justify-end text-xs text-slate-500 dark:text-zinc-400 px-1">
           {!isAnswered && (
             <div className="flex items-center gap-2">
               {placedTokens.length > 0 && (

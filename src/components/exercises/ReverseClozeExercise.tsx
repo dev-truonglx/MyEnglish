@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Volume2, CheckCircle2, XCircle, Sparkles } from "lucide-react";
+import { Volume2, CheckCircle2, XCircle } from "lucide-react";
 import { Rating } from "@/services/srs";
 import type { WordDetail } from "@/types/database";
 import { cleanMeaningForOption, generateMultipleChoiceQuestion, isLeech, pickExample, wordFormsPattern } from "@/services/smartReview";
@@ -147,11 +147,6 @@ export default function ReverseClozeExercise({
     <div className="w-full max-w-xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
       {/* Context Sentence Card */}
       <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-8 space-y-3 md:space-y-4 shadow-sm text-center">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 border border-cyan-200/50 dark:border-cyan-800/40">
-          <Sparkles className="w-3 h-3" />
-          <span>Câu ví dụ thực tế</span>
-        </div>
-
         <div className="text-base md:text-lg font-medium text-slate-800 dark:text-zinc-200 leading-relaxed">
           "{renderSentenceWithHighlight()}"
         </div>
@@ -166,10 +161,6 @@ export default function ReverseClozeExercise({
             <span>Nghe câu ví dụ</span>
           </button>
         </div>
-
-        <p className="text-xs text-slate-400 dark:text-zinc-500 border-t border-slate-100 dark:border-zinc-800 pt-3">
-          Từ được gạch chân mang nghĩa là gì trong câu trên?
-        </p>
 
         {leechMnemonic && (
           <div className="mt-2 px-3 py-1.5 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200/70 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300">
@@ -237,11 +228,7 @@ export default function ReverseClozeExercise({
           <p className="text-center text-xs text-amber-500 dark:text-amber-400 font-semibold animate-in fade-in duration-150">
             Chưa đúng, thử phương án khác nhé!
           </p>
-        ) : (
-          <span className="text-center text-[11px] text-slate-400 dark:text-zinc-500">
-            Chọn phương án đúng nhất theo ngữ cảnh câu
-          </span>
-        )}
+        ) : null}
       </div>
     </div>
   );

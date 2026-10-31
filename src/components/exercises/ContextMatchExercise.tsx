@@ -1,5 +1,5 @@
 import { Fragment, useState, useEffect, useMemo, useRef } from "react";
-import { CheckCircle2, RotateCcw, Link2, AlertCircle, Eye } from "lucide-react";
+import { CheckCircle2, RotateCcw, AlertCircle, Eye } from "lucide-react";
 import { Rating } from "@/services/srs";
 import { shuffle } from "@/lib/utils";
 import type { WordDetail } from "@/types/database";
@@ -229,18 +229,7 @@ export default function ContextMatchExercise({
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
-      {/* Exercise header */}
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 text-center space-y-2 shadow-sm">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400 border border-purple-200/50 dark:border-purple-800/40">
-          <Link2 className="w-3 h-3" />
-          <span>Ghép từ vào ngữ cảnh câu thích hợp</span>
-        </div>
-        <p className="text-xs text-slate-500 dark:text-zinc-400">
-          Nhấn số của một từ rồi số của câu tương ứng (hoặc bấm chuột) để ghép thành cặp.
-        </p>
-      </div>
-
+    <div className="w-full max-w-2xl mx-auto space-y-3 md:space-y-4 animate-in fade-in duration-200">
       {/* Matching grid: row i holds word i and sentence i, so both columns line up */}
       <div className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,4.8fr)] md:grid-cols-[minmax(max-content,2fr)_minmax(0,5fr)] gap-x-2 md:gap-x-3 gap-y-2 md:gap-y-2.5">
         <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
@@ -355,13 +344,7 @@ export default function ContextMatchExercise({
               </button>
             </div>
           </div>
-        ) : (
-          <div className="w-full h-full max-md:p-2 md:py-0 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-2 md:px-3 max-md:text-center">
-            <span>
-              Gõ số của từ ({1}–{pairs.length}) rồi số của câu ({pairs.length + 1}–{pairs.length * 2}) để ghép cặp, Enter để kiểm tra
-            </span>
-          </div>
-        )}
+        ) : null}
       </div>
     </div>
   );

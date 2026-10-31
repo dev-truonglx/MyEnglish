@@ -2,7 +2,6 @@ import { SkipForward } from "lucide-react";
 import { Rating, type IntervalPreviews } from "@/services/srs";
 import type { ExerciseType } from "@/services/smartReview";
 import { isSimpleMode } from "@/services/learnerProfile";
-import { EXERCISE_LABEL_VN } from "./exerciseLabels";
 
 interface GradingBarProps {
   effectiveExerciseType: ExerciseType;
@@ -120,7 +119,6 @@ export default function GradingBar({
             <SkipForward className="w-3.5 h-3.5" />
             <span>Chưa nhớ từ này, bỏ qua</span>
           </button>
-          <div className="text-[11px] text-slate-400 dark:text-zinc-500">{EXERCISE_LABEL_VN[effectiveExerciseType]}</div>
         </div>
       ) : (effectiveExerciseType === "flip" ? isFlipped : hasCheckedAnswer) ? (
         <div className="w-full grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 md:h-full animate-in slide-in-from-bottom-2 duration-150 [&>button:disabled]:opacity-40 [&>button:disabled]:cursor-not-allowed">

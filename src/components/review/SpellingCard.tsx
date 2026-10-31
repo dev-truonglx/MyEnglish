@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { Volume2, CheckCircle2, Eye, Keyboard, HelpCircle, RotateCcw, AlertCircle, SkipForward } from "lucide-react";
+import { Volume2, CheckCircle2, Eye, HelpCircle, RotateCcw, AlertCircle, SkipForward } from "lucide-react";
 import type { ReviewCard } from "@/types/database";
 import type { FeedbackMessage } from "@/hooks/useReviewSession";
 import RevealedWordContent from "./RevealedWordContent";
@@ -47,16 +47,6 @@ export default function SpellingCard({
       {!hasCheckedAnswer ? (
         <div className="flex-1 min-h-0 flex flex-col justify-between py-2 overflow-y-auto pr-1 scrollbar-thin">
           <div className="my-auto space-y-4 w-full">
-            <div className="text-center space-y-1 shrink-0">
-              <span className="text-xs font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-bold flex items-center justify-center gap-1.5">
-                <Keyboard className="w-4 h-4" />
-                Luyện gõ chính tả
-              </span>
-              <p className="hidden md:block text-xs text-slate-500 dark:text-zinc-400">
-                Đọc nghĩa, tự nhớ ra từ tiếng Anh rồi nhấn Enter. Phát âm sẽ được đọc sau khi trả lời.
-              </p>
-            </div>
-
             {/* Audio & Clue Card */}
             <div className="p-4 md:p-6 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-center space-y-3.5 max-w-lg mx-auto w-full shadow-inner shrink-0">
               {/* No audio or IPA before answering: hearing the word would turn recall into dictation.
@@ -65,11 +55,8 @@ export default function SpellingCard({
                 <div className="text-[11px] font-mono text-slate-500 dark:text-zinc-400">({currentWord.part_of_speech})</div>
               )}
 
-              <div className="p-3 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-sm">
-                <span className="text-[10px] font-mono uppercase text-emerald-700 dark:text-emerald-400 block font-bold mb-1">
-                  Định nghĩa tiếng Việt:
-                </span>
-                <span className="font-medium">{maskTargetInMeaning(currentWord.meaning_vn, currentWord.word)}</span>
+              <div className="p-3 md:p-4 rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-base md:text-lg font-semibold">
+                {maskTargetInMeaning(currentWord.meaning_vn, currentWord.word)}
               </div>
             </div>
 
@@ -109,53 +96,51 @@ export default function SpellingCard({
                 />
               </div>
 
-              {/* Dedicated Stable Feedback & Hint Area - ALWAYS 48px so screen NEVER jumps */}
-              <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
-                {feedbackMessage ? (
-                  <div
-                    className={`w-full h-full px-3.5 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold text-center shadow-xs animate-in fade-in duration-150 ${
-                      feedbackMessage.type === "success"
-                        ? "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
-                        : feedbackMessage.type === "error"
-                        ? "bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300"
-                        : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300"
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      {feedbackMessage.type === "success" ? (
-                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                      ) : (
-                        <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
-                      )}
-                      <span className="truncate">{feedbackMessage.text}</span>
-                    </div>
-                    {(showHint || wrongAttempts >= 2) && (
-                      <span className="text-[11px] font-mono font-bold text-amber-700 dark:text-amber-300 shrink-0 ml-2">
-                        {currentWord.word.slice(0, 2).toUpperCase()}
-                        {currentWord.word.slice(2).replace(/./g, " •")}
-                      </span>
-                    )}
-                  </div>
-                ) : (showHint || wrongAttempts >= 2) ? (
-                  <div className="w-full h-full px-3.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-2 shadow-xs animate-in fade-in duration-150">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <HelpCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
-                      <span>
-                        Gợi ý chính tả:{" "}
-                        <span className="font-mono font-bold text-amber-800 dark:text-amber-300 text-sm">
+              {/* Dedicated Feedback & Hint Area */}
+              {(feedbackMessage || showHint || wrongAttempts >= 2) && (
+                <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
+                  {feedbackMessage ? (
+                    <div
+                      className={`w-full h-full px-3.5 rounded-xl border flex items-center justify-between gap-2 text-xs font-semibold text-center shadow-xs animate-in fade-in duration-150 ${
+                        feedbackMessage.type === "success"
+                          ? "bg-emerald-50 dark:bg-emerald-950/50 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300"
+                          : feedbackMessage.type === "error"
+                          ? "bg-rose-50 dark:bg-rose-950/50 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300"
+                          : "bg-slate-100 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300"
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {feedbackMessage.type === "success" ? (
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        ) : (
+                          <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+                        )}
+                        <span className="truncate">{feedbackMessage.text}</span>
+                      </div>
+                      {(showHint || wrongAttempts >= 2) && (
+                        <span className="text-[11px] font-mono font-bold text-amber-700 dark:text-amber-300 shrink-0 ml-2">
                           {currentWord.word.slice(0, 2).toUpperCase()}
                           {currentWord.word.slice(2).replace(/./g, " •")}
-                        </span>{" "}
-                        ({currentWord.word.length} ký tự)
-                      </span>
+                        </span>
+                      )}
                     </div>
-                  </div>
-                ) : (
-                  <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
-                    <span>Đọc nghĩa tiếng Việt rồi tự gõ từ tiếng Anh. Phát âm sẽ có sau khi trả lời.</span>
-                  </div>
-                )}
-              </div>
+                  ) : (
+                    <div className="w-full h-full px-3.5 rounded-xl bg-amber-50/90 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-900 dark:text-amber-200 text-xs flex items-center justify-between gap-2 shadow-xs animate-in fade-in duration-150">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <HelpCircle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                        <span>
+                          Gợi ý chính tả:{" "}
+                          <span className="font-mono font-bold text-amber-800 dark:text-amber-300 text-sm">
+                            {currentWord.word.slice(0, 2).toUpperCase()}
+                            {currentWord.word.slice(2).replace(/./g, " •")}
+                          </span>{" "}
+                          ({currentWord.word.length} ký tự)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Action buttons */}
               <div className="flex items-center justify-end text-xs px-1 pt-1">

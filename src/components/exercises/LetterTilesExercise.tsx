@@ -378,14 +378,12 @@ export default function LetterTilesExercise({
     <div className="w-full max-w-xl mx-auto space-y-2 md:space-y-4 animate-in fade-in duration-200">
       {!hideHeader ? (
         <div className="rounded-xl md:rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2.5 md:p-5 text-center space-y-1 md:space-y-2 shadow-xs">
-          <div className="text-[10px] md:text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
           <h2 className="text-lg md:text-2xl font-bold text-slate-900 dark:text-white break-words">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn, target, example), target)}</h2>
           {word.part_of_speech && <p className="text-[11px] md:text-xs italic text-slate-400">{word.part_of_speech}</p>}
           {example?.sentence_vn && <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
         </div>
       ) : (
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400 pt-0.5">
-          <span>Xếp chữ cái thành từ tiếng Anh:</span>
+        <div className="flex items-center justify-end text-xs font-semibold text-slate-600 dark:text-zinc-400 pt-0.5">
           <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
             {letterCount} chữ cái
           </span>
@@ -393,89 +391,119 @@ export default function LetterTilesExercise({
       )}
 
       {/* Slots */}
-      <div className={`flex flex-wrap justify-center items-center gap-1 md:gap-1.5 min-h-[36px] md:min-h-[52px] py-0.5 ${state === "wrong" ? "animate-shake" : ""}`}>
-        {slots.map((slotChar, i) => {
-          const isFixed = FIXED.test(slotChar);
-          if (isFixed) {
-            return (
-              <span key={i} className="w-2.5 md:w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500 text-sm md:text-base">
-                {slotChar === " " ? "" : slotChar}
-              </span>
-            );
-          }
+      {(() => {
+        const isLongWord = letterCount > 7;
+        const isVeryLongWord = letterCount > 10;
+        const slotSizeClass = isVeryLongWord
+          ? "w-[30px] h-[38px] sm:w-[34px] sm:h-[42px] md:w-[40px] md:h-[48px] text-sm sm:text-base md:text-lg"
+          : isLongWord
+          ? "w-[36px] h-[44px] sm:w-[40px] sm:h-[48px] md:w-[46px] md:h-[54px] text-base sm:text-lg md:text-xl"
+          : "w-[44px] h-[52px] sm:w-[50px] sm:h-[58px] md:w-[56px] md:h-[64px] text-lg sm:text-xl md:text-2xl";
 
-          const nonFixedIdx = slotIndices[i];
-          const hasLetter = nonFixedIdx >= 0 && nonFixedIdx < picked.length;
-          const letter = hasLetter ? builtLetters[nonFixedIdx] : "";
-          const isFirstSlotHint = hint && i === 0 && !hasLetter;
+        return (
+          <div className={`flex flex-wrap justify-center items-center gap-1.5 md:gap-2 min-h-[52px] md:min-h-[64px] py-1 ${state === "wrong" ? "animate-shake" : ""}`}>
+            {slots.map((slotChar, i) => {
+              const isFixed = FIXED.test(slotChar);
+              if (isFixed) {
+                return (
+                  <span key={i} className="w-2.5 md:w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500 text-sm md:text-base">
+                    {slotChar === " " ? "" : slotChar}
+                  </span>
+                );
+              }
 
-          if (hasLetter && state !== "correct" && state !== "give_up") {
-            return (
-              <button
-                key={i}
-                type="button"
-                onClick={() => unpickAt(nonFixedIdx)}
-                title="Bấm để xóa chữ này"
-                className={`w-7 h-8.5 sm:w-8 sm:h-9 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-base md:text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
-                  state === "wrong"
-                    ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:border-rose-400 hover:bg-rose-50"
-                    : "border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30 text-slate-900 dark:text-white hover:border-rose-400 hover:bg-rose-50/80 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 hover:scale-105 active:scale-95"
-                }`}
-              >
-                {letter}
-              </button>
-            );
-          }
+              const nonFixedIdx = slotIndices[i];
+              const hasLetter = nonFixedIdx >= 0 && nonFixedIdx < picked.length;
+              const letter = hasLetter ? builtLetters[nonFixedIdx] : "";
+              const isFirstSlotHint = hint && i === 0 && !hasLetter;
+              const isNextActiveSlot = !hasLetter && nonFixedIdx === picked.length && state === "building";
 
-          return (
-            <span
-              key={i}
-              className={`w-7 h-8.5 sm:w-8 sm:h-9 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-base md:text-xl font-bold font-mono select-none ${
-                state === "correct"
-                  ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
-                  : state === "give_up"
-                  ? "border-rose-400 bg-rose-50 dark:bg-rose-950/40 text-rose-700 dark:text-rose-300 font-bold"
-                  : state === "wrong"
-                  ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200"
-                  : "border-dashed border-slate-300 dark:border-zinc-700 text-slate-400"
-              }`}
-            >
-              {state === "give_up"
-                ? slotChar
-                : letter || (isFirstSlotHint ? <span className="text-slate-300 dark:text-zinc-600">{slots[0]}</span> : "")}
-            </span>
-          );
-        })}
-      </div>
+              if (hasLetter && state !== "correct" && state !== "give_up") {
+                return (
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => unpickAt(nonFixedIdx)}
+                    title="Bấm để xóa chữ này"
+                    className={`${slotSizeClass} rounded-xl border-2 flex items-center justify-center font-black font-mono uppercase transition-all cursor-pointer select-none group shadow-sm active:scale-95 ${
+                      state === "wrong"
+                        ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200 hover:border-rose-400 hover:bg-rose-50"
+                        : "border-cyan-500 bg-cyan-50/90 dark:bg-cyan-950/60 text-cyan-950 dark:text-cyan-200 hover:border-rose-400 hover:bg-rose-50/80 hover:text-rose-600 dark:hover:bg-rose-950/50 dark:hover:text-rose-300"
+                    }`}
+                  >
+                    {letter}
+                  </button>
+                );
+              }
+
+              return (
+                <span
+                  key={i}
+                  className={`${slotSizeClass} rounded-xl border-2 flex items-center justify-center font-bold font-mono uppercase select-none transition-all ${
+                    state === "correct"
+                      ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-300 shadow-sm"
+                      : state === "give_up"
+                      ? "border-rose-400 bg-rose-50 dark:bg-rose-950/50 text-rose-700 dark:text-rose-300 font-bold"
+                      : state === "wrong"
+                      ? "border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200"
+                      : isNextActiveSlot
+                      ? "border-cyan-500 dark:border-cyan-400 bg-cyan-50/40 dark:bg-cyan-950/30 text-slate-400 dark:text-zinc-500 shadow-sm ring-2 ring-cyan-500/20"
+                      : "border-slate-300 dark:border-zinc-700/80 bg-slate-100/80 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 shadow-inner"
+                  }`}
+                >
+                  {state === "give_up" ? (
+                    slotChar
+                  ) : letter ? (
+                    letter
+                  ) : isFirstSlotHint ? (
+                    <span className="text-slate-400 dark:text-zinc-500 opacity-60">{slots[0]}</span>
+                  ) : (
+                    <span className={`w-3.5 h-0.5 rounded-full ${isNextActiveSlot ? "bg-cyan-500/80 animate-pulse" : "bg-slate-300 dark:bg-zinc-600"}`} />
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       {/* Tiles */}
-      <div className="flex flex-wrap justify-center gap-1 md:gap-2 py-0.5">
-        {tiles.map((t) => {
-          const used = picked.includes(t.id);
-          const pickedIdx = picked.indexOf(t.id);
-          return (
-            <button
-              key={t.id}
-              onClick={() => {
-                if (used) {
-                  unpickAt(pickedIdx);
-                } else {
-                  pick(t.id);
-                }
-              }}
-              disabled={state === "correct" || state === "give_up"}
-              title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
-              className={`w-8.5 h-8.5 sm:w-10 sm:h-10 md:w-11 md:h-11 rounded-lg md:rounded-xl text-base md:text-lg font-bold font-mono shadow-xs transition-all flex items-center justify-center ${
-                used || state === "give_up"
-                  ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 cursor-not-allowed opacity-60"
-                  : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95 cursor-pointer"
-              }`}
-            >
-              {t.ch}
-            </button>
-          );
-        })}
-      </div>
+      {(() => {
+        const isManyTiles = tiles.length > 8;
+        const tileSizeClass = isManyTiles
+          ? "w-[38px] h-[46px] sm:w-[42px] sm:h-[50px] md:w-[48px] md:h-[54px] text-lg sm:text-xl font-bold"
+          : "w-[44px] h-[50px] sm:w-[48px] sm:h-[54px] md:w-[54px] md:h-[60px] text-xl sm:text-2xl font-bold";
+
+        return (
+          <div className="flex flex-wrap justify-center gap-1.5 sm:gap-2 py-1">
+            {tiles.map((t) => {
+              const used = picked.includes(t.id);
+              const pickedIdx = picked.indexOf(t.id);
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => {
+                    if (used) {
+                      unpickAt(pickedIdx);
+                    } else {
+                      pick(t.id);
+                    }
+                  }}
+                  disabled={state === "correct" || state === "give_up"}
+                  title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
+                  className={`${tileSizeClass} px-2 rounded-xl font-mono uppercase transition-all flex items-center justify-center select-none ${
+                    used || state === "give_up"
+                      ? "bg-slate-100/60 dark:bg-zinc-800/30 text-slate-300 dark:text-zinc-600 border border-slate-200 dark:border-zinc-800 cursor-not-allowed opacity-35 scale-95"
+                      : "bg-white dark:bg-zinc-800 border-2 border-slate-300 dark:border-zinc-600 border-b-4 border-b-slate-400 dark:border-b-zinc-700 text-slate-900 dark:text-white shadow-md hover:border-cyan-400 hover:bg-slate-50 dark:hover:bg-zinc-750 active:border-b-2 active:translate-y-0.5 cursor-pointer active:scale-95"
+                  }`}
+                >
+                  {t.ch}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })()}
 
       <div className="flex flex-wrap items-center justify-between gap-2 md:gap-2.5 text-xs px-1 min-h-[38px] pt-1">
         <div className="flex items-center gap-2 flex-wrap">

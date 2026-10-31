@@ -2,7 +2,6 @@ import { Tag, Bug, Zap } from "lucide-react";
 import type { ReviewCard } from "@/types/database";
 import { isLeech, type ExerciseType, type XPReward } from "@/services/smartReview";
 import type { StudyMode } from "@/hooks/useReviewSession";
-import { EXERCISE_LABEL_VN } from "./exerciseLabels";
 
 interface CardBadgesProps {
   currentWord: ReviewCard;
@@ -12,12 +11,11 @@ interface CardBadgesProps {
   mode: StudyMode;
 }
 
-/** Card top badges: part of speech, topic, leech/new status, XP popup, exercise type */
+/** Card top badges: part of speech, topic, leech/new status, XP popup */
 export default function CardBadges({
   currentWord,
   showXPPopup,
   lastXPReward,
-  effectiveExerciseType,
 }: CardBadgesProps) {
   const isNew = (currentWord.srs.reps ?? 0) === 0;
 
@@ -58,9 +56,6 @@ export default function CardBadges({
             +{lastXPReward.totalXP} XP
           </span>
         )}
-        <span className="text-[10px] md:text-[11px] text-slate-400 dark:text-zinc-500 shrink-0 font-medium">
-          {EXERCISE_LABEL_VN[effectiveExerciseType]}
-        </span>
       </div>
     </div>
   );
