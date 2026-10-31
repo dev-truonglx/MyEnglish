@@ -84,6 +84,7 @@ import {
   type BlurOverlayLevel,
 } from "@/services/reminderSettings";
 import { PAGE_CONTAINER } from "./dashboard/shared";
+import { platformSlots } from "@/lib/platformSlots";
 
 const IS_MAC = typeof navigator !== "undefined" && /Mac|iPod|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 
@@ -411,6 +412,9 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
           )}
         </div>
       )}
+
+      {platformSlots.settingsTop && <platformSlots.settingsTop />}
+
       {/* 1. HỌC MỖI NGÀY: what shapes the learning, first and highlighted */}
       <SettingsSection
         id="study"
@@ -441,7 +445,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       setDailyGoalState(g);
                       setNotifFeedback(`Đã đặt mục tiêu mỗi ngày: ${g} câu.`);
                     }}
-                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                    className={`py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg text-xs font-mono font-medium transition-all ${
                       dailyGoal === g
                         ? "bg-emerald-600 text-white shadow-sm font-bold"
                         : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
@@ -472,7 +476,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       saveFocusSettings({ minutes: m });
                       setFocusMinutes(m);
                     }}
-                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                    className={`py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg text-xs font-mono font-medium transition-all ${
                       focusMinutes === m
                         ? "bg-violet-600 text-white shadow-sm font-bold"
                         : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
@@ -520,7 +524,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                         setStudyLimits((prev) => ({ ...prev, [cfg.key]: val }));
                         setNotifFeedback(`Đã cập nhật "${cfg.title}" thành ${val}!`);
                       }}
-                      className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                      className={`py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg text-xs font-mono font-medium transition-all ${
                         studyLimits[cfg.key] === val
                           ? "bg-cyan-600 text-white shadow-sm font-bold"
                           : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
@@ -562,14 +566,14 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
       >
         <div className="space-y-6">
           {/* SECTION 0: AUTOSTART SYSTEM SETTING */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex items-center gap-3">
-                <span className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white shadow-md shadow-rose-500/20">
+          <div className="p-4 md:p-6 rounded-2xl md:rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+            <div className="md:flex-wrap flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div className="md:items-center flex max-md:items-start gap-3">
+                <span className="p-2.5 rounded-2xl bg-gradient-to-tr from-amber-500 to-rose-500 text-white shadow-md shadow-rose-500/20 max-md:shrink-0">
                   <Power className="w-5 h-5" />
                 </span>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 max-md:flex-wrap">
                     <h3 className="text-sm font-bold text-slate-900 dark:text-white">
                       Tự khởi động cùng hệ điều hành
                     </h3>
@@ -588,7 +592,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 type="button"
                 disabled={togglingAutostart}
                 onClick={() => handleToggleAutostart(!autostart)}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm disabled:opacity-50 ${
+                className={`w-full sm:w-auto px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl text-xs font-bold transition-all flex items-center max-md:justify-center gap-2 shadow-sm max-md:shrink-0 disabled:opacity-50 ${
                   autostart
                     ? "bg-emerald-600 hover:bg-emerald-500 text-white"
                     : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
@@ -611,10 +615,10 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
           </div>
 
           {/* SECTION 1: SETTINGS & SCHEDULE CONFIGURATION */}
-          <div className="p-6 rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-6 shadow-sm">
-            <div className="flex items-center justify-between gap-3 flex-wrap border-b border-slate-100 dark:border-zinc-800 pb-4">
+          <div className="p-4 md:p-6 rounded-2xl md:rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-6 shadow-sm">
+            <div className="md:flex-wrap flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-zinc-800 pb-4">
               <div className="flex items-center gap-2.5">
-                <span className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-md shadow-cyan-500/20">
+                <span className="p-2 rounded-xl bg-gradient-to-tr from-cyan-500 to-indigo-500 text-white shadow-md shadow-cyan-500/20 max-md:shrink-0">
                   <Sliders className="w-4 h-4" />
                 </span>
                 <div>
@@ -630,7 +634,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               {/* Master Toggle */}
               <button
                 onClick={() => handleUpdateReminder({ enabled: !reminderSettings.enabled })}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                className={`w-full sm:w-auto px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl text-xs font-bold transition-all flex items-center max-md:justify-center gap-2 shadow-sm max-md:shrink-0 ${
                   reminderSettings.enabled
                     ? "bg-emerald-600 hover:bg-emerald-500 text-white"
                     : "bg-slate-200 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400"
@@ -643,8 +647,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
             {/* Realtime Schedule & Countdown Card */}
             {reminderSettings.enabled && reminderSettings.intervalMinutes > 0 && (
-              <div className="p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border border-cyan-200/80 dark:border-cyan-800/60 flex items-center justify-between gap-4 flex-wrap">
-                <div className="flex items-center gap-3">
+              <div className="md:flex-wrap p-4 rounded-2xl bg-gradient-to-r from-cyan-500/10 via-indigo-500/10 to-purple-500/10 border border-cyan-200/80 dark:border-cyan-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="flex items-start sm:items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 flex items-center justify-center font-bold shrink-0">
                     <Clock className="w-5 h-5 animate-pulse" />
                   </div>
@@ -676,7 +680,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 <button
                   onClick={handleTestPopupQuiz}
                   disabled={testingPopup}
-                  className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-sm flex items-center gap-1.5 shrink-0"
+                  className="w-full sm:w-auto px-3.5 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-bold transition-all shadow-sm flex items-center max-md:justify-center gap-1.5 shrink-0"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
                   <span>{testingPopup ? "Đang mở..." : "Hiển thị ngay"}</span>
@@ -686,7 +690,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
             {/* Active Snooze Alert if currently snoozed */}
             {snoozeMinutesRemaining > 0 && (
-              <div className="p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex items-center justify-between gap-3 flex-wrap">
+              <div className="md:flex-wrap p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-2.5 text-amber-800 dark:text-amber-300 text-xs font-semibold">
                   <Hourglass className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-spin-slow shrink-0" />
                   <span>
@@ -696,7 +700,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 </div>
                 <button
                   onClick={handleCancelSnooze}
-                  className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors"
+                  className="w-full sm:w-auto px-3 py-2 md:py-1.5 max-md:min-h-[40px] rounded-xl bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold transition-colors max-md:flex max-md:items-center max-md:justify-center shrink-0"
                 >
                   Hủy hoãn ngay
                 </button>
@@ -724,7 +728,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       <button
                         key={val}
                         onClick={() => handleUpdateReminder({ intervalMinutes: val })}
-                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                        className={`py-2 md:py-1.5 px-2 max-md:min-h-[40px] rounded-xl text-xs font-semibold transition-all text-center ${
                           isSelected
                             ? "bg-cyan-600 text-white shadow-sm shadow-cyan-600/30"
                             : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-cyan-500"
@@ -758,7 +762,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       <button
                         key={val}
                         onClick={() => handleUpdateReminder({ snoozeMinutes: val })}
-                        className={`py-1.5 px-2 rounded-xl text-xs font-semibold transition-all text-center ${
+                        className={`py-2 md:py-1.5 px-2 max-md:min-h-[40px] rounded-xl text-xs font-semibold transition-all text-center ${
                           isSelected
                             ? "bg-amber-600 text-white shadow-sm shadow-amber-600/30"
                             : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-amber-500"
@@ -1230,7 +1234,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             <button
               onClick={() => checkCli()}
               disabled={checkingCli}
-              className="px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
+              className="w-full sm:w-auto px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 transition-colors flex items-center justify-center gap-2 shrink-0 shadow-sm"
             >
               <RefreshCw className={`w-3.5 h-3.5 ${checkingCli ? "animate-spin" : ""}`} />
               <span>Kiểm tra lại kết nối</span>
@@ -1271,12 +1275,12 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                 data-lpignore="true"
                 data-1p-ignore="true"
                 data-form-type="other"
-                className="flex-1 w-full px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
+                className="flex-1 w-full px-3.5 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl bg-slate-50 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-base md:text-xs font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:ring-2 focus:ring-cyan-500"
               />
               <button
                 type="submit"
                 disabled={checkingCli}
-                className="w-full sm:w-auto px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs transition-colors shrink-0 shadow-sm flex items-center justify-center gap-1.5"
+                className="w-full sm:w-auto px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-semibold text-xs transition-colors shrink-0 shadow-sm flex items-center justify-center gap-1.5"
               >
                 {customCliSaved ? (
                   <>
@@ -1293,12 +1297,12 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </p>
           </div>
           {/* OS Switcher Tabs */}
-          <div className="p-1.5 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700/60 flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
+          <div className="p-1.5 rounded-2xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700/60 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setSelectedOs("macos")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                className={`px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl text-xs font-bold transition-all flex items-center max-md:justify-center gap-2 shadow-sm ${
                   selectedOs === "macos"
                     ? "bg-white dark:bg-zinc-900 text-slate-900 dark:text-white border border-slate-200/80 dark:border-zinc-700 shadow-md"
                     : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -1313,7 +1317,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
               <button
                 type="button"
                 onClick={() => setSelectedOs("windows")}
-                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 shadow-sm ${
+                className={`px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl text-xs font-bold transition-all flex items-center max-md:justify-center gap-2 shadow-sm ${
                   selectedOs === "windows"
                     ? "bg-white dark:bg-zinc-900 text-cyan-600 dark:text-cyan-400 border border-slate-200/80 dark:border-zinc-700 shadow-md"
                     : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -1723,7 +1727,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                   {Math.round(fsrsSettings.requestRetention * 100)}%
                 </span>
               </div>
-              <div className="grid grid-cols-4 gap-2 pt-1">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                 {[0.8, 0.85, 0.9, 0.95].map((val) => (
                   <button
                     key={val}
@@ -1732,7 +1736,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
                       setFsrsSettings((prev) => ({ ...prev, requestRetention: val }));
                       setNotifFeedback(`Đã cập nhật mục tiêu ghi nhớ FSRS thành ${Math.round(val * 100)}%!`);
                     }}
-                    className={`py-1.5 rounded-lg text-xs font-mono font-medium transition-all ${
+                    className={`py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg text-xs font-mono font-medium transition-all ${
                       fsrsSettings.requestRetention === val
                         ? "bg-cyan-600 text-white shadow-sm font-bold"
                         : "bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 hover:border-slate-300"
@@ -1779,7 +1783,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         description="Xoá toàn bộ quá trình học để bắt đầu lại như bản cài mới."
         defaultOpen={false}
       >
-        <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
+        <div className="p-4 md:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">
           <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1 max-w-xl">
               <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
@@ -1793,7 +1797,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             </div>
             <button
               onClick={() => setShowResetModal(true)}
-              className="px-4 py-2.5 rounded-xl border border-rose-300 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center gap-2 shrink-0 transition-all shadow-sm"
+              className="w-full sm:w-auto px-4 py-2.5 max-md:min-h-[40px] rounded-xl border border-rose-300 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-700 dark:text-rose-300 text-xs font-bold flex items-center max-md:justify-center gap-2 shrink-0 transition-all shadow-sm"
             >
               <RotateCcw className="w-3.5 h-3.5" />
               <span>Đặt lại dữ liệu...</span>

@@ -220,7 +220,7 @@ export default function AnalyticsView({
                 role="tab"
                 aria-selected={selected}
                 onClick={() => setTab(t.id)}
-                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 -mb-px border-b-2 text-sm font-medium transition-colors ${
+                className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-2 max-md:min-h-[40px] -mb-px border-b-2 text-sm font-medium transition-colors ${
                   selected
                     ? "border-cyan-500 text-cyan-700 dark:text-cyan-300"
                     : "border-transparent text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200"
@@ -242,7 +242,7 @@ export default function AnalyticsView({
       {tab === "overview" && (
         <>
       {/* Top 4 Key Metric Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
         {/* Retention Health */}
         <div className="p-4 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-2">
           <div className="flex items-center justify-between">
@@ -332,7 +332,7 @@ export default function AnalyticsView({
       <WeeklyProgressCard words={words} />
 
       {/* Heatmap Widget */}
-      <div className={`${card} p-5 space-y-3`}>
+      <div className={`${card} p-4 md:p-5 space-y-3`}>
         <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
           <Calendar className="w-4 h-4 text-cyan-500" />
           <span>Lịch sử học mỗi ngày</span>
@@ -386,8 +386,8 @@ export default function AnalyticsView({
 
       {/* Accuracy & Review Logs Summary (if logs exist) */}
       {reviewAnalytics && reviewAnalytics.totalReviews > 0 && (
-        <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
+        <div className="p-4 md:p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
+          <div className="flex max-md:flex-wrap items-center justify-between max-md:gap-2">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <Activity className="w-4 h-4 text-emerald-500" />
               <span>Độ chính xác khi ôn, 14 ngày qua</span>
@@ -397,7 +397,7 @@ export default function AnalyticsView({
             </span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 md:gap-4 text-center">
             <div className="p-3 rounded-xl bg-slate-50 dark:bg-zinc-950/60 border border-slate-200 dark:border-zinc-800">
               <span className="text-[11px] text-slate-500 dark:text-zinc-400">Tổng lượt ôn tập</span>
               <p className="text-xl font-bold font-mono text-slate-900 dark:text-white mt-1">
@@ -421,9 +421,9 @@ export default function AnalyticsView({
       )}
 
       {/* FSRS Word State Distribution & Retention Insights */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         {/* Word State Distribution */}
-        <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-5">
+        <div className="p-4 md:p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-5">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <PieIcon className="w-4 h-4 text-purple-500" />
             <span>Các từ đang ở giai đoạn nào</span>
@@ -513,7 +513,7 @@ export default function AnalyticsView({
         </div>
 
         {/* Topic Mastery Grid */}
-        <div className="p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
+        <div className="p-4 md:p-6 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 shadow-sm space-y-4">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-cyan-500" />
             <span>Nhớ lâu theo cấp độ</span>

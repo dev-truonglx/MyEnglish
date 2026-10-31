@@ -75,7 +75,7 @@ export default function TodayChecklist({
         </div>
       )}
 
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="md:gap-3 flex flex-wrap md:flex-nowrap items-baseline justify-between max-md:gap-x-3 max-md:gap-y-0.5">
         <p className="text-sm font-semibold text-cyan-800 dark:text-cyan-300">{heading}</p>
         <p className="text-xs text-slate-500 dark:text-zinc-400 shrink-0">
           {tasks.length - left.length}/{tasks.length} việc · còn ~{minutesLeft} phút
@@ -115,7 +115,7 @@ export default function TodayChecklist({
               ) : (
                 <button
                   onClick={() => onRun(task)}
-                  className={`w-full text-left flex items-center gap-3 rounded-xl px-3 py-2 border transition ${
+                  className={`w-full text-left flex items-center gap-3 rounded-xl px-3 py-2 max-md:min-h-10 border transition ${
                     isPrimary
                       ? "bg-white dark:bg-zinc-900 border-cyan-300 dark:border-cyan-700/70"
                       : "bg-white/70 dark:bg-zinc-900/50 border-slate-200 dark:border-zinc-800 hover:border-cyan-300 dark:hover:border-cyan-700"
@@ -133,7 +133,7 @@ export default function TodayChecklist({
         <button
           onClick={() => onRun(primary)}
           autoFocus
-          className="px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] text-white text-sm font-bold shadow-md shadow-cyan-600/30 inline-flex items-center justify-center gap-2 transition-all"
+          className="max-md:min-h-10 px-5 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] text-white text-sm font-bold shadow-md shadow-cyan-600/30 inline-flex items-center justify-center gap-2 transition-all"
         >
           <Play className="w-4 h-4 fill-white" />
           {primaryLabel(primary, firstIndex === 0)}
@@ -142,7 +142,7 @@ export default function TodayChecklist({
           <button
             onClick={onFocus}
             title="Học các thẻ này trong một phiên có hẹn giờ: ẩn mọi thứ khác, tắt nhắc nhở"
-            className="px-3.5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-600/30 transition active:scale-[0.98]"
+            className="max-md:min-h-10 px-3.5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5 bg-violet-600 hover:bg-violet-700 text-white shadow-md shadow-violet-600/30 transition active:scale-[0.98]"
           >
             <Crosshair className="w-4 h-4" /> Tập trung {focusMinutes ?? 10}′
           </button>
@@ -151,7 +151,7 @@ export default function TodayChecklist({
           <button
             onClick={onQuickStart}
             title="3 thẻ ôn nhanh, đủ để giữ chuỗi ngày học"
-            className={`px-3.5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5 border transition ${
+            className={`max-md:min-h-10 px-3.5 py-2.5 rounded-xl text-sm font-semibold inline-flex items-center gap-1.5 border transition ${
               quickMode === "urgent"
                 ? "border-amber-400 dark:border-amber-500/60 bg-amber-50 dark:bg-amber-500/10 text-amber-800 dark:text-amber-200 hover:bg-amber-100 dark:hover:bg-amber-500/20"
                 : "border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"

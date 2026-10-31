@@ -50,9 +50,9 @@ export default function PretestCard({ question, phonetic, onDone }: PretestCardP
         </p>
       </div>
 
-      <div className="p-5 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
+      <div className="p-4 md:p-5 rounded-2xl bg-slate-50 dark:bg-zinc-950/80 border border-slate-200/80 dark:border-zinc-800/80 space-y-3">
         <div className="flex items-baseline gap-2.5 flex-wrap">
-          <span className="text-2xl font-black text-slate-900 dark:text-white tracking-tight">{question.word}</span>
+          <span className="text-2xl break-words font-black text-slate-900 dark:text-white tracking-tight">{question.word}</span>
           {phonetic && <span className="font-mono text-cyan-600 dark:text-cyan-400 text-sm">{phonetic}</span>}
         </div>
         <p className="text-sm italic text-slate-700 dark:text-zinc-300 pl-3 border-l-2 border-violet-500/60">
@@ -65,9 +65,9 @@ export default function PretestCard({ question, phonetic, onDone }: PretestCardP
           <button
             key={o.text}
             onClick={() => pick(i)}
-            className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-violet-400 dark:hover:border-violet-500/60 text-left text-sm text-slate-800 dark:text-zinc-200 transition-colors"
+            className="w-full flex items-center gap-3 p-3 max-md:min-h-11 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-violet-400 dark:hover:border-violet-500/60 text-left text-sm text-slate-800 dark:text-zinc-200 transition-colors"
           >
-            <kbd className="w-5 h-5 shrink-0 flex items-center justify-center rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono text-slate-500">
+            <kbd className="hidden md:flex w-5 h-5 shrink-0 items-center justify-center rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono text-slate-500">
               {i + 1}
             </kbd>
             <span>{o.text}</span>
@@ -75,9 +75,9 @@ export default function PretestCard({ question, phonetic, onDone }: PretestCardP
         ))}
         <button
           onClick={() => pick(null)}
-          className="w-full flex items-center gap-3 p-3 rounded-xl border border-dashed border-slate-300 dark:border-zinc-700 text-left text-sm text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition-colors"
+          className="w-full flex items-center gap-3 p-3 max-md:min-h-11 rounded-xl border border-dashed border-slate-300 dark:border-zinc-700 text-left text-sm text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition-colors"
         >
-          <kbd className="w-5 h-5 shrink-0 flex items-center justify-center rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">0</kbd>
+          <kbd className="hidden md:flex w-5 h-5 shrink-0 items-center justify-center rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-mono">0</kbd>
           <span className="flex items-center gap-1.5">
             <HelpCircle className="w-3.5 h-3.5" />
             Chưa đoán được

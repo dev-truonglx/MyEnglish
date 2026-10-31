@@ -241,7 +241,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
             onClick={onBack}
             title="Quay lại danh sách"
             aria-label="Quay lại danh sách"
-            className="shrink-0 rounded-xl border border-slate-200 p-2 text-slate-600 transition hover:bg-slate-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="shrink-0 rounded-xl border border-slate-200 p-2.5 md:p-2 max-md:min-h-[40px] text-slate-600 transition hover:bg-slate-100 dark:border-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             <ArrowLeft className="h-4 w-4" />
           </button>
@@ -275,13 +275,13 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
           <button
             type="button"
             onClick={() => setImportModalOpen(true)}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50/70 hover:bg-cyan-100/80 px-2.5 py-1.5 text-xs font-semibold text-cyan-700 transition dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300 dark:hover:bg-cyan-900/50 cursor-pointer"
+            className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-cyan-50/70 hover:bg-cyan-100/80 px-2.5 py-1.5 max-md:min-h-[40px] text-xs font-semibold text-cyan-700 transition dark:border-cyan-800 dark:bg-cyan-950/40 dark:text-cyan-300 dark:hover:bg-cyan-900/50 cursor-pointer"
             title="Thêm bài tập bằng AI cho riêng bài học này"
           >
             <Sparkles className="h-3.5 w-3.5 text-cyan-600 dark:text-cyan-400" />
             <span>Thêm bài tập AI</span>
           </button>
-          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-medium text-slate-700 dark:border-zinc-800 dark:text-zinc-300">
+          <label className="inline-flex cursor-pointer items-center gap-2 rounded-lg border border-slate-200 px-2.5 py-1.5 max-md:min-h-[40px] text-xs font-medium text-slate-700 dark:border-zinc-800 dark:text-zinc-300">
             <input
               type="checkbox"
               checked={onPath}
@@ -353,7 +353,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
             key={id}
             type="button"
             onClick={() => goTab(id)}
-            className={`flex items-center justify-center gap-1.5 rounded-lg px-1.5 py-2 text-center text-xs font-semibold leading-tight transition ${
+            className={`flex items-center justify-center gap-1.5 rounded-lg px-1.5 py-2 max-md:min-h-[40px] text-center text-xs font-semibold leading-tight transition ${
               tab === id
                 ? "bg-white text-cyan-700 shadow-sm dark:bg-zinc-900 dark:text-cyan-400"
                 : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -383,7 +383,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
                 type="button"
                 onClick={() => (studied ? void startExercises() : void startQuickCheck())}
                 disabled={starting !== null}
-                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
+                className="inline-flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 max-md:min-h-[44px] text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
               >
                 {starting ? <Loader2 className="h-4 w-4 animate-spin" /> : studied ? <Layers className="h-4 w-4" /> : <Zap className="h-4 w-4" />}
                 {studied ? "Làm bài tập" : "Làm kiểm tra nhanh"}
@@ -421,7 +421,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
               type="button"
               onClick={startQuickCheck}
               disabled={starting !== null}
-              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-6 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500 disabled:opacity-50 sm:w-auto"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-cyan-600 px-6 py-2.5 max-md:min-h-[44px] text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500 disabled:opacity-50 sm:w-auto"
             >
               {starting === "learn" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4 fill-current" />}
               Bắt đầu
@@ -470,7 +470,7 @@ function ReadOnlyPanel({ studied, quickEmpty, onMark, onBack }: { studied: boole
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
+          className="inline-flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 max-md:min-h-[44px] text-sm font-semibold text-slate-700 transition hover:bg-white dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
           Về danh sách bài
         </button>
@@ -478,7 +478,7 @@ function ReadOnlyPanel({ studied, quickEmpty, onMark, onBack }: { studied: boole
         <button
           type="button"
           onClick={onMark}
-          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
+          className="inline-flex w-full sm:w-auto shrink-0 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2.5 max-md:min-h-[44px] text-sm font-semibold !text-white shadow-sm transition hover:bg-cyan-500"
         >
           <CheckCircle2 className="h-4 w-4" />
           Đã đọc xong, tính là đã học

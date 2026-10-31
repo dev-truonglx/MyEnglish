@@ -84,7 +84,7 @@ export default function HabitInsightsCard({ words }: { words: WordDetail[] }) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 space-y-6 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-4 md:p-5 space-y-6 shadow-sm">
       {/* Long-term memory growth */}
       <div className="space-y-3">
         <div className="flex items-center gap-2">
@@ -112,7 +112,7 @@ export default function HabitInsightsCard({ words }: { words: WordDetail[] }) {
 
       {/* When the learner studies */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2 text-xs font-semibold text-slate-700 dark:text-zinc-300">
+        <div className="flex max-md:flex-wrap items-center gap-2 text-xs font-semibold text-slate-700 dark:text-zinc-300">
           <Clock className="w-3.5 h-3.5" /> Giờ bạn hay học ({data.days} ngày)
           {topHours.size > 0 && (
             <span className="ml-auto font-normal text-slate-500 dark:text-zinc-400">

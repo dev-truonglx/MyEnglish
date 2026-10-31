@@ -75,13 +75,13 @@ export default function WeeklyProgressCard({ words, compact = false }: { words: 
   const lowRetention = enoughData && (retentionPct as number) < targetPct - 5;
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-4 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 md:p-5 space-y-4 shadow-sm">
       <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
         <CalendarCheck className="w-4 h-4 text-cyan-500" />
         <span>Tuần này</span>
       </h3>
 
-      <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-2 sm:grid-cols-4"}`}>
+      <div className={`grid gap-3 ${compact ? "grid-cols-2" : "grid-cols-2 md:grid-cols-4"}`}>
         <Stat label="Lượt trả lời" value={String(week.answers)} />
         <Stat label="Từ đã ôn" value={String(week.wordsStudied)} />
         <Stat label="Ngày học" value={`${week.activeDays}/7`} />

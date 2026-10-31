@@ -375,11 +375,11 @@ export default function LetterTilesExercise({
   }, [tiles, picked, pick, undo, check, letterCount, state]);
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-4 animate-in fade-in duration-200">
+    <div className="w-full max-w-xl mx-auto space-y-3 md:space-y-4 animate-in fade-in duration-200">
       {!hideHeader ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-2 shadow-sm">
+        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-6 text-center space-y-2 shadow-sm">
           <div className="text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
-          <h2 className="text-2xl font-bold text-slate-900 dark:text-white">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn, target, example), target)}</h2>
+          <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white break-words">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn, target, example), target)}</h2>
           {word.part_of_speech && <p className="text-xs italic text-slate-400">{word.part_of_speech}</p>}
           {example?.sentence_vn && <p className="text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
         </div>
@@ -393,12 +393,12 @@ export default function LetterTilesExercise({
       )}
 
       {/* Slots */}
-      <div className={`flex flex-wrap justify-center items-center gap-1.5 min-h-[52px] py-1 ${state === "wrong" ? "animate-shake" : ""}`}>
+      <div className={`flex flex-wrap justify-center items-center gap-1 md:gap-1.5 min-h-[44px] md:min-h-[52px] py-1 ${state === "wrong" ? "animate-shake" : ""}`}>
         {slots.map((slotChar, i) => {
           const isFixed = FIXED.test(slotChar);
           if (isFixed) {
             return (
-              <span key={i} className="w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500">
+              <span key={i} className="w-3 md:w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500">
                 {slotChar === " " ? "" : slotChar}
               </span>
             );
@@ -416,7 +416,7 @@ export default function LetterTilesExercise({
                 type="button"
                 onClick={() => unpickAt(nonFixedIdx)}
                 title="Bấm để xóa chữ này"
-                className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
+                className={`w-8 h-10 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-lg md:text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
                   state === "wrong"
                     ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:border-rose-400 hover:bg-rose-50"
                     : "border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30 text-slate-900 dark:text-white hover:border-rose-400 hover:bg-rose-50/80 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 hover:scale-105 active:scale-95"
@@ -430,7 +430,7 @@ export default function LetterTilesExercise({
           return (
             <span
               key={i}
-              className={`w-10 h-12 rounded-lg border-2 flex items-center justify-center text-xl font-bold font-mono select-none ${
+              className={`w-8 h-10 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-lg md:text-xl font-bold font-mono select-none ${
                 state === "correct"
                   ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                   : state === "give_up"
@@ -449,7 +449,7 @@ export default function LetterTilesExercise({
       </div>
 
       {/* Tiles */}
-      <div className="flex flex-wrap justify-center gap-2 py-1">
+      <div className="flex flex-wrap justify-center gap-1.5 md:gap-2 py-1">
         {tiles.map((t) => {
           const used = picked.includes(t.id);
           const pickedIdx = picked.indexOf(t.id);
@@ -465,7 +465,7 @@ export default function LetterTilesExercise({
               }}
               disabled={state === "correct" || state === "give_up"}
               title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
-              className={`w-11 h-11 rounded-xl text-lg font-bold font-mono shadow-sm transition-all ${
+              className={`w-10 h-10 md:w-11 md:h-11 rounded-xl text-base md:text-lg font-bold font-mono shadow-sm transition-all max-md:flex max-md:items-center max-md:justify-center ${
                 used || state === "give_up"
                   ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 cursor-not-allowed opacity-60"
                   : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95 cursor-pointer"
@@ -477,13 +477,13 @@ export default function LetterTilesExercise({
         })}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2.5 text-xs px-1 min-h-[38px] pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 md:gap-2.5 text-xs px-1 min-h-[38px] pt-1">
         <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={clear}
             disabled={picked.length === 0 || state === "correct" || state === "give_up"}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-750 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:pointer-events-none transition-colors text-xs font-medium cursor-pointer shadow-2xs"
+            className="inline-flex items-center gap-1.5 px-2.5 py-2 md:py-1.5 max-md:min-h-10 rounded-lg border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-750 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:pointer-events-none transition-colors text-xs font-medium cursor-pointer shadow-2xs"
             title="Làm lại từ đầu"
           >
             <RotateCcw className="w-3.5 h-3.5" />
@@ -493,7 +493,7 @@ export default function LetterTilesExercise({
             <button
               type="button"
               onClick={() => setHint(true)}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors text-xs font-medium cursor-pointer"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 md:py-1.5 max-md:min-h-10 rounded-lg text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors text-xs font-medium cursor-pointer"
               title="Hiện chữ cái đầu tiên làm gợi ý"
             >
               <HelpCircle className="w-3.5 h-3.5" />
@@ -504,7 +504,7 @@ export default function LetterTilesExercise({
             <button
               type="button"
               onClick={giveUp}
-              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 text-xs font-semibold transition-colors cursor-pointer shrink-0"
+              className="inline-flex items-center gap-1.5 px-2.5 py-2 md:py-1.5 max-md:min-h-10 rounded-lg border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-900/50 text-rose-600 dark:text-rose-400 text-xs font-semibold transition-colors cursor-pointer shrink-0"
               title="Xem đáp án và học lại từ này"
             >
               <Eye className="w-3.5 h-3.5" />
@@ -530,10 +530,10 @@ export default function LetterTilesExercise({
             <button
               type="button"
               onClick={() => check(picked)}
-              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer animate-in fade-in"
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 md:py-1.5 max-md:min-h-10 rounded-xl bg-cyan-600 hover:bg-cyan-700 text-white font-bold text-xs shadow-xs transition-all active:scale-95 cursor-pointer animate-in fade-in"
             >
               <span>Kiểm tra</span>
-              <kbd className="px-1.5 py-0.5 bg-white/20 rounded text-[10px] font-mono leading-none">Enter</kbd>
+              <kbd className="hidden md:inline-block px-1.5 py-0.5 bg-white/20 rounded text-[10px] font-mono leading-none">Enter</kbd>
             </button>
           ) : null}
         </div>

@@ -7,7 +7,7 @@ import { PAGE_CONTAINER } from "./shared";
 export default function AccountTab({ onOpenLeaderboard }: { onOpenLeaderboard?: () => void }) {
   const signedIn = useAuthStore((s) => !!s.user);
   return (
-    <div className={PAGE_CONTAINER}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3`}>
       <div className="space-y-5 max-w-2xl">
         <div>
           <h2 className="text-base font-bold text-slate-900 dark:text-white">Tài khoản</h2>
@@ -17,7 +17,7 @@ export default function AccountTab({ onOpenLeaderboard }: { onOpenLeaderboard?: 
         {signedIn && onOpenLeaderboard && (
           <button
             onClick={onOpenLeaderboard}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-800"
+            className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-800 dark:text-zinc-100 hover:bg-slate-50 dark:hover:bg-zinc-800"
           >
             <Trophy className="w-4 h-4 text-amber-500" /> Xem bảng xếp hạng
           </button>

@@ -75,7 +75,7 @@ export default function DisplaySettings() {
                 setUiScale(s);
                 setScale(s);
               }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${scale === s
+              className={`px-3 py-1.5 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-lg text-xs font-semibold border ${scale === s
                 ? "bg-cyan-600 text-white border-cyan-600"
                 : "border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-300"
                 }`}
@@ -113,7 +113,7 @@ export default function DisplaySettings() {
             </label>
             <button
               onClick={() => playSound("combo")}
-              className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs"
+              className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs"
             >
               <Volume2 className="w-3.5 h-3.5" /> Nghe thử
             </button>
@@ -126,7 +126,7 @@ export default function DisplaySettings() {
           <select
             value={tts.voiceURI}
             onChange={(e) => setTts(saveTtsSettings({ voiceURI: e.target.value }))}
-            className="text-xs rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 max-w-[16rem]"
+            className="text-base md:text-xs rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-2 py-1.5 w-full md:w-auto max-w-full md:max-w-[16rem]"
           >
             <option value="">Mặc định của máy</option>
             {voices.map((v) => (
@@ -150,7 +150,7 @@ export default function DisplaySettings() {
           </label>
           <button
             onClick={() => handleSpeak("Hello. I fixed the bug and pushed the code.")}
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs"
+            className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1 px-2.5 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-xs"
           >
             <Volume2 className="w-3.5 h-3.5" /> Nghe thử
           </button>

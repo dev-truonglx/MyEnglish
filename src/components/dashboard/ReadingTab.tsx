@@ -174,7 +174,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
 
   if (!analysis) {
     return (
-      <div className={`${PAGE_CONTAINER} space-y-5`}>
+      <div className={`${PAGE_CONTAINER} max-md:p-3 space-y-5`}>
         <div className="space-y-2 text-center">
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center justify-center gap-2">
             <BookOpenText className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
@@ -207,7 +207,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
           data-lpignore="true"
           data-1p-ignore="true"
           data-form-type="other"
-          className="w-full p-4 rounded-2xl border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-y"
+          className="w-full p-4 rounded-2xl border border-slate-300 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 text-base md:text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 focus:ring-2 focus:ring-cyan-500/20 resize-y"
         />
         <div className="flex items-center justify-between">
           <span className="text-[11px] text-slate-400 dark:text-zinc-500">
@@ -220,7 +220,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
                   setText("");
                   saveDraft("");
                 }}
-                className="py-2 px-3 rounded-xl text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
+                className="py-2 px-3 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-xl text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200"
               >
                 Xóa
               </button>
@@ -228,7 +228,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
             <button
               onClick={startReading}
               disabled={!text.trim()}
-              className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40"
+              className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40"
             >
               <BookOpenText className="w-4 h-4" />
               Đọc
@@ -244,7 +244,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
   for (const h of analysis.bankHits) counts[h.status]++;
 
   return (
-    <div className={`${PAGE_CONTAINER} space-y-4`}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3 space-y-4`}>
       {message && (
         <div className="flex items-start justify-between gap-3 p-3 rounded-xl border border-cyan-200 dark:border-cyan-500/30 bg-cyan-50 dark:bg-cyan-500/10 text-xs text-cyan-900 dark:text-cyan-200">
           <span>{message}</span>
@@ -262,7 +262,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
         </div>
         <button
           onClick={() => setReading(null)}
-          className="inline-flex items-center gap-1.5 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
+          className="inline-flex items-center gap-1.5 max-md:min-h-10 py-1.5 px-3 rounded-lg border border-slate-200 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
         >
           <Pencil className="w-3.5 h-3.5" />
           Sửa / dán bài khác
@@ -270,7 +270,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-4 items-start">
-        <article className="p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-[15px] leading-8 text-slate-800 dark:text-zinc-200 whitespace-pre-wrap break-words">
+        <article className="p-3.5 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 text-[15px] leading-8 text-slate-800 dark:text-zinc-200 whitespace-pre-wrap break-words">
           {analysis.segments.map((seg, i) => {
             const t = seg.token;
             if (!t || t.kind === "common") {
@@ -311,7 +311,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
                   <button
                     key={b}
                     onClick={() => togglePick(b, "")}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-zinc-900 border border-violet-200 dark:border-violet-500/30 text-[11px] font-mono text-violet-800 dark:text-violet-200"
+                    className="inline-flex items-center gap-1 max-md:min-h-8 px-2 py-1 md:py-0.5 rounded-md bg-white dark:bg-zinc-900 border border-violet-200 dark:border-violet-500/30 text-[11px] font-mono text-violet-800 dark:text-violet-200"
                   >
                     {b}
                     <X className="w-3 h-3" />
@@ -321,7 +321,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
               <button
                 onClick={addPicked}
                 disabled={adding}
-                className="w-full inline-flex items-center justify-center gap-1.5 py-2 rounded-lg bg-violet-600 hover:bg-violet-500 !text-white text-xs font-semibold disabled:opacity-50"
+                className="w-full inline-flex items-center justify-center max-md:min-h-10 gap-1.5 py-2 max-md:px-3 rounded-lg bg-violet-600 hover:bg-violet-500 !text-white text-xs font-semibold disabled:opacity-50"
               >
                 <Plus className="w-3.5 h-3.5" />
                 Thêm vào sổ kèm câu ví dụ
@@ -347,7 +347,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
                       onClick={() => keepSentence(h.word.id, h.sentence)}
                       disabled={savedSentences.has(h.word.id)}
                       title={h.sentence}
-                      className="inline-flex items-center gap-1 text-[10px] text-cyan-700 dark:text-cyan-400 hover:underline disabled:no-underline disabled:text-emerald-600"
+                      className="inline-flex items-center gap-1 text-[10px] text-cyan-700 dark:text-cyan-400 hover:underline disabled:no-underline disabled:text-emerald-600 py-1 md:py-0"
                     >
                       {savedSentences.has(h.word.id) ? <Check className="w-3 h-3" /> : <Quote className="w-3 h-3" />}
                       {savedSentences.has(h.word.id) ? "Đã lưu câu" : "Lưu câu này làm ví dụ"}
@@ -372,7 +372,7 @@ export default function ReadingTab({ resetKey }: { resetKey?: number }) {
                       key={c.base}
                       onClick={() => togglePick(c.base, c.sentence)}
                       title={c.sentence}
-                      className={`px-2 py-1 rounded-md border text-[11px] font-mono transition-colors ${on ? "bg-violet-600 border-violet-600 !text-white" : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-violet-400"}`}
+                      className={`max-md:inline-flex max-md:items-center max-md:min-h-8 px-2 py-1 rounded-md border text-[11px] font-mono transition-colors ${on ? "bg-violet-600 border-violet-600 !text-white" : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-violet-400"}`}
                     >
                       {c.base}
                       {c.count > 1 && <span className="opacity-60"> ×{c.count}</span>}

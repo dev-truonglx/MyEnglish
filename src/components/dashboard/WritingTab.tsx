@@ -151,7 +151,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
   };
 
   return (
-    <div className={`${PAGE_CONTAINER} space-y-6`}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3 space-y-5 md:space-y-6`}>
       <div className="space-y-2 text-center">
         <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight flex items-center justify-center gap-2">
           <NotebookPen className="w-5 h-5 text-cyan-600 dark:text-cyan-400" />
@@ -164,7 +164,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
       </div>
 
       {/* Daily standup */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-3 shadow-sm">
+      <div className="p-3.5 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-3 shadow-sm">
         <div className="flex items-center justify-between">
           <span className="text-sm font-bold text-slate-900 dark:text-white">Standup hôm nay</span>
           <span className="text-[11px] font-mono text-slate-400">
@@ -198,14 +198,14 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
           data-lpignore="true"
           data-1p-ignore="true"
           data-form-type="other"
-          className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 resize-y"
+          className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-base md:text-sm text-slate-800 dark:text-zinc-200 leading-relaxed focus:outline-none focus:border-cyan-500 resize-y"
         />
         <div className="flex items-center justify-between">
           <span className={`text-[11px] ${len > 600 ? "text-rose-500" : "text-slate-400"}`}>{len}/600 ký tự</span>
           <button
             onClick={send}
             disabled={!canSend}
-            className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40"
+            className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
             {busy ? "AI đang sửa…" : used >= STANDUP_PER_DAY ? "Hết lượt hôm nay" : "Nhờ AI sửa"}
@@ -254,7 +254,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
       </div>
 
       {/* Mistake notebook */}
-      <div className="p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-4 shadow-sm">
+      <div className="p-3.5 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-4 shadow-sm">
         <div className="flex items-center justify-between gap-3">
           <span className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
             <BookMarked className="w-4 h-4 text-rose-500" />
@@ -263,7 +263,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
           {summary && summary.due > 0 && !reviewing && (
             <button
               onClick={startReview}
-              className="inline-flex items-center gap-1.5 py-2 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 !text-white text-xs font-semibold shadow-sm"
+              className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1.5 py-2 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 !text-white text-xs font-semibold shadow-sm"
             >
               <Play className="w-3.5 h-3.5 fill-white" />
               Ôn {summary.due} lỗi đến hạn
@@ -295,9 +295,9 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
                 const lesson = categoryLessons[category];
                 const max = summary.byCategory[0].count;
                 return (
-                  <div key={category} className="flex items-center gap-3 text-xs">
-                    <span className="w-48 shrink-0 text-slate-700 dark:text-zinc-300">{MISTAKE_CATEGORY_LABEL[category]}</span>
-                    <div className="flex-1 h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
+                  <div key={category} className="flex flex-wrap md:flex-nowrap items-center gap-2 md:gap-3 text-xs">
+                    <span className="w-full md:w-48 shrink-0 text-slate-700 dark:text-zinc-300 max-md:font-medium md:font-normal">{MISTAKE_CATEGORY_LABEL[category]}</span>
+                    <div className="flex-1 max-md:min-w-[100px] h-2 rounded-full bg-slate-100 dark:bg-zinc-800 overflow-hidden">
                       <div className="h-full bg-rose-400/80" style={{ width: `${Math.round((count / max) * 100)}%` }} />
                     </div>
                     <span className="w-6 text-right font-mono text-slate-500">{count}</span>
@@ -324,7 +324,7 @@ export default function WritingTab({ onOpenGrammarLesson, resetKey }: WritingTab
                   <button
                     onClick={() => deleteMistake(m.id).then(reload)}
                     title="Xóa khỏi sổ (AI sửa sai, hoặc không cần ôn)"
-                    className="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-rose-500 transition-opacity"
+                    className="max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100 p-2.5 -m-1.5 md:p-0 md:m-0 text-slate-400 hover:text-rose-500 transition-opacity"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>

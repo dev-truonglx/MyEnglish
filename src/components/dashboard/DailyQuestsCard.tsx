@@ -184,7 +184,7 @@ export default function DailyQuestsCard({
               <button
                 onClick={() => go(q)}
                 disabled={done}
-                className="w-full flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/60 disabled:hover:bg-transparent transition-colors group"
+                className="w-full flex items-center gap-2.5 rounded-lg px-1.5 py-1.5 max-md:min-h-10 text-left hover:bg-slate-50 dark:hover:bg-zinc-800/60 disabled:hover:bg-transparent transition-colors group"
               >
                 <span
                   className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${
@@ -245,7 +245,7 @@ export default function DailyQuestsCard({
         <button
           onClick={open}
           disabled={opening}
-          className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-bold shadow-md shadow-amber-500/30 active:scale-[0.98] transition-all"
+          className="w-full flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 max-md:min-h-10 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white text-sm font-bold shadow-md shadow-amber-500/30 active:scale-[0.98] transition-all"
         >
           <Gift className={`w-5 h-5 ${opening ? "animate-shake" : "animate-bounce"}`} key={opening ? "o" : "r"} />
           {opening ? "Đang mở…" : "Mở rương phần thưởng"}

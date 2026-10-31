@@ -259,7 +259,7 @@ function LevelRoadmap({
                     }}
                     title={`Đánh dấu toàn bộ từ ${level} là đã biết`}
                     aria-label={`Đánh dấu toàn bộ từ ${level} là đã biết`}
-                    className="p-1 -mr-1 rounded-md text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 transition-colors"
+                    className="p-2 -mr-1 md:p-1 rounded-md text-slate-400 hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/60 transition-colors"
                   >
                     <CheckCheck className="w-3.5 h-3.5" />
                   </button>
@@ -444,7 +444,7 @@ function Skim({
                 role="tab"
                 aria-selected={l === level}
                 onClick={() => setLevel(l)}
-                className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                className={`px-2.5 py-1 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-md text-xs font-semibold transition-colors ${
                   l === level
                     ? "bg-white dark:bg-zinc-700 text-cyan-700 dark:text-cyan-300 shadow-sm"
                     : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -462,7 +462,7 @@ function Skim({
           <button
             type="button"
             onClick={() => onMarkLevel(level)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+            className="inline-flex items-center max-md:min-h-10 gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
             title={`Đánh dấu toàn bộ từ vựng cấp ${level} là đã biết`}
           >
             <CheckCheck className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
@@ -473,14 +473,14 @@ function Skim({
           <span className="ml-auto flex items-center gap-3">
             <button
               onClick={() => setShown(allShown ? new Set() : new Set(entries.map((e) => e.id)))}
-              className="inline-flex items-center gap-1 text-xs font-medium text-slate-600 dark:text-zinc-300 hover:text-cyan-700 dark:hover:text-cyan-300"
+              className="inline-flex items-center max-md:min-h-10 gap-1 text-xs font-medium text-slate-600 dark:text-zinc-300 hover:text-cyan-700 dark:hover:text-cyan-300"
             >
               {allShown ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
               {allShown ? "Ẩn nghĩa" : "Hiện nghĩa"}
             </button>
             <button
               onClick={() => setPicked(picked.size === entries.length ? new Set() : new Set(entries.map((e) => e.id)))}
-              className="text-xs font-medium text-cyan-700 dark:text-cyan-300 hover:underline"
+              className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center font-medium text-cyan-700 dark:text-cyan-300 hover:underline"
             >
               {picked.size === entries.length ? "Bỏ chọn tất cả" : "Chọn tất cả"}
             </button>
@@ -549,11 +549,11 @@ function Skim({
       )}
       {/* The action stays in view while the list scrolls */}
       {entries && entries.length > 0 && (
-        <div className="sticky bottom-0 -mx-5 -mb-5 px-5 py-3 rounded-b-2xl border-t border-slate-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex flex-wrap items-center gap-3">
+        <div className="sticky bottom-0 -mx-3 md:-mx-5 -mb-3 md:-mb-5 px-3 md:px-5 py-3 rounded-b-2xl border-t border-slate-200 dark:border-zinc-800 bg-white/95 dark:bg-zinc-900/95 backdrop-blur flex flex-wrap items-center gap-3">
           <button
             onClick={markKnown}
             disabled={picked.size === 0 || busy}
-            className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center gap-2"
+            className="px-4 py-2 max-md:min-h-10 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-2"
           >
             {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
             {picked.size > 0 ? `Đánh dấu ${picked.size} từ đã biết` : "Chọn từ bạn đã biết"}
@@ -563,7 +563,7 @@ function Skim({
               type="button"
               disabled={busy}
               onClick={() => onMarkLevel(level)}
-              className="px-3 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 hover:border-emerald-500 dark:hover:border-emerald-500 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 inline-flex items-center gap-1.5 transition-colors disabled:opacity-50"
+              className="px-3 py-2 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 hover:border-emerald-500 dark:hover:border-emerald-500 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 inline-flex items-center max-md:justify-center gap-1.5 transition-colors disabled:opacity-50"
             >
               <CheckCheck className="w-4 h-4 text-emerald-500" />
               Đánh dấu cả cấp {level}
@@ -637,7 +637,7 @@ function CatalogSearch({ onChanged }: { onChanged: () => void }) {
           data-lpignore="true"
           data-1p-ignore="true"
           data-form-type="other"
-          className="flex-1 bg-transparent text-sm text-slate-900 dark:text-zinc-100 focus:outline-none"
+          className="flex-1 bg-transparent text-base md:text-sm text-slate-900 dark:text-zinc-100 focus:outline-none"
         />
       </label>
       {!query.trim() ? (
@@ -666,7 +666,7 @@ function CatalogSearch({ onChanged }: { onChanged: () => void }) {
             </div>
             <button
               onClick={() => early(e)}
-              className="shrink-0 inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40"
+              className="shrink-0 inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40"
             >
               <Zap className="w-3.5 h-3.5" /> Học sớm
             </button>
@@ -719,7 +719,7 @@ export default function VocabTab() {
   const card = "rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-sm";
 
   return (
-    <div className={`${PAGE_CONTAINER} space-y-5`}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3 space-y-5`}>
       {modalLevel && (
         <MarkLevelKnownModal
           level={modalLevel}

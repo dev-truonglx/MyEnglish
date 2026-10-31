@@ -1,0 +1,14 @@
+{
+  "name": "MyEnglish",
+  "short_name": "MyEnglish",
+  "lang": "vi",
+  "start_url": "/learn",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f172a",
+  "icons": [
+    { "src": "/app-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "/app-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "maskable" }
+  ]
+}

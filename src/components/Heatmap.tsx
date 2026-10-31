@@ -120,9 +120,9 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
   };
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800/90 bg-white dark:bg-zinc-900/60 p-6 space-y-6 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800/90 bg-white dark:bg-zinc-900/60 p-4 md:p-6 space-y-6 shadow-sm">
       {/* Streaks Header Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
         {/* Metric 1: Current Streak */}
         <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/80 p-3.5 space-y-1 relative overflow-hidden shadow-sm">
           <div className="flex items-center justify-between text-slate-500 dark:text-zinc-400 text-xs">
@@ -174,9 +174,9 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
 
       {/* DAILY GOAL PROGRESS CARD */}
       <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/80 space-y-3 shadow-sm">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Target className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
+        <div className="flex max-md:flex-wrap max-md:gap-y-2 items-center justify-between">
+          <div className="flex flex-wrap md:flex-nowrap items-center gap-2">
+            <Target className="w-4 h-4 text-cyan-600 dark:text-cyan-400 max-md:shrink-0" />
             <span className="text-xs font-semibold text-slate-800 dark:text-zinc-200">Mục tiêu hằng ngày (Daily Goal)</span>
             {streakStats.goalReached && (
               <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
@@ -195,7 +195,7 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
                 setIsEditingGoal(!isEditingGoal);
               }}
               title="Cài đặt mục tiêu"
-              className="p-1 rounded text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
+              className="p-3.5 md:p-1 rounded text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
             >
               <Settings2 className="w-3.5 h-3.5" />
             </button>
@@ -216,7 +216,7 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
 
         {/* Goal Edit Inline Form */}
         {isEditingGoal && (
-          <form onSubmit={handleSaveGoal} autoComplete="off" className="pt-2 flex items-center gap-2 text-xs">
+          <form onSubmit={handleSaveGoal} autoComplete="off" className="pt-2 flex max-md:flex-wrap items-center gap-2 text-xs">
             <span className="text-slate-600 dark:text-zinc-400">Đặt mục tiêu số câu/ngày:</span>
             <input
               type="number"
@@ -233,18 +233,18 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
               data-lpignore="true"
               data-1p-ignore="true"
               data-form-type="other"
-              className="w-16 px-2 py-1 rounded bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-white font-mono text-xs focus:outline-none focus:border-cyan-500"
+              className="w-16 px-2 py-1 max-md:min-h-[40px] rounded bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 text-slate-900 dark:text-white font-mono text-base md:text-xs focus:outline-none focus:border-cyan-500"
             />
             <button
               type="submit"
-              className="px-2.5 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition-colors"
+              className="px-2.5 py-1 max-md:min-h-[40px] rounded bg-cyan-600 hover:bg-cyan-500 text-white font-medium transition-colors"
             >
               Lưu
             </button>
             <button
               type="button"
               onClick={() => setIsEditingGoal(false)}
-              className="px-2 py-1 text-slate-500 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300"
+              className="px-2 py-1 max-md:min-h-[40px] text-slate-500 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300"
             >
               Huỷ
             </button>
@@ -254,9 +254,9 @@ export default function Heatmap({ words, dueRemaining = null }: HeatmapProps) {
 
       {/* HEATMAP GRID */}
       <div className="space-y-3">
-        <div className="flex items-center justify-between text-xs text-slate-500 dark:text-zinc-400">
+        <div className="flex max-md:flex-wrap max-md:gap-y-2 items-center justify-between text-xs text-slate-500 dark:text-zinc-400">
           <span className="font-medium text-slate-800 dark:text-zinc-300">Biểu đồ đóng góp & Hoạt động (20 tuần gần nhất)</span>
-          <div className="flex items-center gap-1.5 text-[11px] font-mono">
+          <div className="flex flex-wrap md:flex-nowrap items-center gap-1.5 text-[11px] font-mono">
             <span>Ít</span>
             <div className="flex gap-1 items-center">
               <span className="w-2.5 h-2.5 rounded-sm bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800" />

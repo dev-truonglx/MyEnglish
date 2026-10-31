@@ -10,10 +10,10 @@ import { AVATARS } from "@/services/avatars";
 type Mode = "signin" | "signup" | "forgot";
 
 const field =
-  "w-full px-3 py-2 rounded-lg text-sm border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder:text-slate-400";
-const primary = "px-4 py-2 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white inline-flex items-center gap-2";
+  "w-full px-3 py-2 rounded-lg text-base md:text-sm border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder:text-slate-400";
+const primary = "px-4 py-2 max-md:min-h-10 rounded-lg text-sm font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white inline-flex items-center justify-center gap-2";
 const secondary =
-  "px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center gap-1.5";
+  "px-3 py-2 max-md:min-h-10 rounded-lg text-xs font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 disabled:opacity-50 inline-flex items-center max-md:justify-center gap-1.5";
 
 function formatTime(iso: string | null): string {
   if (!iso) return "chưa lần nào";
@@ -40,7 +40,7 @@ export default function AccountSettings() {
 
   const shell = (children: React.ReactNode) => (
     <section>
-      <div className="p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">{children}</div>
+      <div className="p-3.5 md:p-5 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 space-y-4 shadow-sm">{children}</div>
     </section>
   );
 
@@ -89,7 +89,7 @@ export default function AccountSettings() {
               key={m}
               onClick={() => setMode(m)}
               className={cn(
-                "px-3 py-1.5 rounded-lg text-xs font-semibold border",
+                "px-3 py-1.5 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-lg text-xs font-semibold border",
                 mode === m ? "bg-cyan-600 border-cyan-600 text-white" : "border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-300"
               )}
             >
@@ -225,7 +225,7 @@ export default function AccountSettings() {
             </button>
             {confirmWipe ? (
               <button
-                className="px-4 py-2 rounded-lg text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white"
+                className="px-4 py-2 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-lg text-sm font-semibold bg-rose-600 hover:bg-rose-500 text-white"
                 onClick={() => void resolveAccountMismatch("wipe")}
               >
                 Chắc chắn: xóa dữ liệu trên máy

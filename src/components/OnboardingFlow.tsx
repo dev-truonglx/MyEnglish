@@ -89,8 +89,8 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-3 md:p-4">
+      <div className="w-full max-w-2xl max-h-[90dvh] md:max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-4 md:p-6 space-y-5">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-1.5">
             {[1, 2, 3].map((s) => (
@@ -101,7 +101,7 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             ))}
             <span className="ml-2 text-xs text-slate-500 dark:text-zinc-500">Bước {step}/3</span>
           </div>
-          <button onClick={skipAll} className="text-xs text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
+          <button onClick={skipAll} className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
             Bỏ qua phần thiết lập
           </button>
         </div>
@@ -144,14 +144,14 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             </div>
             <div className="flex items-center justify-end gap-3 pt-1">
               {!level && (
-                <button onClick={goToLevels} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+                <button onClick={goToLevels} className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                   Chưa rõ, bỏ qua
                 </button>
               )}
               <button
                 onClick={goToLevels}
                 disabled={!level}
-                className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-40"
+                className="py-2.5 px-5 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-40"
               >
                 Tiếp
               </button>
@@ -171,12 +171,12 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             <MixOrderToggle levels={studyLevels} value={highFirst} onChange={setHighFirst} />
             <p className="text-xs text-slate-500 dark:text-zinc-400">{mixDescription(studyLevels, highFirst)}</p>
             <div className="flex items-center justify-between pt-1">
-              <button onClick={() => setStep(1)} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+              <button onClick={() => setStep(1)} className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                 Quay lại
               </button>
               <button
                 onClick={() => setStep(3)}
-                className="py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold"
+                className="py-2.5 px-5 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold"
               >
                 Tiếp
               </button>
@@ -280,17 +280,17 @@ export default function OnboardingFlow({ onFinish }: OnboardingFlowProps) {
             </div>
             {error && <p className="text-xs text-rose-600 dark:text-rose-400">{error}</p>}
             <div className="flex items-center justify-between pt-1">
-              <button onClick={() => setStep(2)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+              <button onClick={() => setStep(2)} disabled={busy} className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                 Quay lại
               </button>
               <div className="flex items-center gap-3">
-                <button onClick={() => finish(false)} disabled={busy} className="text-xs text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
+                <button onClick={() => finish(false)} disabled={busy} className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200">
                   Để sau
                 </button>
                 <button
                   onClick={() => finish(true)}
                   disabled={busy}
-                  className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-sm font-semibold shadow-lg shadow-orange-500/20 disabled:opacity-60"
+                  className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-sm font-semibold shadow-lg shadow-orange-500/20 disabled:opacity-60"
                 >
                   {busy && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                   {busy ? "Đang chuẩn bị từ vựng…" : `Học ${DAILY_PLANS[minutes].newCardsPerDay} từ đầu tiên ngay`}

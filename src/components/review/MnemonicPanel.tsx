@@ -111,7 +111,7 @@ export default function MnemonicPanel({
         <button
           onClick={makeMemoryAid}
           disabled={aiState === "loading"}
-          className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1 rounded-lg bg-white/80 dark:bg-zinc-900/60 border border-amber-300 dark:border-amber-700 text-[11px] font-semibold font-sans disabled:opacity-60"
+          className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1 max-md:min-h-10 rounded-lg bg-white/80 dark:bg-zinc-900/60 border border-amber-300 dark:border-amber-700 text-[11px] font-semibold font-sans disabled:opacity-60"
         >
           {aiState === "loading" ? <Loader2 className="w-3 h-3 animate-spin" /> : <Sparkles className="w-3 h-3" />}
           {aiState === "loading" ? "Đang tạo…" : aiState === "error" ? "AI chưa trả lời được, thử lại" : "Tạo câu ví dụ & mẹo nhớ mới bằng AI"}

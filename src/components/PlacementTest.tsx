@@ -65,11 +65,11 @@ export default function PlacementTest({ onDone, onClose }: { onDone: (level: Lev
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-      <div className="w-full max-w-md rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-5 space-y-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 md:p-4">
+      <div className="w-full max-w-md max-h-[90dvh] max-md:overflow-y-auto md:max-h-none md:overflow-visible rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-4 md:p-5 space-y-4">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-bold text-slate-900 dark:text-white">Kiểm tra trình độ</h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
+          <button onClick={onClose} className="p-2.5 -m-1 md:p-1 md:m-0 max-md:rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200">
             <X className="w-4 h-4" />
           </button>
         </div>
@@ -80,10 +80,10 @@ export default function PlacementTest({ onDone, onClose }: { onDone: (level: Lev
             </div>
             {q.kind === "listening" ? (
               <div className="flex items-center justify-center gap-2 py-2">
-                <button onClick={() => handleSpeak(q.say!)} className="px-4 py-2 rounded-xl bg-cyan-600 text-white text-sm font-semibold inline-flex items-center gap-1.5">
+                <button onClick={() => handleSpeak(q.say!)} className="px-4 py-2 max-md:min-h-10 rounded-xl bg-cyan-600 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5">
                   <Volume2 className="w-4 h-4" /> Nghe lại
                 </button>
-                <button onClick={() => handleSpeak(q.say!, SLOW_RATE)} className="px-3 py-2 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5">
+                <button onClick={() => handleSpeak(q.say!, SLOW_RATE)} className="px-3 py-2 max-md:min-h-10 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5">
                   <Snail className="w-4 h-4" /> Chậm
                 </button>
               </div>
@@ -98,7 +98,7 @@ export default function PlacementTest({ onDone, onClose }: { onDone: (level: Lev
                 <button
                   key={opt}
                   onClick={() => answer(opt)}
-                  className={`w-full p-3 rounded-xl border text-left text-sm transition-colors ${opt === DONT_KNOW
+                  className={`w-full p-3 max-md:min-h-10 rounded-xl border text-left text-sm transition-colors ${opt === DONT_KNOW
                     ? "border-dashed border-slate-300 dark:border-zinc-700 text-slate-500 dark:text-zinc-400"
                     : "border-slate-200 dark:border-zinc-800 hover:border-cyan-400 text-slate-800 dark:text-zinc-200"
                     }`}
@@ -112,7 +112,7 @@ export default function PlacementTest({ onDone, onClose }: { onDone: (level: Lev
           <div className="space-y-3 text-sm text-slate-700 dark:text-zinc-300">
             <p>{RESULT_TEXT[result]}</p>
             <p className="text-xs text-slate-500 dark:text-zinc-400">Có thể đổi trình độ bất cứ lúc nào trong phần Cài đặt.</p>
-            <button onClick={() => onDone(result)} className="w-full py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold">
+            <button onClick={() => onDone(result)} className="w-full py-2.5 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold">
               Học theo trình độ này
             </button>
           </div>

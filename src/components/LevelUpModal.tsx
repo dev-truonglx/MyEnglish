@@ -79,8 +79,8 @@ export default function LevelUpModal() {
     <>
       {/* Level Up Celebration Modal */}
       {levelUpData && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm rounded-3xl border border-amber-500/30 bg-gradient-to-b from-zinc-900 to-zinc-950 p-6 text-center space-y-5 shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200">
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 md:p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm max-h-[90dvh] max-md:overflow-y-auto md:max-h-none md:overflow-visible rounded-3xl border border-amber-500/30 bg-gradient-to-b from-zinc-900 to-zinc-950 p-4 md:p-6 text-center space-y-4 md:space-y-5 shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-200">
             {/* Background Glow */}
             <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-48 h-48 bg-amber-500/20 rounded-full blur-3xl pointer-events-none" />
 
@@ -108,7 +108,7 @@ export default function LevelUpModal() {
 
             <button
               onClick={closeLevelUp}
-              className="w-full py-3 rounded-xl font-bold text-sm bg-gradient-to-r from-amber-500 to-yellow-500 text-zinc-950 hover:from-amber-400 hover:to-yellow-400 transition-all shadow-md shadow-amber-500/20"
+              className="w-full py-3 max-md:min-h-10 rounded-xl font-bold text-sm bg-gradient-to-r from-amber-500 to-yellow-500 text-zinc-950 hover:from-amber-400 hover:to-yellow-400 transition-all shadow-md shadow-amber-500/20"
             >
               Tiếp tục học ngay
             </button>
@@ -118,7 +118,7 @@ export default function LevelUpModal() {
 
       {/* Badge Unlocked Notification Toast */}
       {unlockedBadges.length > 0 && (
-        <div className="fixed bottom-6 right-6 z-[9998] space-y-3 pointer-events-auto">
+        <div className="fixed bottom-16 right-3 left-3 sm:left-auto md:bottom-6 md:right-6 z-[9998] space-y-3 pointer-events-auto">
           {unlockedBadges.map((badge) => (
             <div
               key={badge.id}
@@ -140,7 +140,7 @@ export default function LevelUpModal() {
               </div>
               <button
                 onClick={() => closeBadge(badge.id)}
-                className="p-1 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors"
+                className="p-2.5 -m-1 md:p-1 md:m-0 rounded-lg text-zinc-500 hover:text-white hover:bg-zinc-800 transition-colors shrink-0"
               >
                 <X className="w-4 h-4" />
               </button>

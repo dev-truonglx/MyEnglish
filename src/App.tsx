@@ -1,4 +1,5 @@
 import { useEffect, useState, lazy, Suspense } from "react";
+import type { DashboardTab } from "@/components/dashboard/shared";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
 import { applyUiScale } from "@/services/learnerProfile";
 import ErrorBoundary from "@/components/ErrorBoundary";
@@ -25,7 +26,14 @@ if (typeof document !== "undefined") {
   }
 }
 
-export default function App() {
+export interface AppProps {
+  /** Web: the tab in the URL at start-up (desktop: none, starts on "today") */
+  initialTab?: DashboardTab;
+  /** Web: told after every tab change, to keep the URL in step */
+  onTabChange?: (tab: DashboardTab) => void;
+}
+
+export default function App({ initialTab, onTabChange }: AppProps = {}) {
   const [windowLabel, setWindowLabel] = useState<string>(getInitialWindowLabel);
   const checkForUpdates = useUpdateStore((state) => state.checkForUpdates);
 
@@ -123,6 +131,8 @@ export default function App() {
       <Suspense fallback={null}>
         <MainDashboard
           onOpenReviewPopupPreview={() => setWindowLabel("review-popup")}
+          initialTab={initialTab}
+          onTabChange={onTabChange}
         />
       </Suspense>
     </ErrorBoundary>

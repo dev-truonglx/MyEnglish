@@ -173,9 +173,9 @@ export default function MeaningMatchExercise({
       : "idle";
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="w-full max-w-2xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
       {/* Exercise header */}
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-5 text-center space-y-2 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 text-center space-y-2 shadow-sm">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400 border border-purple-200/50 dark:border-purple-800/40">
           <Link2 className="w-3 h-3" />
           <span>Nối từ với nghĩa</span>
@@ -186,7 +186,7 @@ export default function MeaningMatchExercise({
       </div>
 
       {/* Matching grid: row i holds word i and meaning i, so both columns line up */}
-      <div className="grid grid-cols-[minmax(max-content,2fr)_minmax(0,3fr)] gap-x-3 gap-y-2.5">
+      <div className="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] md:grid-cols-[minmax(max-content,2fr)_minmax(0,3fr)] gap-x-2 md:gap-x-3 gap-y-2 md:gap-y-2.5">
         <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
         <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Nghĩa tiếng Việt</h4>
         {pairs.map((p, idx) => {
@@ -200,7 +200,7 @@ export default function MeaningMatchExercise({
                 disabled={done}
                 onClick={() => pick("word", p.wordId)}
               >
-                <span className="flex-1 text-sm font-bold whitespace-nowrap">{p.word}</span>
+                <span className="flex-1 min-w-0 text-xs md:text-sm font-bold break-words md:whitespace-nowrap">{p.word}</span>
               </MatchCell>
               <MatchCell
                 number={pairs.length + idx + 1}
@@ -209,7 +209,7 @@ export default function MeaningMatchExercise({
                 disabled={done}
                 onClick={() => pick("meaning", m.wordId)}
               >
-                <span className="flex-1 min-w-0 text-[13px] font-medium leading-relaxed">{m.meaningVN}</span>
+                <span className="flex-1 min-w-0 text-xs md:text-[13px] font-medium leading-relaxed">{m.meaningVN}</span>
               </MatchCell>
             </Fragment>
           );
@@ -217,12 +217,12 @@ export default function MeaningMatchExercise({
       </div>
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between gap-3 pt-2 text-xs">
+      <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 pt-2 text-xs">
         {!done ? (
           <button
             type="button"
             onClick={handleGiveUp}
-            className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold"
+            className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold max-md:min-h-10"
             title="Xem đáp án các cặp nối"
           >
             <Eye className="w-3.5 h-3.5" />
@@ -237,9 +237,9 @@ export default function MeaningMatchExercise({
       </div>
 
       {/* Dedicated Stable Feedback Area - ALWAYS occupies 48px so layout NEVER jumps */}
-      <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
+      <div className="min-h-[48px] md:h-[48px] flex items-center justify-center w-full">
         {done && !gaveUp ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
             <span className="font-semibold">
               {targetMistakes === 0 && !byElimination
@@ -250,19 +250,19 @@ export default function MeaningMatchExercise({
             </span>
           </div>
         ) : done ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
             <span className="font-semibold">
               Đã hiển thị các cặp nối đúng. Từ "{word.word}" sẽ được ôn lại sớm. Nhấn Enter hoặc Tiếp tục.
             </span>
           </div>
         ) : wrongNote ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
             <span>{wrongNote}</span>
           </div>
         ) : (
-          <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
+          <div className="w-full h-full max-md:p-2 md:py-0 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-2 md:px-3 max-md:text-center">
             <span>
               Gõ số của từ (1–{pairs.length}) rồi số của nghĩa ({pairs.length + 1}–{pairs.length * 2}) để nối, mỗi cặp được kiểm tra ngay
             </span>
@@ -296,7 +296,7 @@ function MatchCell({
       type="button"
       onClick={onClick}
       disabled={disabled || state === "matched"}
-      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+      className={`h-full min-h-[3.5rem] w-full px-2 md:px-3 py-2 md:py-2.5 rounded-xl border text-left transition-all flex items-center gap-1.5 md:gap-2.5 shadow-sm ${
         state === "matched"
           ? "border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-200"
           : state === "selected"
@@ -321,7 +321,7 @@ function MatchCell({
         }
       />
       {children}
-      {pairedWith && <span className="shrink-0 text-[11px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">{pairedWith}</span>}
+      {pairedWith && <span className="shrink-0 text-[10px] md:text-[11px] font-mono font-semibold text-emerald-600 dark:text-emerald-400">{pairedWith}</span>}
     </button>
   );
 }

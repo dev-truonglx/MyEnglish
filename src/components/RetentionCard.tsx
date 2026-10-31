@@ -46,9 +46,9 @@ export default function RetentionCard() {
   const { current, previous, withFocus, withoutFocus, focus } = data;
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 space-y-4">
-      <div className="flex items-center gap-2">
-        <Repeat className="w-4 h-4 text-cyan-500" />
+    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 md:p-5 space-y-4">
+      <div className="flex flex-wrap md:flex-nowrap items-center gap-2">
+        <Repeat className="w-4 h-4 text-cyan-500 max-md:shrink-0" />
         <h3 className="text-sm font-bold text-slate-900 dark:text-white">Thói quen quay lại</h3>
         <span className="text-[11px] text-slate-400 dark:text-zinc-500">{data.windowDays} ngày gần nhất</span>
       </div>

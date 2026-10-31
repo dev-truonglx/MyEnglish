@@ -82,11 +82,11 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
 
   return (
     <div className="rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 space-y-3">
-      <div className="flex items-center justify-between gap-2 text-sm">
+      <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 text-sm">
         <span className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-zinc-200">
           <Layers className="w-4 h-4 text-cyan-500" /> Lộ trình từ vựng Oxford
         </span>
-        <button onClick={onOpenPath} className="text-xs font-medium text-cyan-700 dark:text-cyan-300 hover:underline">
+        <button onClick={onOpenPath} className="max-md:min-h-10 text-xs font-medium text-cyan-700 dark:text-cyan-300 hover:underline">
           Đổi cấp · Lướt từ đã biết
         </button>
       </div>
@@ -100,7 +100,7 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
           const pct = (n: number) => `${Math.min(100, Math.round((n * 100) / Math.max(1, p.total)))}%`;
           return (
             <div key={p.level} className="space-y-1">
-              <div className="flex items-center justify-between gap-2 text-xs">
+              <div className="flex flex-col items-start md:flex-row md:items-center justify-between gap-0.5 md:gap-2 text-xs">
                 <span className="font-semibold text-slate-800 dark:text-zinc-200">
                   {p.level}: {p.met}/{p.total} từ
                   {p.rememberedLong > 0 && (
@@ -110,7 +110,7 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
                     </span>
                   )}
                 </span>
-                <span className="text-slate-500 dark:text-zinc-400 text-right">
+                <span className="text-slate-500 dark:text-zinc-400 text-left md:text-right">
                   {remaining <= 0 || goal === null
                     ? "Đã gặp hết ✓"
                     : goal >= p.total
@@ -162,7 +162,7 @@ export default function TodayRoadmapCard({ simple, milestone, onOpenPath }: Toda
             <button
               onClick={() => openNext(nextLevel)}
               disabled={busy}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold"
+              className="max-md:min-h-10 px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-white text-xs font-semibold"
             >
               Mở thêm {nextLevel}
             </button>

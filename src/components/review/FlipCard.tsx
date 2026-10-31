@@ -15,13 +15,13 @@ export default function FlipCard({ currentWord, synonyms, isFlipped, setIsFlippe
   return (
     <div className="flex-1 min-h-0 flex flex-col justify-between">
       {!isFlipped ? (
-        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center space-y-4 py-8">
+        <div className="flex-1 min-h-0 flex flex-col items-center justify-center text-center space-y-4 py-4 md:py-8">
           <span className="text-[11px] font-mono uppercase tracking-widest text-cyan-600 dark:text-cyan-400 font-semibold">
             Từ vựng
           </span>
 
           <div className="flex items-center gap-3 flex-wrap justify-center">
-            <h2 className="text-4xl md:text-5xl font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
+            <h2 className="text-3xl md:text-5xl break-words max-md:max-w-full font-extrabold text-slate-900 dark:text-white tracking-tight font-mono">
               {currentWord.word}
             </h2>
             <button
@@ -52,7 +52,7 @@ export default function FlipCard({ currentWord, synonyms, isFlipped, setIsFlippe
             </div>
           )}
 
-          <div className="pt-8 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 animate-pulse">
+          <div className="pt-4 md:pt-8 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 animate-pulse">
             <Eye className="w-4 h-4" />
             <span>Nhấn Space hoặc click vào thẻ để xem định nghĩa</span>
           </div>

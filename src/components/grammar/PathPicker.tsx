@@ -338,7 +338,7 @@ function ChapterBody({ rows, renderCard }: { rows: LessonRow[]; renderCard: (row
           )}
         </div>
       ) : (
-        // Narrow: one group per row of the table, two cards across
+        // Narrow: one group per row of the table, two cards across on desktop, 1 column on phone
         <div className="space-y-3.5">
           {TENSE_ROWS.map((r) => {
             const items = TENSE_COLUMNS.map((col) => cells.get(`${r.time}:${col.aspect}`)).filter(
@@ -349,7 +349,7 @@ function ChapterBody({ rows, renderCard }: { rows: LessonRow[]; renderCard: (row
             return (
               <div key={r.time} className="space-y-2">
                 <SubHeading>{r.label}</SubHeading>
-                <div className="grid grid-cols-2 gap-2">{items.map((item) => renderCard(item.row))}</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">{items.map((item) => renderCard(item.row))}</div>
               </div>
             );
           })}
@@ -501,7 +501,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
                 role="tab"
                 aria-selected={mode === m}
                 onClick={() => changeMode(m)}
-                className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
+                className={`rounded-md px-3 py-1.5 md:py-1 max-md:min-h-[40px] text-xs font-semibold transition-colors ${
                   mode === m
                     ? "bg-white text-cyan-700 shadow-sm dark:bg-zinc-800 dark:text-cyan-300"
                     : "text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-zinc-200"
@@ -540,7 +540,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
           return (
             <div key={chapter.chapterId}>
               <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-2.5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900 sm:p-3">
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap sm:flex-nowrap items-center gap-2">
                   <button
                     type="button"
                     aria-expanded={isOpen}
@@ -561,7 +561,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
                     <button
                       type="button"
                       onClick={() => toggleChapter(ids)}
-                      className="shrink-0 rounded-lg border border-cyan-200 px-2.5 py-1 text-xs font-semibold text-cyan-700 transition hover:bg-cyan-50 dark:border-cyan-900 dark:text-cyan-400 dark:hover:bg-cyan-950/40"
+                      className="shrink-0 rounded-lg border border-cyan-200 px-2.5 py-1.5 md:py-1 max-md:min-h-[40px] text-xs font-semibold text-cyan-700 transition hover:bg-cyan-50 dark:border-cyan-900 dark:text-cyan-400 dark:hover:bg-cyan-950/40"
                     >
                       {allChecked ? "Bỏ cả chương" : "Chọn cả chương"}
                     </button>
@@ -599,7 +599,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
             type="button"
             disabled={pickedInBookOrder.length === 0}
             onClick={() => onPractice(pickedInBookOrder)}
-            className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-600 px-3 py-2 text-sm font-semibold !text-white transition hover:bg-cyan-500 disabled:opacity-40"
+            className="inline-flex min-w-0 flex-1 items-center justify-center gap-2 rounded-lg bg-cyan-600 px-3 py-2.5 md:py-2 max-md:min-h-[44px] text-sm font-semibold !text-white transition hover:bg-cyan-500 disabled:opacity-40"
           >
             <Layers className="h-4 w-4 shrink-0" />
             <span className="truncate">Luyện {pickedInBookOrder.length} bài đã chọn</span>
@@ -607,7 +607,7 @@ export default function PathPicker({ chapters, onOpenLesson, onPractice, mode: m
           <button
             type="button"
             onClick={() => changeMode("path")}
-            className="shrink-0 rounded-lg px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="shrink-0 rounded-lg px-3 py-2.5 md:py-2 max-md:min-h-[44px] text-sm font-semibold text-slate-600 transition hover:bg-slate-100 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Huỷ
           </button>

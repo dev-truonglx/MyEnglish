@@ -33,7 +33,7 @@ export default function TopicFilters({
       {/* All Topics */}
       <button
         onClick={() => setSelectedTopic("all")}
-        className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${selectedTopic === "all"
+        className={`max-md:min-h-10 px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${selectedTopic === "all"
           ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
           : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
           }`}
@@ -52,7 +52,7 @@ export default function TopicFilters({
           <button
             key={top}
             onClick={() => setSelectedTopic(isSelected ? "all" : top)}
-            className={`px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${isSelected
+            className={`max-md:min-h-10 px-3 py-1.5 rounded-xl text-xs font-medium shrink-0 transition-all flex items-center gap-1.5 ${isSelected
               ? "bg-cyan-100 dark:bg-cyan-500/20 text-cyan-800 dark:text-cyan-300 border border-cyan-300 dark:border-cyan-500/50 shadow-sm font-semibold"
               : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"
               }`}
@@ -70,7 +70,7 @@ export default function TopicFilters({
       {selectedTopic !== "all" && (
         <button
           onClick={() => handleStartReview(false, selectedTopic)}
-          className="ml-auto shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-500/40 hover:bg-orange-200 dark:hover:bg-orange-500/30 text-xs font-medium transition-all shadow-sm"
+          className="ml-auto shrink-0 inline-flex items-center gap-1.5 max-md:min-h-10 px-3 py-1.5 rounded-xl bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300 border border-orange-300 dark:border-orange-500/40 hover:bg-orange-200 dark:hover:bg-orange-500/30 text-xs font-medium transition-all shadow-sm"
         >
           <Play className="w-3 h-3 fill-orange-500 text-orange-500 dark:fill-orange-400 dark:text-orange-400" />
           <span>

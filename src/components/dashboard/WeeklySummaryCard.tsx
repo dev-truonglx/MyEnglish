@@ -55,7 +55,7 @@ export default function WeeklySummaryCard({ simple, now }: { simple: boolean; no
           onClick={hide}
           title="Ẩn đến tuần sau"
           aria-label="Ẩn tóm tắt tuần"
-          className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-white/70 dark:hover:bg-zinc-800"
+          className="p-3 -m-2 md:p-1 md:m-0 rounded-md text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 hover:bg-white/70 dark:hover:bg-zinc-800"
         >
           <X className="w-4 h-4" />
         </button>

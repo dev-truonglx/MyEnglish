@@ -227,10 +227,10 @@ export default function WordInspector({
         onClick={() => setSelectedWord(null)}
         className="absolute inset-0 bg-slate-900/25 dark:bg-black/55 animate-in fade-in duration-150"
       />
-      <aside className="relative h-full w-full max-w-[640px] md:w-[580px] lg:w-[640px] border-l border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 flex flex-col animate-in slide-in-from-right duration-200 shadow-2xl">
+      <aside className="relative h-full w-full max-w-full md:max-w-[640px] md:w-[580px] lg:w-[640px] border-l border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-950 flex flex-col animate-in slide-in-from-right duration-200 shadow-2xl">
         {/* ── Header: the word, how to say it, where it stands ── */}
         <div className="shrink-0 border-b border-slate-200 dark:border-zinc-800 bg-gradient-to-b from-cyan-50/70 to-white dark:from-cyan-950/20 dark:to-zinc-950">
-          <div className="px-5 pt-4 pb-3 space-y-3">
+          <div className="px-3.5 md:px-5 pt-4 pb-3 space-y-3">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0 space-y-1.5">
                 <div className="flex items-center gap-1.5 text-[11px] font-mono uppercase tracking-wider text-slate-500 dark:text-zinc-400">
@@ -268,7 +268,7 @@ export default function WordInspector({
                   onClick={(e) => requestDeleteWord(w.id, w.word, e)}
                   title="Xoá từ"
                   aria-label="Xoá từ"
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                  className="p-2.5 -m-1 md:p-1.5 md:m-0 rounded-lg text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
@@ -276,7 +276,7 @@ export default function WordInspector({
                   onClick={() => setSelectedWord(null)}
                   aria-label="Đóng chi tiết từ vựng"
                   title="Đóng (Esc)"
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                  className="p-2.5 -m-1 md:p-1.5 md:m-0 rounded-lg text-slate-400 hover:text-slate-800 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -300,14 +300,14 @@ export default function WordInspector({
               <div className="ml-auto flex items-center gap-1.5">
                 <button
                   onClick={() => handleSpeak(w.word)}
-                  className="px-2.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold inline-flex items-center gap-1.5 shadow-sm"
+                  className="max-md:min-h-10 px-2.5 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white font-semibold inline-flex items-center gap-1.5 shadow-sm"
                 >
                   <Volume2 className="w-3.5 h-3.5" /> Nghe
                 </button>
                 <button
                   onClick={() => handleSpeak(w.word, SLOW_RATE)}
                   title="Nghe chậm"
-                  className="px-2.5 py-1.5 rounded-lg border border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 inline-flex items-center gap-1.5"
+                  className="max-md:min-h-10 px-2.5 py-1.5 rounded-lg border border-cyan-300 dark:border-cyan-700 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-50 dark:hover:bg-cyan-950/40 inline-flex items-center gap-1.5"
                 >
                   <Snail className="w-3.5 h-3.5" /> Chậm
                 </button>
@@ -315,7 +315,7 @@ export default function WordInspector({
             </div>
 
             {/* Four numbers at a glance */}
-            <div className="grid grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <Stat
                 label="Nhớ lúc này"
                 value={recall == null ? "—" : `${Math.round(recall * 100)}%`}
@@ -346,7 +346,7 @@ export default function WordInspector({
           </div>
 
           {/* Section bar: jump to any part of the panel */}
-          <nav className="px-5 pb-2.5 flex flex-wrap gap-1" aria-label="Các phần chi tiết">
+          <nav className="px-3.5 md:px-5 pb-2.5 flex flex-wrap gap-1" aria-label="Các phần chi tiết">
             {nav.map(([id, label]) => (
               <button
                 key={id}
@@ -360,7 +360,7 @@ export default function WordInspector({
         </div>
 
         {/* ── Content: meanings, examples and messages can be selected and copied ── */}
-        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-5 space-y-7 select-text">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto p-3.5 md:p-5 space-y-5 md:space-y-7 select-text">
           {/* Meaning: the short one, then every sense of the dictionary entry */}
           <Section id="wi-meaning" icon={<Sparkles className="w-3.5 h-3.5 text-cyan-500" />} title="Nghĩa tiếng Việt">
             <p className="text-base text-slate-900 dark:text-zinc-100 leading-relaxed font-medium">{w.meaning_vn}</p>
@@ -570,7 +570,7 @@ export default function WordInspector({
             </p>
             <button
               onClick={() => toggleSuspended(w)}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
+              className={`inline-flex items-center gap-1.5 max-md:min-h-10 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${
                 w.suspended
                   ? "border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
                   : "border-slate-300 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
@@ -610,7 +610,7 @@ export default function WordInspector({
                 <select
                   value={w.topic || "General Tech"}
                   onChange={(e) => handleUpdateTopic(w.id, e.target.value)}
-                  className="bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 rounded-lg px-2 py-1 text-slate-800 dark:text-zinc-200 focus:outline-none focus:border-cyan-500"
+                  className="bg-white dark:bg-zinc-900 border border-slate-300 dark:border-zinc-700 rounded-lg px-2 py-1 text-base md:text-xs text-slate-800 dark:text-zinc-200 focus:outline-none focus:border-cyan-500"
                 >
                   {PREDEFINED_TOPICS.map((top) => (
                     <option key={top} value={top}>

@@ -40,7 +40,7 @@ export default function ReviewTopBar({
       ) : (
         <button
           onClick={onExit}
-          className="inline-flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+          className="inline-flex items-center gap-1.5 max-md:min-h-10 pr-3 md:pr-0 text-xs text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
         >
           <ChevronLeft className="w-4 h-4" />
           <span>Thoát</span>
@@ -52,7 +52,7 @@ export default function ReviewTopBar({
       <div className="flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-x-auto max-w-full gap-1">
         <button
           onClick={() => handleModeChange("mixed")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "mixed"
               ? "bg-white dark:bg-amber-500/20 text-amber-700 dark:text-amber-300 border border-slate-200 dark:border-amber-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -65,7 +65,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("flip")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "flip"
               ? "bg-white dark:bg-cyan-500/20 text-cyan-700 dark:text-cyan-300 border border-slate-200 dark:border-cyan-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -77,7 +77,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("multiple_choice")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "multiple_choice"
               ? "bg-white dark:bg-blue-500/20 text-blue-700 dark:text-blue-300 border border-slate-200 dark:border-blue-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -88,7 +88,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("meaning_match")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "meaning_match"
               ? "bg-white dark:bg-pink-500/20 text-pink-700 dark:text-pink-300 border border-slate-200 dark:border-pink-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -99,7 +99,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("cloze")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "cloze"
               ? "bg-white dark:bg-indigo-500/20 text-indigo-700 dark:text-indigo-300 border border-slate-200 dark:border-indigo-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -111,7 +111,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("spelling")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "spelling"
               ? "bg-white dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-slate-200 dark:border-emerald-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -123,7 +123,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("sentence_builder")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "sentence_builder"
               ? "bg-white dark:bg-purple-500/20 text-purple-700 dark:text-purple-300 border border-slate-200 dark:border-purple-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -134,7 +134,7 @@ export default function ReviewTopBar({
 
         <button
           onClick={() => handleModeChange("listening")}
-          className={`flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-all ${
+          className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
             mode === "listening"
               ? "bg-white dark:bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-slate-200 dark:border-rose-500/40 shadow-sm"
               : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"

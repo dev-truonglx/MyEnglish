@@ -95,7 +95,7 @@ export default function HandbookView({
             </div>
             <button
               onClick={() => speakText(txt(block.en))}
-              className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition shrink-0"
+              className="p-2 md:p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition shrink-0"
               title="Phát âm tiếng Anh"
             >
               <Volume2 className="w-4 h-4" />
@@ -170,7 +170,7 @@ export default function HandbookView({
                 </div>
                 <button
                   onClick={() => speakText(txt(item!.en))}
-                  className="p-1 text-slate-400 hover:text-cyan-600 transition"
+                  className="p-2 md:p-1 text-slate-400 hover:text-cyan-600 transition"
                   title="Phát âm"
                 >
                   <Volume2 className="w-3.5 h-3.5" />

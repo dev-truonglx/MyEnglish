@@ -51,13 +51,13 @@ export default function FocusSummary({ result, next, onExtend, onNavigate }: Foc
           <div className="flex flex-wrap gap-2">
             <button
               onClick={() => onNavigate("writing")}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-100 dark:hover:bg-violet-900/40"
+              className="inline-flex items-center gap-1 px-3 py-1.5 max-md:min-h-10 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-100 dark:hover:bg-violet-900/40"
             >
               <NotebookPen className="w-3.5 h-3.5" /> Ôn lỗi sai
             </button>
             <button
               onClick={() => onNavigate("grammar")}
-              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-100 dark:hover:bg-violet-900/40"
+              className="inline-flex items-center gap-1 px-3 py-1.5 max-md:min-h-10 rounded-lg border border-violet-300 dark:border-violet-700 text-violet-700 dark:text-violet-300 text-xs font-medium hover:bg-violet-100 dark:hover:bg-violet-900/40"
             >
               <BookOpen className="w-3.5 h-3.5" /> Ôn ngữ pháp
             </button>
@@ -67,7 +67,7 @@ export default function FocusSummary({ result, next, onExtend, onNavigate }: Foc
       {result.endedBy !== "queue" && (
         <button
           onClick={onExtend}
-          className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
+          className="inline-flex items-center gap-1 px-3 py-1.5 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
         >
           <Plus className="w-3.5 h-3.5" /> Thêm 5 phút
         </button>

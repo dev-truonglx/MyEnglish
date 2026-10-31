@@ -83,6 +83,7 @@ import { useWordsStore } from "@/stores/wordsStore";
 import { useToggleMap } from "@/hooks/useToggleMap";
 import { GlobalToast, AutoReplenishBanner, type GlobalToastData } from "./dashboard/DashboardBanners";
 import Sidebar from "./dashboard/Sidebar";
+import MobileNav from "./dashboard/MobileNav";
 import DashboardHeader from "./dashboard/DashboardHeader";
 import LibraryTab from "./dashboard/LibraryTab";
 import CaptureTab from "./dashboard/CaptureTab";
@@ -116,12 +117,20 @@ const EMPTY_BUCKET_COUNTS: Record<ReviewTimeBucket, number> = {
 };
 const EMPTY_CARD_META = new Map<string, WordCardMeta>();
 
+export const SELECT_TAB_EVENT = "myenglish-select-tab";
+
 interface MainDashboardProps {
   onOpenReviewPopupPreview?: () => void;
+  /** Web: the tab in the URL at start-up (desktop: none, starts on "today") */
+  initialTab?: DashboardTab;
+  /** Web: told after every tab change, to keep the URL in step */
+  onTabChange?: (tab: DashboardTab) => void;
 }
 
 export default function MainDashboard({
   onOpenReviewPopupPreview,
+  initialTab,
+  onTabChange,
 }: MainDashboardProps) {
   // The words store outlives this component: start every mount from a clean slate
   // (same as the former component-local state), before anything reads it.
@@ -140,7 +149,14 @@ export default function MainDashboard({
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
   // The app opens on "Hôm nay": one clear thing to do, not the whole word library
-  const [activeTab, setActiveTab] = useState<DashboardTab>("today");
+  const [activeTab, setActiveTab] = useState<DashboardTab>(initialTab ?? "today");
+
+  // Web: keep URL in sync when active tab changes
+  const onTabChangeRef = useRef(onTabChange);
+  onTabChangeRef.current = onTabChange;
+  useEffect(() => {
+    onTabChangeRef.current?.(activeTab);
+  }, [activeTab]);
   // Incremented whenever a sidebar / header tab item is clicked so active tabs return to their main screen
   const [tabResetKey, setTabResetKey] = useState(0);
   // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
@@ -235,6 +251,18 @@ export default function MainDashboard({
     },
     [activeTab, autoFinishCompletedReview]
   );
+
+  // Web: external tab selection (e.g. browser popstate). Nothing on desktop dispatches it.
+  useEffect(() => {
+    const onSelectTab = (e: Event) => {
+      const custom = e as CustomEvent<DashboardTab>;
+      if (custom.detail) {
+        handleSelectTab(custom.detail);
+      }
+    };
+    window.addEventListener(SELECT_TAB_EVENT, onSelectTab);
+    return () => window.removeEventListener(SELECT_TAB_EVENT, onSelectTab);
+  }, [handleSelectTab]);
 
   const handleConfirmExit = useCallback(() => {
     const pending = confirmExitNav;
@@ -1306,9 +1334,23 @@ export default function MainDashboard({
         forgottenDue={forgottenDue}
       />
       )}
+      {/* BOTTOM NAV (phones only, same condition as the sidebar) */}
+      {!focusing && (
+      <MobileNav
+        activeTab={activeTab}
+        setActiveTab={handleSelectTab}
+        pipelineQueue={pipelineQueue}
+        dueCount={dueCount}
+        streakStats={streakStats}
+        libraryStats={libraryStats}
+        simpleMode={simpleMode}
+        forgottenCount={forgottenCount}
+        forgottenDue={forgottenDue}
+      />
+      )}
 
       {/* MAIN CONTENT AREA */}
-      <main className="flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-zinc-950">
+      <main className={`flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-zinc-950${focusing ? "" : " pb-14 md:pb-0"}`}>
         {/* Top App Bar */}
         {!focusing && (
         <DashboardHeader

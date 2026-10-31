@@ -73,7 +73,7 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 dark:bg-black/75 backdrop-blur-sm animate-in fade-in duration-150">
-      <div className="w-full max-w-lg rounded-3xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-zinc-950 p-6 shadow-2xl space-y-5 animate-in zoom-in-95 duration-150">
+      <div className="w-full max-w-lg rounded-3xl border border-rose-200 dark:border-rose-900/50 bg-white dark:bg-zinc-950 p-4 md:p-6 max-h-[90dvh] max-md:overflow-y-auto md:max-h-none md:overflow-visible shadow-2xl space-y-5 animate-in zoom-in-95 duration-150">
         {/* Header */}
         <div className="flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -92,7 +92,7 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
           {!isResetting && !isSuccess && (
             <button
               onClick={onClose}
-              className="p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors"
+              className="p-2.5 md:p-1.5 rounded-xl text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-900 transition-colors"
             >
               <X className="w-5 h-5" />
             </button>
@@ -179,12 +179,12 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
         )}
 
         {/* Footer buttons */}
-        <div className="flex items-center justify-end gap-3 pt-1">
+        <div className="flex max-md:flex-wrap items-center justify-end gap-3 pt-1">
           <button
             type="button"
             onClick={onClose}
             disabled={isResetting || isSuccess}
-            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-900 disabled:opacity-50 transition-colors"
+            className="max-md:min-h-10 px-4 py-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-900 disabled:opacity-50 transition-colors"
           >
             Hủy bỏ
           </button>
@@ -192,7 +192,7 @@ export default function ResetAppDataModal({ isOpen, onClose }: ResetAppDataModal
             type="button"
             onClick={handleConfirmReset}
             disabled={!confirmed || isResetting || isSuccess}
-            className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-sm shadow-rose-600/20 transition-all"
+            className="max-md:min-h-10 px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-40 text-white text-xs font-bold flex items-center gap-2 shadow-sm shadow-rose-600/20 transition-all"
           >
             {isResetting ? (
               <>

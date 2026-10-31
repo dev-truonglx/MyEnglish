@@ -497,26 +497,26 @@ export default function ReflexChallengeModal({
   const wrongAnswerRecords = answerRecords.filter((a) => !a.isCorrect);
 
   return (
-    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 text-white p-4 select-none animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-slate-950 text-white p-3 md:p-4 select-none animate-in fade-in duration-200 max-md:overflow-y-auto">
       {/* ── PHASE 1: READY / ONBOARDING ── */}
       {phase === "ready" && (
-        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-3xl p-7 shadow-2xl text-center space-y-6 animate-in zoom-in-95">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400 shadow-lg shadow-amber-500/20">
-            <Zap className="w-9 h-9 fill-amber-400" />
+        <div className="max-w-md w-full bg-slate-900 border border-slate-800 rounded-2xl md:rounded-3xl p-5 md:p-7 shadow-2xl text-center space-y-5 md:space-y-6 animate-in zoom-in-95">
+          <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400 shadow-lg shadow-amber-500/20">
+            <Zap className="w-8 h-8 md:w-9 md:h-9 fill-amber-400" />
           </div>
 
           <div>
             <span className="text-xs font-bold uppercase tracking-wider text-amber-400 bg-amber-400/10 px-3 py-1 rounded-full">
               Chế độ Duolingo Ramp Up
             </span>
-            <h2 className="text-2xl font-black mt-2 text-white">Thử Thách Phản Xạ 3 Chặng</h2>
-            <p className="text-sm text-slate-400 mt-1">
+            <h2 className="text-xl md:text-2xl font-black mt-2 text-white">Thử Thách Phản Xạ 3 Chặng</h2>
+            <p className="text-xs md:text-sm text-slate-400 mt-1">
               Thời gian liên thông: Giữ nguyên số giây còn lại qua từng chặng!
             </p>
           </div>
 
-          <div className="bg-slate-950/60 rounded-2xl p-4 border border-slate-800/80 text-left space-y-3">
-            <div className="flex items-center justify-between text-sm pb-2 border-b border-slate-800">
+          <div className="bg-slate-950/60 rounded-2xl p-3.5 md:p-4 border border-slate-800/80 text-left space-y-3">
+            <div className="flex items-center justify-between text-xs md:text-sm pb-2 border-b border-slate-800">
               <span className="text-slate-400">⏱️ Quỹ thời gian ban đầu</span>
               <span className="font-bold text-white">105 giây (1m45s)</span>
             </div>
@@ -541,19 +541,21 @@ export default function ReflexChallengeModal({
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={onClose}
-              className="flex-1 py-3.5 rounded-xl border border-slate-700 hover:bg-slate-800 font-semibold text-slate-300 transition-colors"
+              className="flex-1 py-3 md:py-3.5 max-md:min-h-[40px] rounded-xl border border-slate-700 hover:bg-slate-800 font-semibold text-slate-300 transition-colors"
             >
               Để sau
             </button>
             <button
               onClick={handleStartGame}
-              className="flex-2 py-3.5 px-6 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
+              className="flex-2 py-3 md:py-3.5 px-4 md:px-6 max-md:min-h-[40px] rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 font-black flex items-center justify-center gap-2 shadow-lg shadow-amber-500/25 transition-all transform hover:scale-[1.02] active:scale-[0.98]"
             >
               <Zap className="w-5 h-5 fill-slate-950" />
-              BẮT ĐẦU NGAY (Space)
+              <span>
+                BẮT ĐẦU NGAY<span className="hidden md:inline"> (Space)</span>
+              </span>
             </button>
           </div>
         </div>
@@ -567,7 +569,7 @@ export default function ReflexChallengeModal({
             <div className="flex items-center justify-between">
               <button
                 onClick={() => setPhase("game_over")}
-                className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors"
+                className="p-2.5 md:p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800/80 transition-colors"
                 title="Dừng thử thách"
               >
                 <X className="w-6 h-6" />
@@ -576,24 +578,24 @@ export default function ReflexChallengeModal({
               {/* Time display */}
               <div
                 className={cn(
-                  "flex items-center gap-2 px-4 py-1.5 rounded-full border font-mono font-black text-lg transition-colors shadow-lg",
+                  "flex items-center gap-2 px-3 md:px-4 py-1 md:py-1.5 rounded-full border font-mono font-black text-base md:text-lg transition-colors shadow-lg",
                   timerColor
                 )}
               >
-                <Clock className="w-5 h-5" />
+                <Clock className="w-4 h-4 md:w-5 md:h-5" />
                 <span>{formatTime(timeLeft)}</span>
               </div>
 
               {/* Streak combo */}
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-amber-400 font-black text-sm">
-                <Flame className={cn("w-4 h-4", comboStreak >= 3 && "fill-amber-400 animate-bounce")} />
+              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-amber-400 font-black text-xs md:text-sm">
+                <Flame className={cn("w-3.5 h-3.5 md:w-4 md:h-4", comboStreak >= 3 && "fill-amber-400 animate-bounce")} />
                 <span>{comboStreak}x</span>
               </div>
             </div>
 
             {/* 3-Tier Indicator and Question Progress */}
             <div className="space-y-1.5">
-              <div className="grid grid-cols-3 gap-2 text-[11px] font-bold uppercase tracking-wider text-center">
+              <div className="grid grid-cols-3 gap-1.5 md:gap-2 text-[10px] md:text-[11px] font-bold uppercase tracking-wider text-center">
                 <div
                   className={cn(
                     "py-1 rounded-lg border",
@@ -658,13 +660,13 @@ export default function ReflexChallengeModal({
               </span>
 
               <div className="flex items-center justify-center gap-3">
-                <h1 className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                <h1 className="text-2xl sm:text-4xl font-black text-white tracking-tight break-words">
                   {currentQ.prompt}
                 </h1>
                 {currentQ.direction === "en_to_vn" && (
                   <button
                     onClick={() => handleSpeak(currentQ.word)}
-                    className="p-2 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
+                    className="p-2.5 md:p-2 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
                     title="Nghe phát âm"
                   >
                     <Volume2 className="w-5 h-5" />
@@ -687,7 +689,7 @@ export default function ReflexChallengeModal({
               <div className="w-full bg-slate-900/90 border border-slate-700/80 rounded-2xl p-4 shadow-xl text-center space-y-2">
                 {/* English word + Phonetic + Speaker in one unified horizontal group */}
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  <span className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                  <span className="text-xl sm:text-3xl font-black text-white tracking-tight break-words">
                     {currentQ.word}
                   </span>
                   {currentQ.phonetic && (
@@ -697,7 +699,7 @@ export default function ReflexChallengeModal({
                   )}
                   <button
                     onClick={() => handleSpeak(currentQ.word)}
-                    className="p-1 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
+                    className="p-2 md:p-1 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800 transition-colors"
                     title="Nghe phát âm"
                   >
                     <Volume2 className="w-3.5 h-3.5" />
@@ -713,7 +715,7 @@ export default function ReflexChallengeModal({
                 </div>
 
                 {/* Vietnamese meaning to verify - prominent & crystal clear */}
-                <div className="py-2.5 px-4 rounded-xl bg-amber-400/10 border border-amber-400/25 text-amber-300 font-black text-lg sm:text-xl tracking-wide leading-snug">
+                <div className="py-2.5 px-3 md:px-4 rounded-xl bg-amber-400/10 border border-amber-400/25 text-amber-300 font-black text-base sm:text-xl tracking-wide leading-snug break-words">
                   "{currentQ.displayedPair?.meaning}"
                 </div>
               </div>
@@ -724,7 +726,7 @@ export default function ReflexChallengeModal({
           <div className="space-y-3 pb-4">
             {/* 1. Multiple Choice layout: ALWAYS 4 OPTIONS IN A BALANCED 2x2 GRID */}
             {currentQ.type === "choice" && currentQ.options && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 md:gap-3">
                 {currentQ.options.map((opt, idx) => {
                   const isSelected = selectedOptionIdx === idx;
                   const isCorrect = idx === currentQ.correctIndex;
@@ -750,11 +752,11 @@ export default function ReflexChallengeModal({
                       disabled={isLocked || isDisabled}
                       onClick={() => handleAnswer(isCorrect, opt, correctText, idx)}
                       className={cn(
-                        "relative flex items-center gap-3 p-4 rounded-2xl border text-left font-semibold text-base transition-all duration-150 transform active:scale-95 shadow-md",
+                        "relative flex items-center gap-3 p-3.5 md:p-4 max-md:min-h-[44px] rounded-2xl border text-left font-semibold text-sm md:text-base transition-all duration-150 transform active:scale-95 shadow-md",
                         btnStyle
                       )}
                     >
-                      <span className="w-7 h-7 rounded-xl bg-slate-950/60 text-slate-300 font-mono text-xs font-bold flex items-center justify-center border border-slate-800 shrink-0">
+                      <span className="hidden md:flex w-7 h-7 rounded-xl bg-slate-950/60 text-slate-300 font-mono text-xs font-bold items-center justify-center border border-slate-800 shrink-0">
                         {idx + 1}
                       </span>
                       <span className="flex-1 min-w-0 truncate">{opt}</span>
@@ -766,7 +768,7 @@ export default function ReflexChallengeModal({
 
             {/* 2. True / False buttons layout directly under the comparison card */}
             {currentQ.type === "true_false" && currentQ.displayedPair && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3 md:gap-4">
                 <button
                   disabled={isLocked || wrongTrueFalse === "SAI"}
                   onClick={() => {
@@ -777,7 +779,7 @@ export default function ReflexChallengeModal({
                     handleAnswer(isCorrect, "SAI", correctText, 1);
                   }}
                   className={cn(
-                    "p-4 rounded-2xl border font-black text-lg flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-lg",
+                    "p-3.5 md:p-4 max-md:min-h-[44px] rounded-2xl border font-black text-base md:text-lg flex items-center justify-center gap-2 md:gap-2.5 transition-all active:scale-95 shadow-lg",
                     wrongTrueFalse === "SAI"
                       ? "bg-rose-950/20 border-rose-950/40 text-rose-500/40 line-through opacity-40 cursor-not-allowed"
                       : feedback === "wrong" && selectedOptionIdx === 1
@@ -785,7 +787,7 @@ export default function ReflexChallengeModal({
                         : "bg-rose-950/40 border-rose-500/50 hover:bg-rose-900/60 text-rose-300"
                   )}
                 >
-                  <span className="w-7 h-7 rounded-xl bg-rose-950/80 text-rose-300 font-mono text-sm font-bold flex items-center justify-center border border-rose-900/80 shrink-0">
+                  <span className="hidden md:flex w-7 h-7 rounded-xl bg-rose-950/80 text-rose-300 font-mono text-sm font-bold items-center justify-center border border-rose-900/80 shrink-0">
                     1
                   </span>
                   <XCircle className="w-5 h-5 shrink-0" />
@@ -801,7 +803,7 @@ export default function ReflexChallengeModal({
                     handleAnswer(isCorrect, "ĐÚNG", correctText, 2);
                   }}
                   className={cn(
-                    "p-4 rounded-2xl border font-black text-lg flex items-center justify-center gap-2.5 transition-all active:scale-95 shadow-lg",
+                    "p-3.5 md:p-4 max-md:min-h-[44px] rounded-2xl border font-black text-base md:text-lg flex items-center justify-center gap-2 md:gap-2.5 transition-all active:scale-95 shadow-lg",
                     wrongTrueFalse === "ĐÚNG"
                       ? "bg-rose-950/20 border-rose-950/40 text-rose-500/40 line-through opacity-40 cursor-not-allowed"
                       : feedback === "wrong" && selectedOptionIdx === 2
@@ -809,7 +811,7 @@ export default function ReflexChallengeModal({
                         : "bg-emerald-950/40 border-emerald-500/50 hover:bg-emerald-900/60 text-emerald-300"
                   )}
                 >
-                  <span className="w-7 h-7 rounded-xl bg-emerald-950/80 text-emerald-300 font-mono text-sm font-bold flex items-center justify-center border border-emerald-900/80 shrink-0">
+                  <span className="hidden md:flex w-7 h-7 rounded-xl bg-emerald-950/80 text-emerald-300 font-mono text-sm font-bold items-center justify-center border border-emerald-900/80 shrink-0">
                     2
                   </span>
                   <CheckCircle2 className="w-5 h-5 shrink-0" />
@@ -823,24 +825,24 @@ export default function ReflexChallengeModal({
 
       {/* ── PHASE 3: TIER TRANSITION (PAUSES AND WAITS FOR USER CLICK - NO AUTO TRANSITION) ── */}
       {phase === "tier_transition" && (
-        <div className="max-w-md w-full bg-slate-900 border border-emerald-500/40 rounded-3xl p-7 shadow-2xl text-center space-y-6 animate-in zoom-in-95">
-          <div className="w-20 h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center mx-auto text-emerald-400 shadow-xl shadow-emerald-500/30">
-            <Trophy className="w-10 h-10" />
+        <div className="max-w-md w-full bg-slate-900 border border-emerald-500/40 rounded-2xl md:rounded-3xl p-5 md:p-7 shadow-2xl text-center space-y-5 md:space-y-6 animate-in zoom-in-95">
+          <div className="w-16 h-16 md:w-20 md:h-20 rounded-full bg-emerald-500/20 border-2 border-emerald-500 flex items-center justify-center mx-auto text-emerald-400 shadow-xl shadow-emerald-500/30">
+            <Trophy className="w-8 h-8 md:w-10 md:h-10" />
           </div>
 
           <div>
-            <h2 className="text-2xl font-black text-white">
+            <h2 className="text-xl md:text-2xl font-black text-white">
               🎉 VƯỢT QUA CHẶNG {tiersCleared}!
             </h2>
-            <p className="text-emerald-400 font-bold mt-1 text-base">
+            <p className="text-emerald-400 font-bold mt-1 text-sm md:text-base">
               +{activeTier === 1 ? 15 : 25} XP ĐÃ ĐƯỢC BẢO LƯU!
             </p>
           </div>
 
-          <div className="bg-slate-950/80 rounded-2xl p-4 border border-slate-800 space-y-2 text-sm">
+          <div className="bg-slate-950/80 rounded-2xl p-3.5 md:p-4 border border-slate-800 space-y-2 text-xs md:text-sm">
             <div className="flex justify-between items-center text-slate-300">
               <span>⏱️ Thời gian bảo lưu:</span>
-              <span className="font-mono font-bold text-amber-400 text-lg">
+              <span className="font-mono font-bold text-amber-400 text-base md:text-lg">
                 {formatTime(timeLeft)}
               </span>
             </div>
@@ -852,9 +854,11 @@ export default function ReflexChallengeModal({
 
           <button
             onClick={handleStartNextTier}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-transform transform active:scale-95"
+            className="w-full py-3.5 md:py-4 max-md:min-h-[44px] rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black text-sm md:text-base flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/30 transition-transform transform active:scale-95"
           >
-            <span>VÀO CHẶNG {tiersCleared + 1} (Nhấn Space)</span>
+            <span>
+              VÀO CHẶNG {tiersCleared + 1}<span className="hidden md:inline"> (Nhấn Space)</span>
+            </span>
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>
@@ -862,14 +866,14 @@ export default function ReflexChallengeModal({
 
       {/* ── PHASE 4: SECOND CHANCE POPUP (STAYS OPEN UNTIL USER CLICKS - NEVER DISAPPEARS) ── */}
       {phase === "second_chance" && (
-        <div className="max-w-md w-full bg-slate-900 border border-amber-500/50 rounded-3xl p-7 shadow-2xl text-center space-y-5 animate-in zoom-in-95">
-          <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400 shadow-lg shadow-amber-500/20">
-            <AlertCircle className="w-9 h-9" />
+        <div className="max-w-md w-full bg-slate-900 border border-amber-500/50 rounded-2xl md:rounded-3xl p-5 md:p-7 shadow-2xl text-center space-y-4 md:space-y-5 animate-in zoom-in-95">
+          <div className="w-14 h-14 md:w-16 md:h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center mx-auto text-amber-400 shadow-lg shadow-amber-500/20">
+            <AlertCircle className="w-8 h-8 md:w-9 md:h-9" />
           </div>
 
           <div>
-            <h2 className="text-2xl font-black text-white">⏰ HẾT GIỜ!</h2>
-            <p className="text-sm text-slate-300 mt-1">
+            <h2 className="text-xl md:text-2xl font-black text-white">⏰ HẾT GIỜ!</h2>
+            <p className="text-xs md:text-sm text-slate-300 mt-1">
               Bạn có muốn nhận thêm <strong className="text-amber-400">+15 giây</strong> để hoàn
               thành Chặng {activeTier} không?
             </p>
@@ -884,16 +888,16 @@ export default function ReflexChallengeModal({
             XP).
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex flex-col sm:flex-row gap-3">
             <button
               onClick={() => setPhase("game_over")}
-              className="flex-1 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 font-semibold text-slate-300 text-sm transition-colors"
+              className="flex-1 py-3 max-md:min-h-[40px] rounded-xl border border-slate-700 hover:bg-slate-800 font-semibold text-slate-300 text-xs md:text-sm transition-colors"
             >
               Dừng lại & Xem kết quả
             </button>
             <button
               onClick={handleAcceptSecondChance}
-              className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-sm flex items-center justify-center gap-1 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
+              className="flex-1 py-3 max-md:min-h-[40px] rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black text-xs md:text-sm flex items-center justify-center gap-1 shadow-lg shadow-amber-500/20 transition-all active:scale-95"
             >
               <Zap className="w-4 h-4 fill-slate-950" />
               Nhận +15s làm tiếp
@@ -904,20 +908,20 @@ export default function ReflexChallengeModal({
 
       {/* ── PHASE 5: GAME OVER / VICTORY RESULTS WITH DETAILED MISTAKE REVIEW ── */}
       {phase === "game_over" && (
-        <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-7 shadow-2xl text-center space-y-5 animate-in zoom-in-95 max-h-[90vh] flex flex-col justify-between">
+        <div className="max-w-lg w-full bg-slate-900 border border-slate-800 rounded-2xl md:rounded-3xl p-4 sm:p-7 shadow-2xl text-center space-y-4 md:space-y-5 animate-in zoom-in-95 max-h-[90vh] flex flex-col justify-between max-md:overflow-y-auto">
           <div className="space-y-4">
             <div
               className={cn(
-                "w-16 h-16 rounded-full flex items-center justify-center mx-auto shadow-xl",
+                "w-14 h-14 md:w-16 md:h-16 rounded-full flex items-center justify-center mx-auto shadow-xl",
                 summary.tiersCleared === 3
                   ? "bg-amber-500/20 border-2 border-amber-500 text-amber-400 shadow-amber-500/25"
                   : "bg-slate-800 border-2 border-slate-700 text-slate-300"
               )}
             >
               {summary.tiersCleared === 3 ? (
-                <Sparkles className="w-8 h-8 fill-amber-400" />
+                <Sparkles className="w-7 h-7 md:w-8 md:h-8 fill-amber-400" />
               ) : (
-                <Trophy className="w-8 h-8" />
+                <Trophy className="w-7 h-7 md:w-8 md:h-8" />
               )}
             </div>
 
@@ -933,12 +937,12 @@ export default function ReflexChallengeModal({
             </div>
 
             {/* XP & Speed Stats Cards */}
-            <div className="grid grid-cols-2 gap-3 text-left">
-              <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
-                <span className="text-[11px] font-bold text-slate-400 block uppercase">
+            <div className="grid grid-cols-2 gap-2.5 md:gap-3 text-left">
+              <div className="bg-slate-950/80 p-3 md:p-3.5 rounded-2xl border border-slate-800">
+                <span className="text-[10px] md:text-[11px] font-bold text-slate-400 block uppercase">
                   Tổng XP Nhận Được
                 </span>
-                <span className="text-2xl font-black text-amber-400 flex items-center gap-1 mt-0.5">
+                <span className="text-xl md:text-2xl font-black text-amber-400 flex items-center gap-1 mt-0.5">
                   +{awardedXP ?? summary.totalXP} <span className="text-xs text-amber-500/80">XP</span>
                 </span>
                 {awardedXP != null && awardedXP < summary.totalXP && (
@@ -953,44 +957,44 @@ export default function ReflexChallengeModal({
                 )}
               </div>
 
-              <div className="bg-slate-950/80 p-3.5 rounded-2xl border border-slate-800">
-                <span className="text-[11px] font-bold text-slate-400 block uppercase">
+              <div className="bg-slate-950/80 p-3 md:p-3.5 rounded-2xl border border-slate-800">
+                <span className="text-[10px] md:text-[11px] font-bold text-slate-400 block uppercase">
                   Tốc độ phản xạ
                 </span>
-                <span className="text-base font-black text-white block mt-0.5">
+                <span className="text-sm md:text-base font-black text-white block mt-0.5">
                   {summary.avgResponseTimeMs > 0
                     ? (summary.avgResponseTimeMs / 1000).toFixed(2)
                     : "0"}
                   s / câu
                 </span>
-                <span className="text-[11px] font-bold text-cyan-400 block mt-0.5">
+                <span className="text-[10px] md:text-[11px] font-bold text-cyan-400 block mt-0.5">
                   {summary.speedTitle}
                 </span>
               </div>
             </div>
 
             {/* Accuracy & Correct / Wrong Counter */}
-            <div className="bg-slate-950/50 rounded-2xl p-3 border border-slate-800/80 flex justify-around text-xs">
+            <div className="bg-slate-950/50 rounded-2xl p-2.5 md:p-3 border border-slate-800/80 flex justify-around text-[11px] md:text-xs">
               <div>
                 <span className="text-slate-500 block">Số câu đúng</span>
-                <span className="font-bold text-emerald-400 text-sm">
+                <span className="font-bold text-emerald-400 text-xs md:text-sm">
                   {summary.totalCorrect} câu
                 </span>
               </div>
               <div className="border-r border-slate-800" />
               <div>
                 <span className="text-slate-500 block">Số câu sai</span>
-                <span className="font-bold text-rose-400 text-sm">{summary.totalWrong} câu</span>
+                <span className="font-bold text-rose-400 text-xs md:text-sm">{summary.totalWrong} câu</span>
               </div>
               <div className="border-r border-slate-800" />
               <div>
                 <span className="text-slate-500 block">Độ chính xác</span>
-                <span className="font-bold text-white text-sm">{summary.accuracy}%</span>
+                <span className="font-bold text-white text-xs md:text-sm">{summary.accuracy}%</span>
               </div>
               <div className="border-r border-slate-800" />
               <div>
                 <span className="text-slate-500 block">Combo max</span>
-                <span className="font-bold text-amber-400 text-sm">{maxCombo}x</span>
+                <span className="font-bold text-amber-400 text-xs md:text-sm">{maxCombo}x</span>
               </div>
             </div>
 
@@ -1025,7 +1029,7 @@ export default function ReflexChallengeModal({
                         </div>
                         <button
                           onClick={() => handleSpeak(item.word)}
-                          className="p-1 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800"
+                          className="p-2 md:p-1 rounded-full text-slate-400 hover:text-cyan-400 hover:bg-slate-800"
                           title="Nghe phát âm"
                         >
                           <Volume2 className="w-3.5 h-3.5" />
@@ -1062,20 +1066,20 @@ export default function ReflexChallengeModal({
           </div>
 
           {/* Action buttons */}
-          <div className="flex gap-3 pt-2">
+          <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
               onClick={() => {
                 initSession();
                 handleStartGame();
               }}
-              className="flex-1 py-3 rounded-xl border border-slate-700 hover:bg-slate-800 font-bold text-slate-200 flex items-center justify-center gap-2 text-sm transition-colors"
+              className="flex-1 py-3 max-md:min-h-[40px] rounded-xl border border-slate-700 hover:bg-slate-800 font-bold text-slate-200 flex items-center justify-center gap-2 text-sm transition-colors"
             >
               <RotateCcw className="w-4 h-4" />
               Luyện tiếp
             </button>
             <button
               onClick={onClose}
-              className="flex-1 py-3 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 font-black text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95"
+              className="flex-1 py-3 max-md:min-h-[40px] rounded-xl bg-gradient-to-r from-cyan-500 to-blue-500 hover:from-cyan-400 hover:to-blue-400 text-slate-950 font-black text-sm flex items-center justify-center gap-1.5 shadow-lg shadow-cyan-500/25 transition-all transform active:scale-95"
             >
               <CheckCircle2 className="w-4 h-4" />
               Kết thúc

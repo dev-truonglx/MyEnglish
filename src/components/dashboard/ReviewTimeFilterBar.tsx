@@ -91,7 +91,7 @@ export default function ReviewTimeFilterBar({
             <button
               key={config.id}
               onClick={() => onSelectBucket(config.id)}
-              className={`px-2.5 py-1.5 rounded-xl text-xs shrink-0 transition-all flex items-center gap-1.5 border ${
+              className={`max-md:min-h-10 px-2.5 py-1.5 rounded-xl text-xs shrink-0 transition-all flex items-center gap-1.5 border ${
                 isSelected
                   ? config.activeClass
                   : "bg-white dark:bg-zinc-900/80 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-800 hover:text-slate-900 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 shadow-sm"

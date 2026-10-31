@@ -63,9 +63,9 @@ const NEAR_MISS_EDITS = 2;
 const LINK_BTN =
   "text-xs font-semibold text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-200 transition flex items-center gap-1 disabled:opacity-50";
 const PRIMARY_BTN =
-  "w-full sm:w-auto px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold shadow-md shadow-cyan-600/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center justify-center gap-1.5";
+  "w-full sm:w-auto px-6 py-3 md:py-2.5 max-md:min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-bold shadow-md shadow-cyan-600/20 transition active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100 flex items-center justify-center gap-1.5";
 const SECONDARY_BTN =
-  "px-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 text-sm font-semibold hover:border-slate-300 dark:hover:border-zinc-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5";
+  "px-4 py-2.5 md:py-2 max-md:min-h-[40px] rounded-xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-slate-700 dark:text-zinc-200 text-sm font-semibold hover:border-slate-300 dark:hover:border-zinc-600 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-1.5";
 const CARD = "rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 sm:p-5 space-y-4";
 const LABEL = "text-[11px] font-bold uppercase tracking-wide text-slate-400 dark:text-zinc-500";
 
@@ -182,7 +182,7 @@ function PlayerHeader({
           data-own-enter
           onClick={onExit}
           title="Quay lại"
-          className="p-1.5 -ml-1.5 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition shrink-0"
+          className="p-2.5 md:p-1.5 -ml-1.5 rounded-lg text-slate-500 dark:text-zinc-400 hover:text-slate-800 dark:hover:text-zinc-100 hover:bg-slate-100 dark:hover:bg-zinc-800 transition shrink-0"
         >
           <ArrowLeft className="w-5 h-5" />
         </button>
@@ -642,9 +642,9 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
                 type="button"
                 disabled={answered}
                 onClick={() => pickOption(i)}
-                className={`p-3 rounded-xl border-2 text-sm font-semibold text-left flex items-start gap-2.5 transition active:scale-[0.99] ${style}`}
+                className={`p-3.5 md:p-3 max-md:min-h-[44px] rounded-xl border-2 text-sm font-semibold text-left flex items-start gap-2.5 transition active:scale-[0.99] ${style}`}
               >
-                <span className="shrink-0 w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 text-[11px] font-bold flex items-center justify-center">
+                <span className="hidden md:flex shrink-0 w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 text-[11px] font-bold items-center justify-center">
                   {i + 1}
                 </span>
                 <span className="min-w-0 break-words leading-6">{option}</span>
@@ -685,7 +685,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
                     data-form-type="other"
                     aria-label={`Ô trống ${i + 1}`}
                     style={{ width: `${Math.min(40, Math.max(10, value.length + 3))}ch`, maxWidth: "100%" }}
-                    className={`inline-block align-middle h-9 mx-1 px-2 rounded-lg border-2 text-sm font-semibold text-center text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none ${
+                    className={`inline-block align-middle h-10 md:h-9 mx-1 px-2.5 md:px-2 rounded-lg border-2 text-base md:text-sm font-semibold text-center text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none ${
                       state === "idle"
                         ? "border-slate-300 dark:border-zinc-700 focus:border-cyan-500"
                         : state === "ok"
@@ -723,11 +723,11 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
           data-1p-ignore="true"
           data-form-type="other"
           aria-label="Câu trả lời"
-          className={`w-full px-3 py-2.5 rounded-xl border-2 text-sm font-semibold leading-relaxed text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none resize-none ${
+          className={`w-full px-3 py-2.5 rounded-xl border-2 text-base md:text-sm font-semibold leading-relaxed text-slate-900 dark:text-white bg-white dark:bg-zinc-950 focus:outline-none resize-none ${
             tone === "idle" ? "border-slate-300 dark:border-zinc-700 focus:border-cyan-500" : tone === "ok" ? "border-emerald-500" : "border-rose-500"
           }`}
         />
-        <p className="text-[11px] text-slate-400 dark:text-zinc-500">Enter để kiểm tra · Shift+Enter để xuống dòng</p>
+        <p className="hidden md:block text-[11px] text-slate-400 dark:text-zinc-500">Enter để kiểm tra · Shift+Enter để xuống dòng</p>
       </>
     );
   };
@@ -763,7 +763,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
               type="button"
               disabled={answered || placedSet.has(i)}
               onClick={() => setPlaced((prev) => (prev.includes(i) ? prev : [...prev, i]))}
-              className={`px-3 py-1.5 rounded-xl border text-sm font-semibold shadow-sm transition active:scale-95 break-words ${
+              className={`px-3 py-2 md:py-1.5 max-md:min-h-[40px] rounded-xl border text-sm font-semibold shadow-sm transition active:scale-95 break-words ${
                 placedSet.has(i)
                   ? "border-dashed border-slate-200 dark:border-zinc-800 bg-transparent text-transparent select-none shadow-none"
                   : "border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 hover:bg-cyan-50/50 dark:hover:bg-cyan-950/30"
@@ -804,7 +804,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
                 type="button"
                 disabled={answered}
                 onClick={() => pickToken(i)}
-                className={`px-2.5 py-1.5 rounded-lg border text-base font-semibold transition active:scale-95 break-words ${style}`}
+                className={`px-3 md:px-2.5 py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg border text-base font-semibold transition active:scale-95 break-words ${style}`}
               >
                 {token}
               </button>
@@ -901,10 +901,10 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
         <div role="group" aria-label="Xác nhận ẩn câu" className="flex flex-col gap-2.5 rounded-xl border border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 p-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm text-rose-900 dark:text-rose-200">Ẩn câu này khỏi bài tập và ôn tập? Bạn có thể hoàn tác ngay sau đó.</p>
           <div className="flex shrink-0 gap-2">
-            <button type="button" data-own-enter disabled={busy} onClick={onHide} className="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition disabled:opacity-50">
+            <button type="button" data-own-enter disabled={busy} onClick={onHide} className="md:px-3 max-md:px-3.5 py-2 md:py-1.5 max-md:min-h-[40px] rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold transition disabled:opacity-50">
               Ẩn câu này
             </button>
-            <button type="button" data-own-enter onClick={() => setConfirmHide(false)} className={SECONDARY_BTN + " !py-1.5 !text-xs"}>
+            <button type="button" data-own-enter onClick={() => setConfirmHide(false)} className={SECONDARY_BTN + " !py-2 md:!py-1.5 !text-xs"}>
               Thôi
             </button>
           </div>
@@ -918,7 +918,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
               type="button"
               data-own-enter
               onClick={useHint}
-              className="px-3 py-1.5 rounded-xl border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-semibold hover:bg-amber-50 dark:hover:bg-amber-950/30 transition flex items-center gap-1"
+              className="md:px-3 max-md:px-3.5 py-2 md:py-1.5 max-md:min-h-[40px] rounded-xl border border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 text-xs font-semibold hover:bg-amber-50 dark:hover:bg-amber-950/30 transition flex items-center gap-1"
               title="Chuyển sang dạng dễ hơn (câu này sẽ được ôn lại)"
             >
               <Lightbulb className="w-3.5 h-3.5" />
@@ -931,7 +931,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
               data-own-enter
               disabled={busy}
               onClick={giveUp}
-              className="px-3 py-1.5 rounded-xl border border-slate-300 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-zinc-800 transition flex items-center gap-1 disabled:opacity-50"
+              className="md:px-3 max-md:px-3.5 py-2 md:py-1.5 max-md:min-h-[40px] rounded-xl border border-slate-300 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 text-xs font-semibold hover:bg-slate-50 dark:hover:bg-zinc-800 transition flex items-center gap-1 disabled:opacity-50"
               title="Xem đáp án của câu này (tính là sai)"
             >
               <CircleHelp className="w-3.5 h-3.5" />
@@ -944,14 +944,14 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
               data-own-enter
               disabled={busy}
               onClick={() => setConfirmHide(true)}
-              className={LINK_BTN}
+              className={`${LINK_BTN} py-2 md:py-0`}
               title="Ẩn câu này khỏi bài tập và ôn tập"
             >
               <EyeOff className="w-3 h-3" />
               Ẩn câu này (dữ liệu lỗi)
             </button>
           )}
-          <button type="button" data-own-enter disabled={busy} onClick={onFinishEarly} className={LINK_BTN} title="Dừng ở đây và xem kết quả các câu đã làm">
+          <button type="button" data-own-enter disabled={busy} onClick={onFinishEarly} className={`${LINK_BTN} py-2 md:py-0`} title="Dừng ở đây và xem kết quả các câu đã làm">
             <Flag className="w-3 h-3" />
             Kết thúc sớm
           </button>
@@ -962,7 +962,7 @@ function Question({ entry, task, hinted, busy, onHint, onNext, onHide, onFinishE
             <span className="text-[11px] opacity-75 font-normal">
               {outcome?.correct ? "(đã ghi nhận tiến độ)" : "(gặp lại ở cuối bài)"}
             </span>
-            <span className="font-mono text-xs">↵</span>
+            <span className="hidden md:inline font-mono text-xs">↵</span>
           </button>
         ) : showCheck ? (
           <button type="button" disabled={!canCheck} onClick={check} className={PRIMARY_BTN}>
