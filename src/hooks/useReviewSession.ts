@@ -59,6 +59,7 @@ import { triggerConfetti } from "@/utils/confetti";
 import { playAnswerSound, playSound, playWrongTry, resetSoundSession } from "@/services/sound";
 import { englishVoices, handleSpeak, AUTO_SPEAK_DELAY_MS } from "@/components/review/speech";
 import { practiceExerciseType } from "@/services/practicePicker";
+import { updateReviewCardIndex, clearReviewSession, getUnifiedSession } from "@/services/unifiedSession";
 
 const MAX_REQUEUES_PER_WORD = 2;
 const REQUEUE_GAP = 3; // Cards shown before a forgotten word comes back
@@ -176,6 +177,8 @@ interface UseReviewSessionOptions {
    * schedule) instead of ending the session. None (empty list): the session ends as usual.
    */
   topUp?: (queue: readonly ReviewCard[]) => Promise<ReviewCard[]>;
+  /** Starting card index (restores in-progress cross-tab position) */
+  initialIndex?: number;
 }
 
 /**
@@ -189,6 +192,7 @@ export function useReviewSession({
   active = true,
   stopAfterCurrent = false,
   topUp,
+  initialIndex = 0,
 }: UseReviewSessionOptions) {
   // Read when a card is done (after awaits): the latest value, not the one of the render that started it
   const stopAfterCurrentRef = useRef(stopAfterCurrent);
@@ -271,7 +275,12 @@ export function useReviewSession({
   // Saving of the answer on screen, started when it was given (see holdAnswer)
   const pendingRecordRef = useRef<Promise<RecordedAnswer | null> | null>(null);
   const continuingRef = useRef(false);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  const [currentIndex, setCurrentIndex] = useState(() => {
+    if (typeof initialIndex === "number" && initialIndex >= 0) {
+      return initialIndex;
+    }
+    return 0;
+  });
   const currentIndexRef = useRef(currentIndex);
   currentIndexRef.current = currentIndex;
   const [isFlipped, setIsFlipped] = useState(false);
@@ -334,6 +343,66 @@ export function useReviewSession({
     setMainSessionActive(!sessionCompleted);
     return () => setMainSessionActive(false);
   }, [sessionCompleted]);
+
+  // Synchronize current card position with unified cross-tab session
+  const isRemoteIndexSyncRef = useRef(false);
+
+  useEffect(() => {
+    if (sessionCompleted) {
+      clearReviewSession();
+    } else {
+      if (isRemoteIndexSyncRef.current) {
+        isRemoteIndexSyncRef.current = false;
+        return;
+      }
+      updateReviewCardIndex(currentIndex, {
+        firstTryCorrect: sessionStats.firstTryCorrect,
+        retryCorrect: sessionStats.retryCorrect,
+        revealedCount: sessionStats.revealedCount,
+        skippedCount: sessionStats.skippedCount,
+        totalWrongAttempts: sessionStats.totalWrongAttempts,
+        totalXPEarned: sessionStats.totalXPEarned,
+      });
+    }
+  }, [currentIndex, sessionCompleted, sessionStats]);
+
+  // Synchronize if another tab changes the card index
+  useEffect(() => {
+    const syncCardIndex = (data: ReturnType<typeof getUnifiedSession>) => {
+      if (data?.isReviewing && data.review && typeof data.review.currentIndex === "number") {
+        const remoteIdx = data.review.currentIndex;
+        if (remoteIdx !== currentIndexRef.current && remoteIdx >= 0 && remoteIdx < queueRef.current.length) {
+          isRemoteIndexSyncRef.current = true;
+          setCurrentIndex(remoteIdx);
+        }
+      }
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === "myenglish_unified_session_v1" && e.newValue) {
+        try {
+          const data = JSON.parse(e.newValue);
+          syncCardIndex(data);
+        } catch {}
+      }
+    };
+
+    const handleFocus = () => {
+      try {
+        const data = getUnifiedSession();
+        syncCardIndex(data);
+      } catch {}
+    };
+
+    window.addEventListener("storage", handleStorage);
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", handleFocus);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
+    };
+  }, []);
 
   // Kept mounted behind another tab: time spent away is not response time, and the input gets focus back
   const hiddenAtRef = useRef<number | null>(null);

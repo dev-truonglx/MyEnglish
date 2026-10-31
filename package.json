@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "tauri": "DEVELOPER_DIR=/Library/Developer/CommandLineTools tauri",
     "check": "tsc --noEmit",
+    "build:extension": "vite build --config vite.extension.config.ts",
+    "package:extension": "bash scripts/package-extension.sh",
     "build:mac": "bash scripts/build-mac.sh",
     "build:win": "bash scripts/build-win-docker.sh",
     "release": "bash scripts/release-all.sh",

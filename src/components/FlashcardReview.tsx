@@ -58,6 +58,8 @@ interface FlashcardReviewProps {
   onSessionCompleted?: (completed: boolean) => void;
   /** From the summary: practise right away the words missed in this session */
   onRetryMissed?: (wordIds: string[]) => void;
+  /** Restores in-progress card index across tabs/windows */
+  initialIndex?: number;
 }
 
 export default function FlashcardReview({
@@ -72,6 +74,7 @@ export default function FlashcardReview({
   onNavigate,
   onSessionCompleted,
   onRetryMissed,
+  initialIndex,
 }: FlashcardReviewProps) {
   const focusSession = useFocusSession(focus);
   const {
@@ -141,6 +144,7 @@ export default function FlashcardReview({
     stopAfterCurrent: !!focus && focusSession.timeUp,
     // Focus session out of cards with time left: practice on the words being learnt until the time is up
     topUp: focus ? (queue) => focusTopUpCards(useWordsStore.getState().words, queue) : undefined,
+    initialIndex,
   });
 
   // Distinct cards answered in this session (a card asked again after a miss counts once)

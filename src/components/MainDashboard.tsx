@@ -64,6 +64,15 @@ import {
   type AuthPromptReason,
 } from "@/services/authPrompt";
 import { useAuthStore } from "@/stores/authStore";
+import {
+  getUnifiedSession,
+  saveUnifiedSession,
+  clearReviewSession,
+  reconstructReviewCards,
+  getTabId,
+  UNIFIED_SESSION_KEY,
+  type UnifiedSessionData,
+} from "@/services/unifiedSession";
 
 function TabFallback() {
   return (
@@ -156,22 +165,22 @@ export default function MainDashboard({
   const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
-  // The app opens on "Hôm nay": one clear thing to do, not the whole word library
-  const [activeTab, setActiveTab] = useState<DashboardTab>(initialTab ?? "today");
+  // The app opens on the unified active tab (or initialTab if specified)
+  const [activeTab, setActiveTab] = useState<DashboardTab>(() => {
+    if (initialTab) return initialTab;
+    const saved = getUnifiedSession();
+    return saved.activeTab || "today";
+  });
+  const activeTabRef = useRef(activeTab);
+  activeTabRef.current = activeTab;
 
-  // Web: keep URL in sync when active tab changes
-  const onTabChangeRef = useRef(onTabChange);
-  onTabChangeRef.current = onTabChange;
-  useEffect(() => {
-    onTabChangeRef.current?.(activeTab);
-  }, [activeTab]);
+  const [initialReviewIndex, setInitialReviewIndex] = useState(0);
+
   // Incremented whenever a sidebar / header tab item is clicked so active tabs return to their main screen
   const [tabResetKey, setTabResetKey] = useState(0);
   // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
   const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(null);
-  useEffect(() => {
-    if (activeTab !== "grammar") setGrammarLessonToOpen(null);
-  }, [activeTab]);
+
   // Simple mode (Settings): the sidebar shows five entries and the header the tabs of the current one
   const [simpleMode, setSimpleModeState] = useState(isSimpleMode);
   useEffect(() => {
@@ -188,11 +197,37 @@ export default function MainDashboard({
   const sessionCompletedRef = useRef(false);
   // New key per session so FlashcardReview never reuses the previous queue
   const [sessionId, setSessionId] = useState(0);
+  const sessionIdRef = useRef(0);
+  sessionIdRef.current = sessionId;
   const [reviewSet, setReviewSet] = useState<ReviewCard[]>([]);
   // Focus session of the review on screen (null: a normal session)
   const [focusPlan, setFocusPlan] = useState<FocusPlan | null>(null);
   const focusing = !!focusPlan && isReviewing;
   const [reflexChallengeOpen, setReflexChallengeOpen] = useState(false);
+
+  // Guard against broadcast loops when applying remote state
+  const isApplyingRemoteSyncRef = useRef(false);
+
+  // Web: keep URL and cross-tab session in sync when active tab changes
+  const onTabChangeRef = useRef(onTabChange);
+  onTabChangeRef.current = onTabChange;
+  useEffect(() => {
+    if (isApplyingRemoteSyncRef.current) return;
+    onTabChangeRef.current?.(activeTab);
+    saveUnifiedSession({ activeTab, action: "tab_change" });
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (activeTab !== "grammar") setGrammarLessonToOpen(null);
+    if (isApplyingRemoteSyncRef.current) return;
+    saveUnifiedSession({ grammarLessonId: grammarLessonToOpen, action: "grammar_change" });
+  }, [activeTab, grammarLessonToOpen]);
+
+  useEffect(() => {
+    if (isApplyingRemoteSyncRef.current) return;
+    saveUnifiedSession({ searchQuery });
+  }, [searchQuery]);
+
   // Fetch the reflex modal's chunk once the app is idle, so the first open does not wait for it
   useEffect(() => {
     const preload = () => void loadReflexChallengeModal().catch(() => {});
@@ -203,6 +238,133 @@ export default function MainDashboard({
     const id = window.setTimeout(preload, 3000);
     return () => window.clearTimeout(id);
   }, []);
+
+  // Central cross-tab sync: whenever any tab performs an action, all other tabs synchronize
+  const applyRemoteSession = useCallback(
+    (remote: UnifiedSessionData) => {
+      // Ignore actions dispatched by this tab
+      if (remote.tabId && remote.tabId === getTabId()) return;
+
+      isApplyingRemoteSyncRef.current = true;
+      try {
+        const currentWords = useWordsStore.getState().words;
+
+        // 1. Review session synchronization
+        if (remote.isReviewing && remote.review?.cards?.length) {
+          if (currentWords.length > 0) {
+            // If already inside the exact same review session, index will be updated by useReviewSession
+            if (!isReviewingRef.current || sessionIdRef.current !== remote.review.sessionId) {
+              const restored = reconstructReviewCards(remote.review.cards, currentWords);
+              if (restored.length > 0) {
+                setReviewSet(restored);
+                setInitialReviewIndex(remote.review.currentIndex || 0);
+                setIsPracticeSession(!!remote.review.practiceMode);
+                setFocusPlan(remote.review.focusMinutes ? newFocusPlan(remote.review.focusMinutes) : null);
+                setSessionId(remote.review.sessionId || Date.now());
+                sessionCompletedRef.current = false;
+                isReviewingRef.current = true;
+                setIsReviewing(true);
+                setActiveTab("review");
+              }
+            }
+          }
+        } else if (!remote.isReviewing) {
+          // Other tab exited or finished review
+          if (isReviewingRef.current) {
+            sessionCompletedRef.current = false;
+            refreshDirtyRef.current = false;
+            isReviewingRef.current = false;
+            setIsReviewing(false);
+            setReviewSet([]);
+            setFocusPlan(null);
+            useWordsStore.getState().refreshWords();
+          }
+
+          const targetTab = remote.activeTab || "today";
+          if (activeTabRef.current !== targetTab) {
+            setActiveTab(targetTab);
+            setTabResetKey((k) => k + 1);
+          }
+        }
+
+        // 2. Grammar lesson synchronization
+        if (remote.grammarLessonId !== undefined && remote.grammarLessonId !== grammarLessonToOpen) {
+          setGrammarLessonToOpen(remote.grammarLessonId);
+        }
+
+        // 3. Search query synchronization
+        if (remote.searchQuery !== undefined && remote.searchQuery !== searchQuery) {
+          setSearchQuery(remote.searchQuery);
+        }
+      } finally {
+        setTimeout(() => {
+          isApplyingRemoteSyncRef.current = false;
+        }, 50);
+      }
+    },
+    [grammarLessonToOpen, searchQuery]
+  );
+
+  // Initial cross-tab session restoration once words are loaded
+  const sessionRestoredRef = useRef(false);
+  useEffect(() => {
+    if (sessionRestoredRef.current || loading || words.length === 0) return;
+    sessionRestoredRef.current = true;
+    const saved = getUnifiedSession();
+    if (saved.grammarLessonId) {
+      setGrammarLessonToOpen(saved.grammarLessonId);
+    }
+    if (saved.searchQuery) {
+      setSearchQuery(saved.searchQuery);
+    }
+    if (saved.isReviewing && saved.review?.cards?.length) {
+      const restored = reconstructReviewCards(saved.review.cards, words);
+      if (restored.length > 0) {
+        setReviewSet(restored);
+        setInitialReviewIndex(saved.review.currentIndex || 0);
+        setIsPracticeSession(!!saved.review.practiceMode);
+        setFocusPlan(saved.review.focusMinutes ? newFocusPlan(saved.review.focusMinutes) : null);
+        setSessionId(saved.review.sessionId || Date.now());
+        sessionCompletedRef.current = false;
+        isReviewingRef.current = true;
+        setIsReviewing(true);
+        setActiveTab("review");
+      }
+    }
+  }, [loading, words]);
+
+  // Synchronize on storage event and whenever user switches back to this tab
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === UNIFIED_SESSION_KEY && e.newValue) {
+        try {
+          const data = JSON.parse(e.newValue);
+          if (data && data.version === 1) {
+            applyRemoteSession(data);
+          }
+        } catch {}
+      }
+    };
+
+    const onFocusOrVisible = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "visible") {
+        const latest = getUnifiedSession();
+        if (latest.updatedAt && latest.tabId !== getTabId()) {
+          applyRemoteSession(latest);
+        }
+      }
+    };
+
+    window.addEventListener("storage", onStorage);
+    window.addEventListener("focus", onFocusOrVisible);
+    document.addEventListener("visibilitychange", onFocusOrVisible);
+    return () => {
+      window.removeEventListener("storage", onStorage);
+      window.removeEventListener("focus", onFocusOrVisible);
+      document.removeEventListener("visibilitychange", onFocusOrVisible);
+    };
+  }, [applyRemoteSession]);
+
   const [confirmExitNav, setConfirmExitNav] = useState<{
     targetTab?: DashboardTab;
     pendingStart?: () => void;
@@ -277,6 +439,7 @@ export default function MainDashboard({
    */
   const autoFinishCompletedReview = useCallback(() => {
     if (sessionCompletedRef.current) {
+      clearReviewSession("today");
       sessionCompletedRef.current = false;
       refreshDirtyRef.current = false;
       isReviewingRef.current = false;
@@ -338,6 +501,8 @@ export default function MainDashboard({
     setConfirmExitNav(null);
     if (!pending) return;
 
+    const targetTab = pending.targetTab || "today";
+    clearReviewSession(targetTab);
     sessionCompletedRef.current = false;
     refreshDirtyRef.current = false;
     isReviewingRef.current = false;
@@ -454,6 +619,29 @@ export default function MainDashboard({
     return calculateStreakAndGoal(words, todayWork.total);
   }, [words, activityVersion, todayWork.total]);
 
+  // Synchronize Extension action icon badge with words needing review / due
+  useEffect(() => {
+    const due = todayWork.reviews > 0 ? todayWork.reviews : todayWork.total;
+    const hasUrgent = todayWork.reviews > 0;
+    const text = due > 0 ? (due > 999 ? "999+" : String(due)) : "";
+    const gChrome = typeof window !== "undefined" ? (window as unknown as { chrome?: any }).chrome : undefined;
+
+    if (gChrome) {
+      try {
+        if (gChrome.action?.setBadgeText) {
+          gChrome.action.setBadgeText({ text });
+          gChrome.action.setBadgeBackgroundColor({ color: hasUrgent ? "#ef4444" : "#0891b2" });
+        }
+        if (gChrome.storage?.local?.set) {
+          gChrome.storage.local.set({ dueCount: due, hasUrgentReviews: hasUrgent });
+        }
+        if (gChrome.runtime?.sendMessage) {
+          gChrome.runtime.sendMessage({ type: "UPDATE_DUE_BADGE", dueCount: due, hasUrgentReviews: hasUrgent }).catch(() => {});
+        }
+      } catch {}
+    }
+  }, [todayWork.reviews, todayWork.total]);
+
   const handleCopyCode = (code: string) => {
     if (navigator.clipboard) {
       navigator.clipboard.writeText(code);
@@ -521,7 +709,6 @@ export default function MainDashboard({
   // answer (5 queries + all the recomputation) is wasted. Reloaded once when the session ends.
   // Only while the session is on screen: kept behind another tab, the tab shown must stay current.
   const refreshDirtyRef = useRef(false);
-  const activeTabRef = useRef(activeTab);
   activeTabRef.current = activeTab;
   // Words changed since the last refresh, when every change named its words (a review in the popup):
   // only those are reloaded. null: something else changed, everything is reloaded.
@@ -878,14 +1065,28 @@ export default function MainDashboard({
     const session = [...due, ...practice, ...extra];
     if (session.length === 0) return false;
     // Not a practice session as a whole: each card decides (a card not due is never graded)
+    const nextSessionId = Date.now();
     setIsPracticeSession(false);
     setFocusPlan(focus ?? null);
     setReviewSet(session);
-    setSessionId((id) => id + 1);
+    setInitialReviewIndex(0);
+    setSessionId(nextSessionId);
     sessionCompletedRef.current = false;
     isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
+
+    saveUnifiedSession({
+      activeTab: "review",
+      isReviewing: true,
+      review: {
+        sessionId: nextSessionId,
+        practiceMode: false,
+        focusMinutes: focus?.plannedMin,
+        cards: session.map((c) => ({ wordId: String(c.id), direction: c.direction })),
+        currentIndex: 0,
+      },
+    });
     return true;
   };
 
@@ -1020,13 +1221,27 @@ export default function MainDashboard({
       return false;
     }
 
+    const nextSessionId = Date.now();
     setFocusPlan(focus ?? null);
     setReviewSet(session);
-    setSessionId((id) => id + 1);
+    setInitialReviewIndex(0);
+    setSessionId(nextSessionId);
     sessionCompletedRef.current = false;
     isReviewingRef.current = true;
     setIsReviewing(true);
     setActiveTab("review");
+
+    saveUnifiedSession({
+      activeTab: "review",
+      isReviewing: true,
+      review: {
+        sessionId: nextSessionId,
+        practiceMode: !onlyDue,
+        focusMinutes: focus?.plannedMin,
+        cards: session.map((c) => ({ wordId: String(c.id), direction: c.direction })),
+        currentIndex: 0,
+      },
+    });
     return true;
   };
 
@@ -1619,6 +1834,7 @@ export default function MainDashboard({
             <Suspense fallback={<TabFallback />}>
               <FlashcardReview
                 key={sessionId}
+                initialIndex={initialReviewIndex}
                 wordsToReview={reviewSet}
                 distractorPool={distractorPool}
                 practiceMode={isPracticeSession}
@@ -1633,6 +1849,7 @@ export default function MainDashboard({
                   startWordListSession(ids.map((id) => byId.get(id)).filter((w): w is WordDetail => !!w));
                 }}
                 onStartFocus={(minutes) => {
+                  clearReviewSession("review");
                   sessionCompletedRef.current = false;
                   // Five more minutes, or a first try after a normal session: a new queue (what is due now)
                   refreshDirtyRef.current = false;
@@ -1647,6 +1864,7 @@ export default function MainDashboard({
                   );
                 }}
                 onNavigate={(tab) => {
+                  clearReviewSession(tab);
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
                   isReviewingRef.current = false;
@@ -1657,6 +1875,7 @@ export default function MainDashboard({
                   promptAuthSyncIfGuest("exit_lesson");
                 }}
                 onFinish={() => {
+                  clearReviewSession("today");
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false; // reloaded just below
                   isReviewingRef.current = false;
@@ -1668,6 +1887,7 @@ export default function MainDashboard({
                   promptAuthSyncIfGuest("exit_lesson");
                 }}
                 onExit={() => {
+                  clearReviewSession("today");
                   sessionCompletedRef.current = false;
                   refreshDirtyRef.current = false;
                   isReviewingRef.current = false;

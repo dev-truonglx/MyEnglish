@@ -1,0 +1,66 @@
+{
+  "manifest_version": 3,
+  "name": "MyEnglish - Học từ vựng & Ngữ pháp FSRS",
+  "version": "0.3.11",
+  "description": "Học từ vựng Oxford 5000 và ngữ pháp tiếng Anh với thuật toán lặp lại ngắt quãng FSRS, đồng bộ dữ liệu đám mây.",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "action": {
+    "default_title": "MyEnglish - Mở thanh bên học nhanh",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "alarms",
+    "notifications",
+    "contextMenus",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://*.supabase.co/*"
+  ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
+  "commands": {
+    "open-myenglish-tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Alt+Shift+E"
+      },
+      "description": "Mở MyEnglish trong tab mới"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "db-worker.mjs",
+        "fsrs-worker.mjs",
+        "sqlite/*",
+        "fsrs/*",
+        "icons/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

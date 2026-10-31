@@ -88,6 +88,24 @@ export async function getDatabase(): Promise<Database> {
 }
 
 /**
+ * Gracefully close the database and clear the cached instance.
+ */
+export async function closeDatabase(): Promise<void> {
+  if (dbInstance) {
+    const db = dbInstance;
+    dbInstance = null;
+    initPromise = null;
+    try {
+      await db.close();
+    } catch (e) {
+      console.warn("Error closing database:", e);
+    }
+  } else {
+    initPromise = null;
+  }
+}
+
+/**
  * Creates required tables and indexes if they don't exist.
  */
 export async function initSchema(db: Database): Promise<void> {

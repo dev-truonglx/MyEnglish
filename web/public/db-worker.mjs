@@ -3,25 +3,60 @@
  * Speaks the same calls as @tauri-apps/plugin-sql (execute / select with $1, $2 placeholders), so the
  * services run their own schema, migrations and queries unchanged. See web/platform/sql.ts.
  */
+
+// Disable the async proxy OPFS VFS which requires SharedArrayBuffer and spawns broken nested proxy workers
+self.sqlite3ApiConfig = {
+  disable: {
+    vfs: {
+      opfs: true,
+      "opfs-vfs": true,
+      "opfs-wl": true,
+    },
+  },
+};
+
 import sqlite3InitModule from "./sqlite/index.mjs";
 
 let sqlite3 = null;
+let pool = null;
 let db = null;
 let persistent = false;
 
 async function open(name) {
   if (db) return { persistent };
-  sqlite3 = await sqlite3InitModule();
-  try {
-    const pool = await sqlite3.installOpfsSAHPoolVfs({ name: "myenglish-sahpool" });
-    db = new pool.OpfsSAHPoolDb(`/${name}`);
-    persistent = true;
-  } catch (err) {
-    // No OPFS (some private windows): keep working in memory, the account sync refills it after sign-in
-    console.warn("OPFS unavailable, database kept in memory:", err);
-    db = new sqlite3.oo1.DB(":memory:", "c");
-    persistent = false;
+  if (!sqlite3) {
+    sqlite3 = await sqlite3InitModule();
   }
+
+  // Attempt to open the OPFS SAHPool with retries to handle any brief lock handover delays
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      if (!pool) {
+        pool = await sqlite3.installOpfsSAHPoolVfs({
+          name: "myenglish-sahpool",
+          preserveOnInitFailure: true,        // Never wipe or delete directory on error
+          forceReinitIfPreviouslyFailed: true, // Allow retrying if a previous attempt hit a lock
+        });
+      } else if (pool.isPaused?.()) {
+        await pool.unpauseVfs();
+      }
+      db = new pool.OpfsSAHPoolDb(`/${name}`);
+      persistent = true;
+      return { persistent };
+    } catch (err) {
+      pool = null;
+      if (attempt < 7) {
+        // Wait 100ms before retrying to allow any background worker to complete release
+        await new Promise((r) => setTimeout(r, 100));
+      } else {
+        console.warn("OPFS SAHPool unavailable after retries, keeping database in memory for this tab:", err);
+      }
+    }
+  }
+
+  // Safe fallback to in-memory if OPFS is held by another process or unavailable
+  db = new sqlite3.oo1.DB(":memory:", "c");
+  persistent = false;
   return { persistent };
 }
 
@@ -69,8 +104,15 @@ self.onmessage = async (e) => {
     else if (op === "execute") result = execute(sql, params);
     else if (op === "select") result = select(sql, params);
     else if (op === "close") {
-      db?.close();
+      try {
+        db?.close();
+      } catch {}
       db = null;
+      try {
+        if (pool && !pool.isPaused?.()) {
+          pool.pauseVfs();
+        }
+      } catch {}
       result = true;
     } else throw new Error(`unknown op ${op}`);
     self.postMessage({ id, result });

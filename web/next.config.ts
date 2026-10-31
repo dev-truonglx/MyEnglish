@@ -47,6 +47,14 @@ const nextConfig: NextConfig = {
     config.output.environment = { ...config.output.environment, asyncFunction: true };
     return config;
   },
+  async rewrites() {
+    return [
+      {
+        source: "/privacy-policy",
+        destination: "/privacy",
+      },
+    ];
+  },
 };
 
 export default nextConfig;

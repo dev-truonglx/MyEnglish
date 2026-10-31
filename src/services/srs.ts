@@ -587,12 +587,12 @@ export async function sendTestNotification(): Promise<{ success: boolean; messag
     if (sent) {
       return {
         success: true,
-        message: "Đã gửi thông báo hệ thống macOS kèm chuông báo 'Glass'! Hãy kiểm tra góc phải màn hình hoặc mở Trung tâm thông báo macOS.",
+        message: "Đã gửi thông báo thành công! Hãy kiểm tra góc màn hình hoặc Trung tâm thông báo hệ thống.",
       };
     } else {
       return {
         success: false,
-        message: "Không thể gửi thông báo. Hãy kiểm tra cài đặt thông báo của macOS.",
+        message: "Không thể gửi thông báo. Hãy kiểm tra quyền thông báo trên trình duyệt hoặc cài đặt hệ thống.",
       };
     }
   } catch (err) {

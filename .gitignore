@@ -23,6 +23,7 @@ dist-ssr
 *.sln
 *.sw?
 dist-win
+dist-extension
 release_dist
 secrets/
 
