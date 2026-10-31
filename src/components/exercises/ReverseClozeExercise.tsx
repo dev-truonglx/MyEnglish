@@ -144,9 +144,9 @@ export default function ReverseClozeExercise({
   };
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="w-full max-w-xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
       {/* Context Sentence Card */}
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 md:p-8 space-y-4 shadow-sm text-center">
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-8 space-y-3 md:space-y-4 shadow-sm text-center">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-cyan-50 dark:bg-cyan-950/60 text-cyan-700 dark:text-cyan-400 border border-cyan-200/50 dark:border-cyan-800/40">
           <Sparkles className="w-3 h-3" />
           <span>Câu ví dụ thực tế</span>
@@ -160,7 +160,7 @@ export default function ReverseClozeExercise({
           <button
             onClick={() => onSpeak(example.sentence_en)}
             type="button"
-            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 transition-colors"
+            className="md:px-3 inline-flex items-center gap-1.5 max-md:px-3.5 py-2 md:py-1 rounded-full text-xs font-medium text-slate-600 dark:text-zinc-300 bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 transition-colors max-md:min-h-10"
           >
             <Volume2 className="w-3.5 h-3.5 text-cyan-500" />
             <span>Nghe câu ví dụ</span>
@@ -179,7 +179,7 @@ export default function ReverseClozeExercise({
       </div>
 
       {/* 4 Choices */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 md:gap-3">
         {options.map((opt, idx) => {
           const isSelected = selectedId === opt.id;
           const isShake = shakeIdx === idx;
@@ -187,7 +187,7 @@ export default function ReverseClozeExercise({
           const showFail = isSelected && !opt.isCorrect;
 
           let btnClasses =
-            "rounded-xl border p-4 text-left transition-all duration-150 flex items-start gap-3 relative ";
+            "rounded-xl border p-3.5 md:p-4 text-left transition-all duration-150 flex items-start gap-2.5 md:gap-3 relative max-md:min-h-10 ";
           if (showSuccess) {
             btnClasses +=
               "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/50 text-emerald-900 dark:text-emerald-200 shadow-md ring-2 ring-emerald-500/30";
@@ -209,7 +209,7 @@ export default function ReverseClozeExercise({
               className={btnClasses}
             >
               <span
-                className={`w-6 h-6 shrink-0 rounded-md flex items-center justify-center text-xs font-mono font-bold ${
+                className={`w-6 h-6 shrink-0 rounded-md hidden md:flex items-center justify-center text-xs font-mono font-bold ${
                   showSuccess
                     ? "bg-emerald-500 text-white"
                     : showFail

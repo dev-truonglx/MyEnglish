@@ -69,7 +69,7 @@ const MEDAL = ["🥇", "🥈", "🥉"];
 
 const chip = (active: boolean) =>
   cn(
-    "px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors",
+    "px-3 py-1.5 max-md:min-h-10 max-md:inline-flex max-md:items-center rounded-lg text-xs font-semibold border transition-colors",
     active
       ? "bg-cyan-600 border-cyan-600 text-white"
       : "bg-white dark:bg-zinc-900 border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
@@ -153,7 +153,7 @@ export default function LeaderboardTab({
 
   if (!configured || !user) {
     return (
-      <div className={PAGE_CONTAINER}>
+      <div className={`${PAGE_CONTAINER} max-md:p-3`}>
         <div className="p-8 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm text-center space-y-3">
           <Trophy className="w-10 h-10 mx-auto text-amber-500" />
           <h2 className="text-base font-bold text-slate-900 dark:text-white">Bảng xếp hạng XP</h2>
@@ -165,7 +165,7 @@ export default function LeaderboardTab({
           {configured && onOpenSettings && (
             <button
               onClick={onOpenSettings}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold"
+              className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 px-4 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold"
             >
               <LogIn className="w-4 h-4" /> Đăng nhập tài khoản
             </button>
@@ -204,7 +204,7 @@ export default function LeaderboardTab({
   );
 
   return (
-    <div className={PAGE_CONTAINER}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3`}>
       <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -219,7 +219,7 @@ export default function LeaderboardTab({
           <button
             onClick={() => void load()}
             disabled={loading}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
+            className="inline-flex items-center max-md:min-h-10 gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-slate-600 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800"
           >
             <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} /> Làm mới
           </button>
@@ -249,7 +249,7 @@ export default function LeaderboardTab({
               </div>
               <button
                 onClick={onStartReflexChallenge}
-                className="inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95 shrink-0"
+                className="inline-flex items-center justify-center max-md:min-h-10 gap-1.5 px-4 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95 shrink-0"
               >
                 <Zap className="w-4 h-4 fill-amber-400" />
                 <span>Thử thách ngay</span>
@@ -378,9 +378,9 @@ function GroupsPanel({ groups, onChanged }: { groups: GroupInfo[]; onChanged: (s
   };
 
   const input =
-    "flex-1 min-w-0 px-3 py-2 rounded-lg text-xs border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder:text-slate-400";
+    "flex-1 min-w-0 px-3 py-2 rounded-lg text-base md:text-xs border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-slate-900 dark:text-white placeholder:text-slate-400";
   const button =
-    "px-3 py-2 rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white";
+    "px-3 py-2 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-lg text-xs font-semibold bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white";
 
   return (
     <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-sm space-y-4">
@@ -431,7 +431,7 @@ function GroupsPanel({ groups, onChanged }: { groups: GroupInfo[]; onChanged: (s
                     window.setTimeout(() => setCopied(null), 1500);
                   });
                 }}
-                className="p-1.5 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                className="p-2.5 -m-1 md:p-1.5 md:m-0 rounded-lg text-slate-500 hover:bg-slate-100 dark:hover:bg-zinc-800"
               >
                 {copied === g.id ? "✓" : <Copy className="w-3.5 h-3.5" />}
               </button>
@@ -448,8 +448,8 @@ function GroupsPanel({ groups, onChanged }: { groups: GroupInfo[]; onChanged: (s
                   void act(async () => { await leaveGroup(g.id); return null; });
                 }}
                 className={cn(
-                  "p-1.5 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10",
-                  leaving === g.id && "px-2 font-semibold bg-rose-50 dark:bg-rose-500/10"
+                  "p-2.5 -m-1 md:p-1.5 md:m-0 rounded-lg text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-500/10",
+                  leaving === g.id && "px-2 max-md:py-1.5 max-md:m-0 font-semibold bg-rose-50 dark:bg-rose-500/10"
                 )}
               >
                 {leaving === g.id ? "Rời nhóm?" : <X className="w-3.5 h-3.5" />}

@@ -24,8 +24,8 @@ export default function CardBadges({
   // Simple mode: no scheduler numbers (S, D, recall %), the word "Leech" becomes "Từ hay quên"
   const simple = isSimpleMode();
   return (
-    <div className="flex items-center justify-between gap-2 border-b border-slate-100 dark:border-zinc-800/80 pb-3 shrink-0">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className="flex items-center justify-between flex-wrap md:flex-nowrap gap-2 border-b border-slate-100 dark:border-zinc-800/80 pb-2 md:pb-3 shrink-0">
+      <div className="flex items-center gap-1.5 md:gap-2 flex-wrap min-w-0">
         {currentWord.part_of_speech && (
           <span className="text-[10px] font-mono uppercase px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-950/80 text-purple-800 dark:text-purple-300 border border-purple-200 dark:border-purple-800/60 font-semibold">
             {currentWord.part_of_speech}
@@ -73,7 +73,7 @@ export default function CardBadges({
         })()}
       </div>
 
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 max-md:shrink-0 max-md:ml-auto">
         {/* XP Floating Popup */}
         {showXPPopup && lastXPReward && (
           <span className="text-xs font-bold text-amber-500 dark:text-amber-400 animate-bounce font-mono flex items-center gap-1">

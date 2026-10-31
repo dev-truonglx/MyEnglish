@@ -32,6 +32,17 @@
         "--strictPort"
       ],
       "port": 1431
+    },
+    {
+      "name": "web-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "--prefix",
+        "web",
+        "run",
+        "dev"
+      ],
+      "port": 3000
     }
   ]
 }

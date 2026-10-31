@@ -68,7 +68,7 @@ export default function FocusBar({ remainingMs, plannedMs, paused, timeUp, cards
 
   return (
     <div className="w-full shrink-0 mb-3">
-      <div className="flex items-center gap-3 text-xs">
+      <div className="md:gap-3 flex items-center flex-wrap max-md:gap-x-3 max-md:gap-y-1 text-xs">
         <span className="inline-flex items-center gap-1.5 font-semibold text-violet-700 dark:text-violet-300">
           <Timer className="w-4 h-4" /> Phiên tập trung
         </span>
@@ -78,7 +78,7 @@ export default function FocusBar({ remainingMs, plannedMs, paused, timeUp, cards
         <button
           onClick={toggleClock}
           title={hideClock ? "Hiện đồng hồ" : "Ẩn đồng hồ (đỡ áp lực khi thấy đếm ngược)"}
-          className="p-1 rounded text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200"
+          className="p-3.5 -m-3 md:m-0 md:p-1 rounded text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-200"
         >
           {hideClock ? <Eye className="w-3.5 h-3.5" /> : <EyeOff className="w-3.5 h-3.5" />}
         </button>
@@ -93,7 +93,7 @@ export default function FocusBar({ remainingMs, plannedMs, paused, timeUp, cards
         ) : null}
         <button
           onClick={leave}
-          className={`ml-auto inline-flex items-center gap-1 px-2.5 py-1 rounded-lg font-medium transition-colors ${
+          className={`ml-auto inline-flex items-center gap-1 px-2.5 py-1 max-md:min-h-10 rounded-lg font-medium transition-colors ${
             canFinish
               ? "bg-emerald-600 hover:bg-emerald-700 text-white"
               : "text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white"
@@ -129,7 +129,7 @@ export default function FocusBar({ remainingMs, plannedMs, paused, timeUp, cards
               <button
                 autoFocus
                 onClick={() => setConfirming(false)}
-                className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
+                className="px-3 py-1.5 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
               >
                 Học tiếp
               </button>
@@ -139,7 +139,7 @@ export default function FocusBar({ remainingMs, plannedMs, paused, timeUp, cards
                   if (canFinish) onDone();
                   else onExit();
                 }}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs"
+                className="px-3 py-1.5 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs"
               >
                 Thoát
               </button>

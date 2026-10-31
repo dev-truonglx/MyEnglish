@@ -203,7 +203,7 @@ export default function TenseSelectionPicker({ value, onChange, className = "" }
           <button
             type="button"
             onClick={selectOnlyDefault}
-            className="inline-flex items-center gap-1.5 text-xs text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 font-medium underline-offset-2 hover:underline transition-colors"
+            className="inline-flex items-center gap-1.5 py-1.5 md:py-0 text-xs text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 font-medium underline-offset-2 hover:underline transition-colors max-md:min-h-[40px]"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             Về mặc định (chỉ Hiện tại đơn)
@@ -226,13 +226,13 @@ export default function TenseSelectionPicker({ value, onChange, className = "" }
                 <button
                   type="button"
                   onClick={() => selectGroup(key)}
-                  className="text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:underline"
+                  className="py-1 md:py-0 text-[11px] font-medium text-cyan-600 dark:text-cyan-400 hover:underline max-md:min-h-[36px] max-md:flex max-md:items-center"
                 >
                   {allInGroupSelected ? "Bỏ chọn nhóm" : "Chọn cả nhóm"}
                 </button>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                 {items.map((item) => {
                   const isChecked = selectedSet.has(item.id);
 

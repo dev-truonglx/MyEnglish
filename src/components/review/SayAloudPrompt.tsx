@@ -24,16 +24,16 @@ export default function SayAloudPrompt({ word, wordId }: { word: string; wordId:
     <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-600 dark:text-zinc-400">
       <Mic className="w-3.5 h-3.5 text-emerald-600" />
       <span>Nghe rồi đọc to theo 2 lần:</span>
-      <button onClick={() => handleSpeak(word)} className="p-1 rounded-md border border-slate-200 dark:border-zinc-700" title="Nghe">
+      <button onClick={() => handleSpeak(word)} className="p-1 max-md:min-h-10 max-md:min-w-10 rounded-md border border-slate-200 dark:border-zinc-700" title="Nghe">
         <Volume2 className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => handleSpeak(word, SLOW_RATE)} className="p-1 rounded-md border border-slate-200 dark:border-zinc-700" title="Nghe chậm">
+      <button onClick={() => handleSpeak(word, SLOW_RATE)} className="p-1 max-md:min-h-10 max-md:min-w-10 rounded-md border border-slate-200 dark:border-zinc-700" title="Nghe chậm">
         <Snail className="w-3.5 h-3.5" />
       </button>
-      <button onClick={() => rate(true)} className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-semibold">
+      <button onClick={() => rate(true)} className="px-2 py-0.5 max-md:min-h-10 rounded-md bg-emerald-600 text-white font-semibold">
         Đọc được
       </button>
-      <button onClick={() => rate(false)} className="px-2 py-0.5 rounded-md border border-slate-300 dark:border-zinc-700">
+      <button onClick={() => rate(false)} className="px-2 py-0.5 max-md:min-h-10 rounded-md border border-slate-300 dark:border-zinc-700">
         Chưa chắc
       </button>
     </div>

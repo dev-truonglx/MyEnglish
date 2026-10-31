@@ -121,8 +121,8 @@ export default function ListeningDictationExercise({
   }, [isAnswered, question, handleSelect, playAudio]);
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-5 animate-in fade-in duration-200">
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-6 text-center space-y-4 shadow-sm">
+    <div className="w-full max-w-xl mx-auto space-y-4 md:space-y-5 animate-in fade-in duration-200">
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-6 text-center space-y-3 md:space-y-4 shadow-sm">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200/50 dark:border-emerald-800/40">
           <Music className="w-3 h-3" />
           <span>Nghe từ và chọn nghĩa đúng</span>
@@ -132,29 +132,29 @@ export default function ListeningDictationExercise({
           <button
             onClick={() => playAudio()}
             type="button"
-            className={`w-20 h-20 rounded-full flex flex-col items-center justify-center transition-all transform active:scale-95 shadow-md cursor-pointer ${
+            className={`w-16 h-16 md:w-20 md:h-20 rounded-full flex flex-col items-center justify-center transition-all transform active:scale-95 shadow-md cursor-pointer ${
               isPlaying
                 ? "bg-gradient-to-tr from-cyan-500 to-blue-500 text-white scale-105 ring-4 ring-cyan-500/30 animate-pulse"
                 : "bg-slate-100 dark:bg-zinc-800 hover:bg-cyan-50 dark:hover:bg-zinc-700 text-cyan-600 dark:text-cyan-400 border border-slate-200 dark:border-zinc-700"
             }`}
             title="Nghe tốc độ thường (Phím R)"
           >
-            <Volume2 className="w-8 h-8 mb-0.5" />
+            <Volume2 className="w-7 h-7 md:w-8 md:h-8 mb-0.5" />
             <span className="text-[10px] font-semibold uppercase tracking-wider">Nghe</span>
           </button>
         </div>
 
-        <div className="flex items-center justify-center gap-3">
+        <div className="flex flex-wrap items-center justify-center gap-2 md:gap-3">
           <button
             onClick={() => playAudio(SLOW_RATE)}
             type="button"
-            className="px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
+            className="px-3 py-2 md:py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 transition-colors flex items-center gap-1.5 cursor-pointer shadow-2xs"
             title="Nghe chậm (Phím S)"
           >
             <Snail className="w-3.5 h-3.5 text-amber-500" />
             <span>Nghe chậm</span>
           </button>
-          <span className="text-[11px] text-slate-400 dark:text-zinc-500">Phím R: nghe lại · S: nghe chậm · 1–4: chọn</span>
+          <span className="hidden md:inline text-[11px] text-slate-400 dark:text-zinc-500">Phím R: nghe lại · S: nghe chậm · 1–4: chọn</span>
         </div>
 
         <div className="min-h-[28px] text-sm">
@@ -168,7 +168,7 @@ export default function ListeningDictationExercise({
         </div>
       </div>
 
-      <div className="grid gap-2.5">
+      <div className="grid gap-2 md:gap-2.5">
         {!question &&
           [0, 1, 2, 3].map((i) => (
             <div key={i} className="h-[50px] rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 animate-pulse" />
@@ -186,7 +186,7 @@ export default function ListeningDictationExercise({
               onClick={() => (playable ? onSpeak(o.word!) : handleSelect(o))}
               disabled={playable ? false : isAnswered || wrong}
               title={playable ? `Nghe "${o.word}"` : undefined}
-              className={`w-full p-3.5 rounded-xl border text-left text-sm transition-all flex items-center gap-3 ${
+              className={`w-full p-3 md:p-3.5 max-md:min-h-10 rounded-xl border text-left text-sm transition-all flex items-center gap-2.5 md:gap-3 ${
                 right
                   ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-900 dark:text-emerald-100"
                   : wrong
@@ -194,7 +194,7 @@ export default function ListeningDictationExercise({
                   : "border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 hover:border-cyan-400 text-slate-800 dark:text-zinc-200"
               } ${playable ? "cursor-pointer" : ""}`}
             >
-              <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[11px] font-mono flex items-center justify-center shrink-0">
+              <span className="w-6 h-6 rounded-md bg-slate-100 dark:bg-zinc-800 text-[11px] font-mono hidden md:flex items-center justify-center shrink-0">
                 {idx + 1}
               </span>
               <span className="flex-1 min-w-0">

@@ -46,7 +46,7 @@ export default function RevealedWordContent({
     >
       {/* Top Header Section */}
       <div className="space-y-2 shrink-0 pb-2 border-b border-slate-200 dark:border-zinc-800">
-        <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center justify-between max-md:flex-wrap gap-2">
           <div className="flex items-center gap-2.5 flex-wrap">
             <h3 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white font-mono">
               {currentWord.word}
@@ -58,7 +58,7 @@ export default function RevealedWordContent({
             )}
             <button
               onClick={(e) => handleSpeak(currentWord.word, e)}
-              className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-1 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
+              className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-3 -m-2 md:m-0 md:p-1 rounded-full hover:bg-slate-100 dark:hover:bg-zinc-800"
               title="Phát âm từ vựng"
             >
               <Volume2 className="w-4 h-4" />
@@ -74,7 +74,7 @@ export default function RevealedWordContent({
                     onFlipBack();
                   }
                 }}
-                className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 flex items-center gap-1.5 bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 px-2.5 py-1 rounded-lg border border-cyan-200/60 dark:border-cyan-800/40 transition-colors"
+                className="text-[11px] font-mono text-cyan-700 dark:text-cyan-400 hover:text-cyan-800 dark:hover:text-cyan-300 flex items-center gap-1.5 bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/60 dark:hover:bg-cyan-900/60 px-2.5 py-1 max-md:min-h-10 rounded-lg border border-cyan-200/60 dark:border-cyan-800/40 transition-colors"
                 title="Lật thẻ về mặt trước"
               >
                 <RotateCcw className="w-3.5 h-3.5" />
@@ -122,7 +122,7 @@ export default function RevealedWordContent({
               return (
                 <div
                   key={idx}
-                  className="rounded-2xl bg-slate-50 dark:bg-zinc-900/90 p-4 border border-slate-200 dark:border-zinc-800/80 space-y-2.5 shadow-2xs hover:border-cyan-500/40 transition-colors"
+                  className="rounded-2xl bg-slate-50 dark:bg-zinc-900/90 p-3 md:p-4 border border-slate-200 dark:border-zinc-800/80 space-y-2.5 shadow-2xs hover:border-cyan-500/40 transition-colors"
                 >
                   {sense && (
                     <div className="flex items-center gap-1.5 text-xs">
@@ -135,13 +135,13 @@ export default function RevealedWordContent({
                     </div>
                   )}
                   <div className="flex items-start justify-between gap-3">
-                  <p className="text-sm md:text-base font-semibold text-slate-900 dark:text-zinc-100 font-mono leading-relaxed">
+                  <p className="text-sm md:text-base break-words max-md:min-w-0 font-semibold text-slate-900 dark:text-zinc-100 font-mono leading-relaxed">
                     "{highlightWord(ex.sentence_en, currentWord.word)}"
                   </p>
                   <button
                     onClick={(e) => handleSpeak(ex.sentence_en, e)}
                     title="Nghe câu ví dụ"
-                    className="p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition-colors shrink-0"
+                    className="p-3 -m-1.5 md:m-0 md:p-1.5 rounded-lg text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition-colors shrink-0"
                   >
                     <Volume2 className="w-4 h-4" />
                   </button>
@@ -159,7 +159,7 @@ export default function RevealedWordContent({
                       <BookOpen className="w-3.5 h-3.5" />
                       <span>Cú pháp & Phân tích ngữ pháp:</span>
                     </div>
-                    <div className="text-xs md:text-[13px] text-slate-800 dark:text-zinc-200 font-mono leading-relaxed bg-amber-50/70 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200/60 dark:border-amber-800/40">
+                    <div className="text-xs md:text-[13px] break-words text-slate-800 dark:text-zinc-200 font-mono leading-relaxed bg-amber-50/70 dark:bg-amber-950/20 p-3 rounded-xl border border-amber-200/60 dark:border-amber-800/40">
                       {ex.grammar_analysis}
                     </div>
                   </div>

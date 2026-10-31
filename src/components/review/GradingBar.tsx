@@ -63,38 +63,39 @@ export default function GradingBar({
         onClick={onKnown}
         disabled={isAdvancing}
         title="Bạn đã thuộc chắc từ này: không ôn nữa, thỉnh thoảng app hỏi lại ngẫu nhiên để kiểm chứng"
-        className={`${size} shrink-0 rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors`}
+        className={`${size} max-md:min-h-12 px-2 md:px-0 shrink-0 rounded-2xl border-2 border-emerald-500 bg-white dark:bg-zinc-950 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors`}
       >
         <span>✓ Tôi biết chắc từ này</span>
         {/* Letter tiles take letters from the keyboard: no D there */}
         {effectiveExerciseType !== "letter_tiles" && (
-          <kbd className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-[11px] font-mono">D</kbd>
+          <kbd className="hidden md:inline-block px-1.5 py-0.5 rounded bg-emerald-500/15 text-[11px] font-mono">D</kbd>
         )}
       </button>
     );
   return (
-    <div className="w-full mt-3 h-14 shrink-0 flex items-center justify-center">
+    // Phones: min height instead of fixed h-14 so the 2x2 grade grid can grow
+    <div className="w-full mt-3 max-md:min-h-14 md:h-14 shrink-0 flex items-center justify-center">
       {introMode ? (
-        <div className="w-full h-full flex gap-2">
+        <div className="w-full md:h-full flex gap-2">
           {knownButton("flex-1 h-full")}
           <button
             onClick={onIntroDone}
             disabled={isAdvancing}
             autoFocus
-            className="flex-[2] h-full rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md"
+            className="flex-[2] h-full max-md:min-h-12 px-2 md:px-0 rounded-2xl bg-cyan-600 hover:bg-cyan-500 text-white disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md"
           >
             <span>{onKnown ? "Học từ này" : "Đã đọc kỹ từ mới — học tiếp"} (sẽ hỏi lại sau vài thẻ)</span>
-            <kbd className="px-2 py-0.5 rounded bg-white/20 text-[11px] font-mono">Enter ↵</kbd>
+            <kbd className="hidden md:inline-block px-2 py-0.5 rounded bg-white/20 text-[11px] font-mono">Enter ↵</kbd>
           </button>
         </div>
       ) : pendingRating !== null ? (
-        <div className="w-full h-full flex gap-2">
+        <div className="w-full md:h-full flex gap-2">
           {onKnown && knownButton("flex-1 h-full")}
           <button
             onClick={onContinue}
             disabled={isAdvancing}
             autoFocus
-            className={`${onKnown ? "flex-[2]" : "w-full"} h-full rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md`}
+            className={`${onKnown ? "flex-[2]" : "w-full"} h-full max-md:min-h-12 px-2 md:px-0 rounded-2xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-slate-900 disabled:opacity-40 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-md`}
           >
             <span>Tiếp tục</span>
             <span className="text-[11px] opacity-70">
@@ -104,7 +105,7 @@ export default function GradingBar({
                 ? "(gặp lại ở cuối phiên)"
                 : `(gặp lại sau ${intervalPreviews[pendingRating as keyof IntervalPreviews]})`}
             </span>
-            <kbd className="px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
+            <kbd className="hidden md:inline-block px-2 py-0.5 rounded bg-white/20 dark:bg-black/10 text-[11px] font-mono">Enter ↵</kbd>
           </button>
         </div>
       ) : ["multiple_choice", "sentence_builder", "context_match", "meaning_match", "listening", "reverse_cloze", "free_writing", "letter_tiles"].includes(
@@ -114,7 +115,7 @@ export default function GradingBar({
           <button
             onClick={() => handleGrade(Rating.Again, effectiveExerciseType)}
             disabled={isAdvancing}
-            className="text-xs text-slate-400 hover:text-rose-500 font-medium flex items-center gap-1.5 transition-colors"
+            className="text-xs text-slate-400 hover:text-rose-500 font-medium max-md:min-h-10 flex items-center gap-1.5 transition-colors"
           >
             <SkipForward className="w-3.5 h-3.5" />
             <span>Chưa nhớ từ này, bỏ qua</span>
@@ -122,12 +123,12 @@ export default function GradingBar({
           <div className="text-[11px] text-slate-400 dark:text-zinc-500">{EXERCISE_LABEL_VN[effectiveExerciseType]}</div>
         </div>
       ) : (effectiveExerciseType === "flip" ? isFlipped : hasCheckedAnswer) ? (
-        <div className="w-full grid grid-cols-4 gap-3 h-full animate-in slide-in-from-bottom-2 duration-150 [&>button:disabled]:opacity-40 [&>button:disabled]:cursor-not-allowed">
+        <div className="w-full grid grid-cols-2 md:grid-cols-4 gap-2 md:gap-3 md:h-full animate-in slide-in-from-bottom-2 duration-150 [&>button:disabled]:opacity-40 [&>button:disabled]:cursor-not-allowed">
           {/* Again: Rating.Again (1) */}
           <button
             onClick={() => handleGrade(Rating.Again)}
             disabled={isAdvancing}
-            className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
+            className={`max-md:min-h-12 p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
               !isCorrect && effectiveExerciseType !== "flip"
                 ? "border-rose-400 dark:border-rose-500 bg-rose-100 dark:bg-rose-900/60 text-rose-900 dark:text-rose-200 ring-2 ring-rose-500/30 font-bold"
                 : "border-rose-200 dark:border-rose-800/80 bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-700 dark:text-rose-300 font-medium"
@@ -139,7 +140,7 @@ export default function GradingBar({
                 {intervalPreviews[Rating.Again]}
               </span>
             </div>
-            <span className="text-[10px] text-rose-600 dark:text-rose-400/80 font-mono">{simple ? "phím 1" : "Again (1)"}</span>
+            <span className="hidden md:inline text-[10px] text-rose-600 dark:text-rose-400/80 font-mono">{simple ? "phím 1" : "Again (1)"}</span>
           </button>
 
           {/* Hard: Rating.Hard (2) */}
@@ -147,7 +148,7 @@ export default function GradingBar({
             onClick={() => handleGrade(Rating.Hard)}
             disabled={isAdvancing || onlyAgain}
             title={onlyAgain ? "Đã xem đáp án: chỉ chấm Quên" : undefined}
-            className="p-2 md:p-3 rounded-2xl border border-amber-200 dark:border-amber-800/80 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
+            className="max-md:min-h-12 p-2 md:p-3 rounded-2xl border border-amber-200 dark:border-amber-800/80 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/40 dark:hover:bg-amber-900/60 text-amber-800 dark:text-amber-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
           >
             <div className="flex items-center gap-1.5">
               <span className="font-bold">Khó</span>
@@ -155,7 +156,7 @@ export default function GradingBar({
                 {intervalPreviews[Rating.Hard]}
               </span>
             </div>
-            <span className="text-[10px] text-amber-700 dark:text-amber-400/80 font-mono">{simple ? "phím 2" : "Hard (2)"}</span>
+            <span className="hidden md:inline text-[10px] text-amber-700 dark:text-amber-400/80 font-mono">{simple ? "phím 2" : "Hard (2)"}</span>
           </button>
 
           {/* Good: Rating.Good (3) */}
@@ -163,7 +164,7 @@ export default function GradingBar({
             onClick={() => handleGrade(Rating.Good)}
             disabled={isAdvancing || onlyAgain}
             title={onlyAgain ? "Đã xem đáp án: chỉ chấm Quên" : undefined}
-            className={`p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
+            className={`max-md:min-h-12 p-2 md:p-3 rounded-2xl border text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm ${
               isCorrect
                 ? "border-blue-400 dark:border-blue-500 bg-blue-100 dark:bg-blue-900/60 text-blue-900 dark:text-blue-200 ring-2 ring-blue-500/30 font-bold"
                 : "border-blue-200 dark:border-blue-800/80 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/60 text-blue-800 dark:text-blue-300 font-medium"
@@ -175,7 +176,7 @@ export default function GradingBar({
                 {intervalPreviews[Rating.Good]}
               </span>
             </div>
-            <span className="text-[10px] text-blue-700 dark:text-blue-400/80 font-mono">{simple ? "phím 3" : "Good (3)"}</span>
+            <span className="hidden md:inline text-[10px] text-blue-700 dark:text-blue-400/80 font-mono">{simple ? "phím 3" : "Good (3)"}</span>
           </button>
 
           {/* Easy: Rating.Easy (4) */}
@@ -185,7 +186,7 @@ export default function GradingBar({
             title={
               onlyAgain ? "Đã xem đáp án: chỉ chấm Quên" : !allowEasy ? "Bài hiểu nghĩa chấm tối đa là Nhớ" : undefined
             }
-            className="p-2 md:p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
+            className="max-md:min-h-12 p-2 md:p-3 rounded-2xl border border-emerald-200 dark:border-emerald-800/80 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 font-medium text-xs flex flex-col items-center justify-center gap-0.5 transition-colors shadow-sm"
           >
             <div className="flex items-center gap-1.5">
               <span className="font-bold">Dễ</span>
@@ -193,44 +194,44 @@ export default function GradingBar({
                 {intervalPreviews[Rating.Easy]}
               </span>
             </div>
-            <span className="text-[10px] text-emerald-700 dark:text-emerald-400/80 font-mono">{simple ? "phím 4" : "Easy (4)"}</span>
+            <span className="hidden md:inline text-[10px] text-emerald-700 dark:text-emerald-400/80 font-mono">{simple ? "phím 4" : "Easy (4)"}</span>
           </button>
         </div>
       ) : effectiveExerciseType === "flip" ? (
-        <div className="w-full h-full flex gap-2">
+        <div className="w-full md:h-full flex gap-2">
           {knownButton("flex-1 h-full")}
           <button
             onClick={() => setIsFlipped(true)}
-            className="flex-[2] h-full rounded-2xl bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-slate-300 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
+            className="flex-[2] h-full max-md:min-h-12 px-2 md:px-0 rounded-2xl bg-white hover:bg-slate-100 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-slate-300 dark:border-zinc-800 text-slate-800 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-2 transition-colors shadow-sm"
           >
             <span>Lật thẻ xem đáp án</span>
-            <kbd className="px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[11px] font-mono text-slate-700 dark:text-zinc-300">
+            <kbd className="hidden md:inline-block px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-[11px] font-mono text-slate-700 dark:text-zinc-300">
               Space
             </kbd>
           </button>
         </div>
       ) : effectiveExerciseType === "cloze" ? (
-        <div className="w-full h-full">
+        <div className="w-full md:h-full">
           <button
             onClick={handleCheckAnswer}
             disabled={!userInput.trim() || isAdvancing}
-            className="w-full h-full rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20"
+            className="w-full h-full max-md:min-h-12 rounded-2xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-600/20"
           >
             <span>Kiểm tra đáp án</span>
-            <kbd className="px-2 py-0.5 rounded bg-indigo-700/60 border border-indigo-400/40 text-[11px] font-mono text-indigo-100">
+            <kbd className="hidden md:inline-block px-2 py-0.5 rounded bg-indigo-700/60 border border-indigo-400/40 text-[11px] font-mono text-indigo-100">
               Enter ↵
             </kbd>
           </button>
         </div>
       ) : (
-        <div className="w-full h-full">
+        <div className="w-full md:h-full">
           <button
             onClick={handleCheckAnswer}
             disabled={!userInput.trim() || isAdvancing}
-            className="w-full h-full rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20"
+            className="w-full h-full max-md:min-h-12 rounded-2xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-600/20"
           >
             <span>Kiểm tra chính tả</span>
-            <kbd className="px-2 py-0.5 rounded bg-emerald-700/60 border border-emerald-400/40 text-[11px] font-mono text-emerald-100">
+            <kbd className="hidden md:inline-block px-2 py-0.5 rounded bg-emerald-700/60 border border-emerald-400/40 text-[11px] font-mono text-emerald-100">
               Enter ↵
             </kbd>
           </button>

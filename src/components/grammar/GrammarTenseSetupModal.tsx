@@ -23,8 +23,8 @@ export default function GrammarTenseSetupModal({ onDone }: GrammarTenseSetupModa
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-0 md:p-4 animate-in fade-in duration-200">
+      <div className="w-full max-w-2xl h-full md:h-auto max-h-[100dvh] md:max-h-[90vh] overflow-y-auto rounded-none md:rounded-2xl bg-white dark:bg-zinc-900 max-md:border-0 md:border border-slate-200 dark:border-zinc-800 shadow-2xl p-4 md:p-6 space-y-5 max-md:flex max-md:flex-col max-md:justify-between">
         {/* Header */}
         <div className="space-y-2">
           <div className="flex items-center gap-2.5">
@@ -32,7 +32,7 @@ export default function GrammarTenseSetupModal({ onDone }: GrammarTenseSetupModa
               <BookOpen className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+              <h2 className="text-lg md:text-xl font-bold text-slate-900 dark:text-white">
                 Chọn thì bắt đầu học
               </h2>
               <span className="text-xs text-cyan-700 dark:text-cyan-400 font-medium inline-flex items-center gap-1">
@@ -41,7 +41,7 @@ export default function GrammarTenseSetupModal({ onDone }: GrammarTenseSetupModa
             </div>
           </div>
 
-          <p className="text-sm text-slate-600 dark:text-zinc-300 leading-relaxed pt-1">
+          <p className="text-xs md:text-sm text-slate-600 dark:text-zinc-300 leading-relaxed pt-1">
             Trước đây app tự động bật toàn bộ các chương và các thì, dễ gây ngợp khi làm bài và kiểm tra. Giờ đây bạn có thể chọn thì mình muốn tập trung học trước — mặc định là <b>Thì hiện tại đơn</b>.
           </p>
         </div>
@@ -50,8 +50,8 @@ export default function GrammarTenseSetupModal({ onDone }: GrammarTenseSetupModa
         <TenseSelectionPicker value={selectedTenses} onChange={setSelectedTenses} />
 
         {/* Bottom actions */}
-        <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-zinc-800">
-          <span className="text-xs text-slate-500 dark:text-zinc-400">
+        <div className="flex flex-col-reverse sm:flex-row max-md:gap-3 items-stretch sm:items-center justify-between pt-2 border-t border-slate-200 dark:border-zinc-800">
+          <span className="text-xs text-slate-500 dark:text-zinc-400 max-sm:text-center">
             Có thể thay đổi bất cứ lúc nào trong tab <b>Ngữ pháp</b>
           </span>
 
@@ -59,7 +59,7 @@ export default function GrammarTenseSetupModal({ onDone }: GrammarTenseSetupModa
             type="button"
             onClick={handleConfirm}
             disabled={saving || selectedTenses.length === 0}
-            className="inline-flex items-center gap-2 py-2.5 px-6 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold transition-colors disabled:opacity-50 shadow-sm"
+            className="inline-flex items-center max-md:justify-center gap-2 py-3 md:py-2.5 px-6 max-md:min-h-[44px] rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold transition-colors disabled:opacity-50 shadow-sm w-full sm:w-auto"
           >
             <CheckCircle2 className="w-4 h-4" />
             Xác nhận & Bắt đầu học

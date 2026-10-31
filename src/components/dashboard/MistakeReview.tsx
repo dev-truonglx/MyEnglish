@@ -52,7 +52,7 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
   const ok = result !== null && result !== Rating.Again;
 
   return (
-    <div className="p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-4">
+    <div className="p-3.5 md:p-5 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-4">
       <div className="flex items-center justify-between text-[11px] text-slate-500 dark:text-zinc-400">
         <span className="font-semibold uppercase tracking-wider">Sửa lỗi bạn từng viết</span>
         <span className="font-mono">
@@ -103,7 +103,7 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
           data-lpignore="true"
           data-1p-ignore="true"
           data-form-type="other"
-          className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
+          className="w-full p-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-950 text-base md:text-sm font-mono text-slate-900 dark:text-white focus:outline-none focus:border-cyan-500"
           placeholder="Cách viết đúng…"
         />
         {result === null && (
@@ -112,16 +112,24 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
               type="button"
               onClick={() => setHint(true)}
               disabled={hint}
-              className="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-amber-600 disabled:text-amber-600"
+              className="inline-flex items-center gap-1 max-md:min-h-10 py-2 md:py-0 text-[11px] text-slate-500 hover:text-amber-600 disabled:text-amber-600"
             >
               <Lightbulb className="w-3.5 h-3.5" />
               {hint ? `Loại lỗi: ${MISTAKE_CATEGORY_LABEL[m.category ?? "other"]}` : "Gợi ý loại lỗi"}
             </button>
             <div className="flex items-center gap-2">
-              <button type="button" onClick={() => setResult(Rating.Again)} className="text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200">
+              <button
+                type="button"
+                onClick={() => setResult(Rating.Again)}
+                className="max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:px-2 max-md:py-1 md:p-0 text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-zinc-200"
+              >
                 Không nhớ
               </button>
-              <button type="submit" disabled={!input.trim()} className="py-2 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40">
+              <button
+                type="submit"
+                disabled={!input.trim()}
+                className="max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center py-2 px-4 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-xs font-semibold disabled:opacity-40"
+              >
                 Kiểm tra
               </button>
             </div>
@@ -145,7 +153,7 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
             {!ok && input.trim() && (
               <button
                 onClick={() => next(Rating.Hard)}
-                className="py-2 px-3 rounded-xl border border-slate-300 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                className="max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center py-2 px-3 rounded-xl border border-slate-300 dark:border-zinc-700 text-xs text-slate-700 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
               >
                 Tôi chỉ gõ nhầm
               </button>
@@ -153,7 +161,7 @@ export default function MistakeReview({ mistakes, onDone }: MistakeReviewProps) 
             <button
               onClick={() => next(ok ? Rating.Good : Rating.Again)}
               autoFocus
-              className="inline-flex items-center gap-1.5 py-2 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold"
+              className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1.5 py-2 px-4 rounded-xl bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold"
             >
               Tiếp
               <ArrowRight className="w-3.5 h-3.5" />

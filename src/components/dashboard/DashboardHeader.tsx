@@ -91,7 +91,7 @@ export default function DashboardHeader({
 
   // Word library: cards or table
   const viewToggle = (
-    <div className="flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
+    <div className="hidden md:flex items-center bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800">
       <button
         onClick={() => setViewMode("gallery")}
         title="Dạng thẻ" aria-label="Xem dạng thẻ"
@@ -117,12 +117,13 @@ export default function DashboardHeader({
 
   return (
     <>
-    <header className="min-h-14 py-2 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-6 flex items-center justify-between gap-3 shrink-0 backdrop-blur-md">
+    {/* Phones: the search takes a row of its own, the controls wrap under it */}
+    <header className="min-h-14 py-2 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-3 md:px-6 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 shrink-0 backdrop-blur-md">
       {/* Search Bar: it only filters the word library, so it is only shown there */}
       {activeTab !== "library" ? (
-        <div className="flex-1" />
+        <div className="hidden md:block flex-1" />
       ) : (
-      <div className="flex-1 min-w-[120px] max-w-md relative">
+      <div className="flex-1 min-w-full md:min-w-[120px] max-w-none md:max-w-md relative">
         <Search className="w-4 h-4 text-slate-400 dark:text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2" />
         <input
           ref={searchInputRef}
@@ -139,17 +140,17 @@ export default function DashboardHeader({
           data-lpignore="true"
           data-1p-ignore="true"
           data-form-type="other"
-          className="w-full bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 rounded-lg pl-9 pr-14 py-1.5 text-xs text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
+          className="w-full bg-slate-100/80 dark:bg-zinc-900/80 border border-slate-200 dark:border-zinc-800 rounded-lg pl-9 pr-14 py-2 md:py-1.5 text-base md:text-xs text-slate-900 dark:text-zinc-100 placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none focus:border-cyan-500/50 transition-colors"
         />
         {searchQuery ? (
           <button
             onClick={() => setSearchQuery("")}
-            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
+            className="absolute right-0 md:right-2.5 top-1/2 -translate-y-1/2 p-3.5 md:p-0 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300"
           >
             <X className="w-3.5 h-3.5" />
           </button>
         ) : (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 text-[10px] font-mono text-slate-400 dark:text-zinc-500 pointer-events-none">
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 hidden md:flex items-center gap-1 text-[10px] font-mono text-slate-400 dark:text-zinc-500 pointer-events-none">
             <kbd className="px-1.5 py-0.5 rounded bg-slate-200 dark:bg-zinc-800 border border-slate-300 dark:border-zinc-700 text-slate-600 dark:text-zinc-400">/</kbd>
           </div>
         )}
@@ -157,13 +158,13 @@ export default function DashboardHeader({
       )}
 
       {/* Right Header Controls: wrap onto a second row in a narrow window instead of being cut off */}
-      <div className="min-w-0 flex flex-wrap items-center justify-end gap-2">
+      <div className="min-w-0 flex-1 md:flex-initial flex flex-wrap items-center justify-end gap-2">
         {/* Reminders snoozed (corner reminder, popup or tray): until when, and undo in one click */}
         {snooze.snoozedUntil && (
           <div
             role="status"
             title={`Nhắc học đang hoãn đến ${snoozeEndText(snooze.snoozedUntil)} (còn ${Math.max(1, Math.ceil((snooze.snoozedUntil - Date.now()) / 60_000))} phút)`}
-            className="inline-flex items-center rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-300 shadow-sm"
+            className="inline-flex items-center max-md:min-h-10 rounded-lg border border-amber-200 dark:border-amber-800/60 bg-amber-50 dark:bg-amber-950/40 text-xs text-amber-800 dark:text-amber-300 shadow-sm"
           >
             <span className="inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1">
               <BellOff className="w-3.5 h-3.5 shrink-0" />
@@ -188,7 +189,7 @@ export default function DashboardHeader({
         <button
           onClick={() => setActiveTab("analytics")}
           title={`Chuỗi: ${streakStats.currentStreak} ngày • Hôm nay: ${streakStats.todayCount}/${streakStats.dailyGoal} câu (bấm để xem tiến độ)`}
-          className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-xs transition-colors shadow-sm"
+          className="flex items-center gap-2 px-2.5 py-1 max-md:min-h-10 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700 text-xs transition-colors shadow-sm"
         >
           <div className="flex items-center gap-1 font-mono font-bold text-orange-600 dark:text-orange-400">
             <Flame className="w-3.5 h-3.5" />
@@ -228,7 +229,7 @@ export default function DashboardHeader({
           onClick={handleQuickReplenish}
           disabled={isQuickReplenishing}
           title={`Tự động sinh 3 từ vựng & bài tập ngữ pháp chuẩn cấp độ ${effectiveLevel}`}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 max-md:min-h-10 rounded-lg bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-400 hover:to-orange-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95 disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {isQuickReplenishing ? (
             <>
@@ -249,7 +250,7 @@ export default function DashboardHeader({
           <button
             onClick={onStartFocus}
             title="Phiên tập trung: học trọn vài phút, ẩn mọi thứ khác và tắt nhắc nhở"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm shadow-violet-600/30 transition-all active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 max-md:min-h-10 rounded-lg bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-500 hover:to-indigo-500 text-white text-xs font-semibold shadow-sm shadow-violet-600/30 transition-all active:scale-95"
           >
             <Crosshair className="w-3.5 h-3.5" />
             <span>Tập trung</span>
@@ -270,7 +271,7 @@ export default function DashboardHeader({
                     : `Học nhanh ${dueCount} thẻ`
                   : "Bắt đầu buổi ôn tập nhanh (Flashcards & Bài tập)"
             }
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 max-md:min-h-10 rounded-lg bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold shadow-sm transition-all active:scale-95"
           >
             <Zap className="w-3.5 h-3.5 fill-white text-white" />
             <span>{isReviewing ? "Tiếp tục ôn" : "Ôn tập ngay"}</span>
@@ -289,7 +290,7 @@ export default function DashboardHeader({
         <button
           onClick={() => setActiveTab("capture")}
           title={AI_VOCAB_ENABLED ? "Thêm từ mới" : "Tìm một từ trong bộ Oxford để học sớm"}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-sm transition-all"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 max-md:min-h-10 rounded-lg bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs font-semibold shadow-sm transition-all"
         >
           <Plus className="w-3.5 h-3.5" />
           <span>{AI_VOCAB_ENABLED ? "Thêm từ" : "Từ Oxford"}</span>
@@ -300,11 +301,11 @@ export default function DashboardHeader({
 
     {/* Simple mode: the tabs of the current sidebar entry (e.g. Ôn tập · Từ đã học · Lộ trình từ vựng) */}
     {group && subTabs && (
-      <div className="h-10 shrink-0 border-b border-slate-200 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/30 px-6 flex items-center">
+      <div className="max-md:min-h-10 md:h-10 shrink-0 border-b border-slate-200 dark:border-zinc-800/80 bg-white/60 dark:bg-zinc-900/30 px-3 md:px-6 py-1 md:py-0 flex items-center">
         <div
           role="tablist"
           aria-label={group.label}
-          className="inline-flex items-center gap-0.5 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800"
+          className="inline-flex flex-wrap md:flex-nowrap max-w-full md:max-w-none items-center gap-0.5 bg-slate-100 dark:bg-zinc-900 p-0.5 rounded-lg border border-slate-200 dark:border-zinc-800"
         >
           {subTabs.map((t) => {
             const selected = t.tab === activeTab;
@@ -315,7 +316,7 @@ export default function DashboardHeader({
                 role="tab"
                 aria-selected={selected}
                 onClick={() => setActiveTab(t.tab)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${selected
+                className={`px-3 py-1 max-md:min-h-10 rounded-md text-xs font-medium transition-colors flex items-center gap-1.5 ${selected
                   ? "bg-white dark:bg-zinc-800 text-cyan-700 dark:text-cyan-400 shadow-sm border border-slate-200 dark:border-transparent"
                   : "border border-transparent text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
                   }`}

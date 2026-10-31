@@ -73,7 +73,7 @@ export default function LearningInsightsCard() {
   }
 
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 space-y-5 shadow-sm">
+    <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 p-5 max-md:p-4 space-y-5 shadow-sm">
       <div className="flex items-center gap-2">
         <Target className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
         <h3 className="text-sm font-bold text-slate-900 dark:text-white">Hiệu quả ghi nhớ (30 ngày)</h3>
@@ -108,6 +108,7 @@ export default function LearningInsightsCard() {
         {insights.calibration.length === 0 ? (
           <p className="text-[11px] text-slate-400 dark:text-zinc-500">Chưa có lượt ôn nào của thẻ đã thuộc kể từ khi bắt đầu ghi dữ liệu này.</p>
         ) : (
+          <div className="overflow-x-auto">
           <table className="w-full text-[11px]">
             <thead>
               <tr className="text-slate-500 dark:text-zinc-400 text-left">
@@ -128,6 +129,7 @@ export default function LearningInsightsCard() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 

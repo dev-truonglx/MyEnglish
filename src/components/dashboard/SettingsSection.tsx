@@ -48,7 +48,7 @@ export default function SettingsSection({ id, icon, title, description, summary,
 
   return (
     <section id={`settings-${id}`} className={`scroll-mt-4 rounded-2xl border ${shell}`}>
-      <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-3 px-5 py-4 text-left">
+      <button type="button" onClick={toggle} aria-expanded={open} className="w-full flex items-center gap-3 px-3.5 md:px-5 py-3 md:py-4 text-left">
         <span
           className={`w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${
             tone === "primary"
@@ -67,7 +67,7 @@ export default function SettingsSection({ id, icon, title, description, summary,
         {!open && summary && <span className="hidden sm:block shrink-0 text-xs text-slate-500 dark:text-zinc-400 text-right max-w-[45%] truncate">{summary}</span>}
         <ChevronDown className={`w-4 h-4 shrink-0 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
-      {open && <div className="px-5 pb-5 space-y-4">{children}</div>}
+      {open && <div className="px-3.5 md:px-5 pb-4 md:pb-5 space-y-4">{children}</div>}
     </section>
   );
 }

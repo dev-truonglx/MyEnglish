@@ -109,6 +109,7 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
         </div>
         {result && (
           <div className="p-3 rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-[11px] space-y-2">
+            <div className="overflow-x-auto">
             <table className="w-full font-mono">
               <thead>
                 <tr className="text-slate-500 dark:text-zinc-400 text-left">
@@ -134,6 +135,7 @@ export default function AdvancedLearningSettings({ onWordsChanged }: { onWordsCh
                 </tr>
               </tbody>
             </table>
+            </div>
             <p className={improves ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}>
               {improves
                 ? "Tham số riêng dự đoán trí nhớ của bạn tốt hơn mặc định — nên áp dụng."

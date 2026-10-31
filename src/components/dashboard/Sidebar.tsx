@@ -54,6 +54,10 @@ interface SidebarProps {
   /** Words often forgotten, and those of them due now (badge of "Từ hay quên") */
   forgottenCount?: number;
   forgottenDue?: number;
+  /** "rail": the fixed left column (md and up only); "drawer": the content of the mobile drawer, shown at any width */
+  variant?: "rail" | "drawer";
+  /** Called after any navigation click (the mobile drawer closes itself with it) */
+  onNavigate?: () => void;
 }
 
 /** LEFT SIDEBAR: logo + update badge, navigation, learning stats, account & theme switcher */
@@ -67,6 +71,8 @@ export default function Sidebar({
   simpleMode = false,
   forgottenCount = 0,
   forgottenDue = 0,
+  variant = "rail",
+  onNavigate,
 }: SidebarProps) {
   const words = useWordsStore((s) => s.words);
   // Marked "Đã biết": the old way still waiting for its one review, or a new word set aside (suspended while still
@@ -138,6 +144,11 @@ export default function Sidebar({
     return () => window.removeEventListener("myenglish-theme-changed", onThemeChanged);
   }, []);
 
+  const navigate = (tab: DashboardTab) => {
+    setActiveTab(tab);
+    onNavigate?.();
+  };
+
   const countBadge = (n: number, highlight = false) =>
     n > 0 ? (
       <span
@@ -199,10 +210,10 @@ export default function Sidebar({
             label: g.label,
             ...groupLook[g.id],
             active,
-            onClick: () => setActiveTab(g.tabs[0].tab),
+            onClick: () => navigate(g.tabs[0].tab),
           };
         })
-      : navItems.map((item) => ({ ...item, key: item.tab, active: activeTab === item.tab, onClick: () => setActiveTab(item.tab) }));
+      : navItems.map((item) => ({ ...item, key: item.tab, active: activeTab === item.tab, onClick: () => navigate(item.tab) }));
 
   // "Truy cập nhanh": two tiles under the list, in both modes
   const quickItems: Array<{ tab: DashboardTab; label: string; icon: typeof BookOpen; tone: string; activeTone: string; badge?: ReactNode; title: string }> = [
@@ -243,7 +254,11 @@ export default function Sidebar({
       : `${streakStats.todayCount}/${streakStats.dailyGoal} câu`;
 
   return (
-    <aside className="w-64 min-h-0 border-r border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/50 flex flex-col shrink-0 select-none">
+    <aside
+      className={`${
+        variant === "drawer" ? "flex w-72 max-w-[85vw] h-full" : "hidden md:flex w-64"
+      } min-h-0 border-r border-slate-200 dark:border-zinc-800/80 bg-white dark:bg-zinc-900/50 flex-col shrink-0 select-none`}
+    >
       {/* Logo & App title (always visible) */}
       <div className="px-4 pt-4 pb-3 shrink-0">
         <div className="flex items-center gap-3">
@@ -449,7 +464,7 @@ export default function Sidebar({
               return (
                 <button
                   key={item.tab}
-                  onClick={() => setActiveTab(item.tab)}
+                  onClick={() => navigate(item.tab)}
                   aria-current={active ? "page" : undefined}
                   title={item.title}
                   className={`relative flex flex-col items-start gap-1 px-2.5 py-2 rounded-xl border text-left text-xs font-semibold transition-all active:scale-[0.97] ${item.tone} ${
@@ -470,7 +485,7 @@ export default function Sidebar({
         {/* Compact stats: streak + today's goal, then the two word tiers (click: Tiến độ) */}
         <button
           type="button"
-          onClick={() => setActiveTab("analytics")}
+          onClick={() => navigate("analytics")}
           title={`${streakStats.todayCount > 0 ? "Hôm nay đã giữ chuỗi ✓" : "Hôm nay chưa học: chỉ cần 1 câu là giữ được chuỗi"}${
             streakStats.freezesAvailable > 0
               ? ` • ${streakStats.freezesAvailable} lượt giữ chuỗi: nếu lỡ 1 ngày, chuỗi vẫn được giữ`
@@ -521,14 +536,14 @@ export default function Sidebar({
         </button>
 
         {/* Weekly XP rank: one line under the streak (signed-in learners) */}
-        <RankLine onOpen={() => setActiveTab("leaderboard")} />
+        <RankLine onOpen={() => navigate("leaderboard")} />
       </div>
 
       {/* Account and theme on one row (always visible) */}
       <div className="p-3 border-t border-slate-200 dark:border-zinc-800/80 bg-slate-50/50 dark:bg-zinc-900/30 flex items-center gap-2 shrink-0">
         {/* Account: sign-in, sync, leaderboard */}
         <button
-          onClick={() => setActiveTab("account")}
+          onClick={() => navigate("account")}
           aria-current={activeTab === "account" ? "page" : undefined}
           title={accountUser ? `Đã đăng nhập: ${accountUser.email}` : "Đăng nhập để đồng bộ tiến trình và đua XP"}
           className={`min-w-0 flex-1 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border transition-colors text-left shadow-sm ${

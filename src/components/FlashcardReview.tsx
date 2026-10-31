@@ -246,7 +246,7 @@ export default function FlashcardReview({
   // Session Completed view with Learning Evaluation Metrics
   if (sessionCompleted) {
     return (
-      <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+      <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-3 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
         {knownMark && (
           <div
             role="status"
@@ -264,7 +264,7 @@ export default function FlashcardReview({
             </div>
             <button
               onClick={undoMarkKnown}
-              className="shrink-0 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
+              className="shrink-0 px-2.5 py-1 max-md:min-h-10 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
             >
               Hoàn tác
             </button>
@@ -300,9 +300,9 @@ export default function FlashcardReview({
 
   if (!currentWord) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center p-8 text-center space-y-4">
+      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-8 text-center space-y-4">
         <p className="text-slate-500 dark:text-zinc-400 text-xs">Không có thẻ nào cần ôn tập hôm nay.</p>
-        <button onClick={leave} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
+        <button onClick={leave} className="max-md:min-h-10 text-xs text-cyan-600 dark:text-cyan-400 hover:underline">
           Quay lại
         </button>
       </div>
@@ -313,7 +313,7 @@ export default function FlashcardReview({
   const answerShown = isIntroCard || hasCheckedAnswer || (effectiveExerciseType === "flip" && isFlipped);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+    <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-3 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
       {focus && (
         <FocusBar
           remainingMs={focusSession.remainingMs}
@@ -385,7 +385,7 @@ export default function FlashcardReview({
           </div>
           <button
             onClick={undoMarkKnown}
-            className="shrink-0 px-2.5 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
+            className="shrink-0 px-2.5 py-1 max-md:min-h-10 rounded-xl bg-white/20 hover:bg-white/30 text-white font-semibold text-xs transition-colors"
           >
             Hoàn tác
           </button>
@@ -404,7 +404,7 @@ export default function FlashcardReview({
               }
             : undefined
         }
-        className={`w-full flex-1 min-h-[200px] max-h-[620px] my-auto overflow-y-auto overflow-x-hidden rounded-3xl border bg-white dark:bg-zinc-950 p-5 md:p-6 shadow-xl dark:shadow-2xl flex flex-col justify-between transition-all relative ${
+        className={`w-full flex-1 min-h-[200px] max-h-[620px] my-auto overflow-y-auto overflow-x-hidden rounded-3xl border bg-white dark:bg-zinc-950 p-4 md:p-6 shadow-xl dark:shadow-2xl flex flex-col justify-between transition-all relative ${
           answerShown ? "select-text" : ""
         } ${
           effectiveExerciseType === "flip" ? "cursor-pointer hover:border-slate-400 dark:hover:border-zinc-700/80" : ""
@@ -649,7 +649,7 @@ export default function FlashcardReview({
       </div>
 
       {/* BOTTOM ACTION BAR - Always present with fixed height (h-14) so card NEVER jumps */}
-      {isPretestCard ? <div className="w-full mt-3 h-14 shrink-0" /> : <GradingBar
+      {isPretestCard ? <div className="hidden md:block w-full mt-3 h-14 shrink-0" /> : <GradingBar
         effectiveExerciseType={effectiveExerciseType}
         handleGrade={handleGrade}
         isAdvancing={isAdvancing}
@@ -690,7 +690,7 @@ export default function FlashcardReview({
               <button
                 autoFocus
                 onClick={() => setConfirmingExit(false)}
-                className="px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors"
+                className="px-3 py-1.5 max-md:min-h-10 rounded-lg bg-cyan-600 hover:bg-cyan-700 text-white text-xs font-semibold transition-colors"
               >
                 Học tiếp
               </button>
@@ -701,7 +701,7 @@ export default function FlashcardReview({
                   if (reviewCount > 0) exitEarly();
                   else onExit();
                 }}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                className="px-3 py-1.5 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 text-xs hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
               >
                 Thoát
               </button>

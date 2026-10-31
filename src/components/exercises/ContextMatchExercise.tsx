@@ -229,9 +229,9 @@ export default function ContextMatchExercise({
   };
 
   return (
-    <div className="w-full max-w-2xl mx-auto space-y-6 animate-in fade-in duration-200">
+    <div className="w-full max-w-2xl mx-auto space-y-4 md:space-y-6 animate-in fade-in duration-200">
       {/* Exercise header */}
-      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-5 text-center space-y-2 shadow-sm">
+      <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-5 text-center space-y-2 shadow-sm">
         <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-purple-50 dark:bg-purple-950/60 text-purple-700 dark:text-purple-400 border border-purple-200/50 dark:border-purple-800/40">
           <Link2 className="w-3 h-3" />
           <span>Ghép từ vào ngữ cảnh câu thích hợp</span>
@@ -242,7 +242,7 @@ export default function ContextMatchExercise({
       </div>
 
       {/* Matching grid: row i holds word i and sentence i, so both columns line up */}
-      <div className="grid grid-cols-[minmax(max-content,2fr)_minmax(0,5fr)] gap-x-3 gap-y-2.5">
+      <div className="grid grid-cols-[minmax(0,2.2fr)_minmax(0,4.8fr)] md:grid-cols-[minmax(max-content,2fr)_minmax(0,5fr)] gap-x-2 md:gap-x-3 gap-y-2 md:gap-y-2.5">
         <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Từ vựng</h4>
         <h4 className="text-xs font-semibold text-slate-500 dark:text-zinc-400 uppercase tracking-wider px-1">Câu có chỗ trống</h4>
         {pairs.map((p, idx) => {
@@ -279,13 +279,13 @@ export default function ContextMatchExercise({
       </div>
 
       {/* Action Bar */}
-      <div className="flex items-center justify-between pt-2">
+      <div className="flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-0 pt-2">
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={handleReset}
             disabled={Object.keys(matches).length === 0 || isAnswered}
-            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 disabled:opacity-40 transition-colors max-md:min-h-10"
           >
             <RotateCcw className="w-3.5 h-3.5" />
             <span>Làm lại ghép cặp</span>
@@ -294,7 +294,7 @@ export default function ContextMatchExercise({
             <button
               type="button"
               onClick={handleGiveUp}
-              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold"
+              className="inline-flex items-center gap-1 text-xs text-rose-500 hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300 transition-colors font-semibold max-md:min-h-10"
               title="Xem đáp án ghép cặp"
             >
               <Eye className="w-3.5 h-3.5" />
@@ -306,16 +306,16 @@ export default function ContextMatchExercise({
         <button
           onClick={handleCheck}
           disabled={!allMatched || isAnswered}
-          className="px-5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 shadow-sm transition-all"
+          className="px-4 md:px-5 py-2.5 md:py-2 max-md:min-h-10 rounded-xl text-xs font-semibold bg-gradient-to-r from-cyan-600 to-blue-600 text-white hover:from-cyan-500 hover:to-blue-500 disabled:opacity-50 shadow-sm transition-all"
         >
           Kiểm tra kết quả
         </button>
       </div>
 
       {/* Dedicated Stable Feedback Area - ALWAYS occupies 48px so layout NEVER jumps */}
-      <div className="h-[48px] min-h-[48px] flex items-center justify-center w-full">
+      <div className="min-h-[48px] md:h-[48px] flex items-center justify-center w-full">
         {isAnswered && isCorrect ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-emerald-800 dark:text-emerald-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <CheckCircle2 className="w-4 h-4 text-emerald-500 shrink-0" />
             <span className="font-semibold">
               {byElimination
@@ -324,14 +324,14 @@ export default function ContextMatchExercise({
             </span>
           </div>
         ) : isAnswered && isCorrect === false ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200 dark:border-rose-800 text-rose-800 dark:text-rose-200 text-xs flex items-center gap-2 shadow-xs animate-in fade-in duration-150">
             <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
             <span className="font-semibold">
               Đã hiển thị các cặp ghép đúng. Từ "{word.word}" sẽ được ôn lại sớm. Nhấn Enter hoặc Tiếp tục.
             </span>
           </div>
         ) : isCorrect === false && !isAnswered ? (
-          <div className="w-full h-full px-3.5 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex items-center justify-between shadow-xs animate-in fade-in duration-150">
+          <div className="w-full h-full max-md:p-2.5 md:px-3.5 md:py-0 rounded-xl bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900 text-rose-800 dark:text-rose-200 text-xs flex flex-col md:flex-row items-center justify-between gap-2 md:gap-0 shadow-xs animate-in fade-in duration-150">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
               <span>Có cặp chưa khớp, đổi lại vị trí rồi thử tiếp nhé!</span>
@@ -340,14 +340,14 @@ export default function ContextMatchExercise({
               <button
                 type="button"
                 onClick={handleReset}
-                className="px-2.5 py-1 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 transition-colors text-rose-700 dark:text-rose-200 text-xs"
+                className="px-2.5 py-1.5 md:py-1 max-md:min-h-10 rounded-lg bg-rose-100 dark:bg-rose-900/60 font-semibold hover:bg-rose-200 transition-colors text-rose-700 dark:text-rose-200 text-xs"
               >
                 Ghép lại
               </button>
               <button
                 type="button"
                 onClick={handleGiveUp}
-                className="px-2.5 py-1 rounded-lg bg-rose-200/70 hover:bg-rose-300/80 dark:bg-rose-900/90 text-rose-800 dark:text-rose-100 font-semibold transition-colors flex items-center gap-1 text-xs"
+                className="px-2.5 py-1.5 md:py-1 max-md:min-h-10 rounded-lg bg-rose-200/70 hover:bg-rose-300/80 dark:bg-rose-900/90 text-rose-800 dark:text-rose-100 font-semibold transition-colors flex items-center gap-1 text-xs"
                 title="Xem đáp án ghép cặp"
               >
                 <Eye className="w-3.5 h-3.5" />
@@ -356,7 +356,7 @@ export default function ContextMatchExercise({
             </div>
           </div>
         ) : (
-          <div className="w-full h-full rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-3">
+          <div className="w-full h-full max-md:p-2 md:py-0 rounded-xl border border-dashed border-slate-200 dark:border-zinc-800/80 flex items-center justify-center text-[11px] text-slate-400 dark:text-zinc-500 font-medium select-none px-2 md:px-3 max-md:text-center">
             <span>
               Gõ số của từ ({1}–{pairs.length}) rồi số của câu ({pairs.length + 1}–{pairs.length * 2}) để ghép cặp, Enter để kiểm tra
             </span>
@@ -392,7 +392,7 @@ function WordCell({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+      className={`h-full min-h-[3.5rem] w-full px-2 md:px-3 py-2 md:py-2.5 rounded-xl border text-left transition-all flex items-center gap-1.5 md:gap-2.5 shadow-sm ${
         isSelected
           ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
           : pairedWith
@@ -410,8 +410,8 @@ function WordCell({
             : "bg-slate-50 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300"
         }
       />
-      <span className="flex-1 text-sm font-bold whitespace-nowrap">{word}</span>
-      {pairedWith && <span className="shrink-0 text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">→ {pairedWith}</span>}
+      <span className="flex-1 min-w-0 text-xs md:text-sm font-bold break-words md:whitespace-nowrap">{word}</span>
+      {pairedWith && <span className="shrink-0 text-[10px] md:text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">→ {pairedWith}</span>}
     </button>
   );
 }
@@ -441,7 +441,7 @@ function SentenceCell({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`h-full min-h-[3.5rem] w-full px-3 py-2.5 rounded-xl border text-left transition-all flex items-center gap-2.5 shadow-sm ${
+      className={`h-full min-h-[3.5rem] w-full px-2 md:px-3 py-2 md:py-2.5 rounded-xl border text-left transition-all flex items-center gap-1.5 md:gap-2.5 shadow-sm ${
         isSelected
           ? "border-cyan-500 ring-2 ring-cyan-500/30 bg-cyan-50 dark:bg-cyan-950/50 text-cyan-900 dark:text-cyan-200"
           : paired
@@ -461,7 +461,7 @@ function SentenceCell({
             : "bg-slate-50 dark:bg-zinc-800 border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300"
         }
       />
-      <span className="flex-1 min-w-0 text-[13px] font-medium leading-relaxed">
+      <span className="flex-1 min-w-0 text-xs md:text-[13px] font-medium leading-relaxed">
         {paired && blankAt >= 0 ? (
           <>
             {sentence.slice(0, blankAt)}
@@ -472,7 +472,7 @@ function SentenceCell({
           sentence
         )}
       </span>
-      {paired && <span className="shrink-0 text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">← {paired.number}</span>}
+      {paired && <span className="shrink-0 text-[10px] md:text-[11px] font-mono font-semibold text-slate-500 dark:text-zinc-400">← {paired.number}</span>}
     </button>
   );
 }

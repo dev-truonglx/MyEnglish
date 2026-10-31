@@ -64,7 +64,7 @@ export default function LibraryTab({
   const [trajectoryWord, setTrajectoryWord] = useState<WordDetail | null>(null);
 
   return (
-    <div className={`${PAGE_CONTAINER} space-y-5`}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3 space-y-5`}>
       {/* Notification alert if any */}
       {message && (
         <div className="p-3 rounded-lg bg-cyan-50 border border-cyan-200 text-cyan-800 dark:bg-cyan-950/40 dark:border-cyan-800 dark:text-cyan-300 text-xs flex items-center justify-between">
@@ -130,7 +130,7 @@ export default function LibraryTab({
               <div className="col-span-full flex justify-center pt-2">
                 <button
                   onClick={() => setVisibleCount((c) => c + GALLERY_PAGE_SIZE)}
-                  className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors shadow-sm"
+                  className="max-md:min-h-10 px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors shadow-sm"
                 >
                   Xem thêm ({filteredWords.length - visibleWords.length} từ còn lại)
                 </button>
@@ -139,7 +139,7 @@ export default function LibraryTab({
           </div>
         )
       ) : (
-        <div className="p-12 text-center rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-3">
+        <div className="p-6 md:p-12 text-center rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 space-y-3">
           <BookOpen className="w-10 h-10 text-slate-300 dark:text-zinc-600 mx-auto" />
           <h3 className="text-sm font-semibold text-slate-700 dark:text-zinc-300">
             Không có từ vựng nào phù hợp
@@ -147,18 +147,18 @@ export default function LibraryTab({
           <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-sm mx-auto">
             Thử thay đổi từ khóa tìm kiếm, chọn chủ đề khác hoặc đặt lại bộ lọc lịch nhắc lại.
           </p>
-          <div className="pt-2 flex justify-center gap-2">
+          <div className="pt-2 flex max-md:flex-wrap justify-center gap-2">
             {reviewTimeFilter !== "all" && (
               <button
                 onClick={() => setReviewTimeFilter("all")}
-                className="px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700"
+                className="max-md:min-h-10 px-3 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700"
               >
                 Xóa bộ lọc lịch nhắc
               </button>
             )}
             <button
               onClick={() => setActiveTab("capture")}
-              className="px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
+              className="max-md:min-h-10 px-4 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-medium shadow-sm transition-colors flex items-center gap-1.5"
             >
               <Plus className="w-3.5 h-3.5" />
               <span>{AI_VOCAB_ENABLED ? "Thêm từ vựng mới" : "Mở lộ trình từ vựng"}</span>

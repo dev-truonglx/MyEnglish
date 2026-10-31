@@ -118,7 +118,7 @@ export default function WordTableView({
               <tr className="border-b border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-950/70 text-slate-600 dark:text-zinc-400 font-mono text-[11px] select-none">
                 <th
                   onClick={() => handleSort("word")}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
+                  className="py-3 px-3 md:px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>Vocabulary Word</span>
@@ -127,17 +127,17 @@ export default function WordTableView({
                 </th>
                 <th
                   onClick={() => handleSort("topic")}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
+                  className="hidden md:table-cell py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>Topic</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="py-3 px-4">Vietnamese Meaning</th>
+                <th className="py-3 px-3 md:px-4">Vietnamese Meaning</th>
                 <th
                   onClick={() => handleSort("repetitions")}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors text-center"
+                  className="hidden md:table-cell py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors text-center"
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <span>Lịch Sử (Đúng/Sai)</span>
@@ -146,26 +146,26 @@ export default function WordTableView({
                 </th>
                 <th
                   onClick={() => handleSort("ease_factor")}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors text-center"
+                  className="hidden md:table-cell py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors text-center"
                 >
                   <div className="flex items-center justify-center gap-1.5">
                     <span>Độ bền (S)</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-center">
+                <th className="hidden md:table-cell py-3 px-4 text-center">
                   <Jargon term="Interval" plain="Ôn lại sau" hint="Số ngày từ lần ôn trước đến lần ôn kế tiếp" />
                 </th>
                 <th
                   onClick={() => handleSort("next_review")}
-                  className="py-3 px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
+                  className="py-3 px-3 md:px-4 cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
                 >
                   <div className="flex items-center gap-1.5">
                     <span>Lịch Nhắc Lại</span>
                     <ArrowUpDown className="w-3 h-3" />
                   </div>
                 </th>
-                <th className="py-3 px-4 text-right">Actions</th>
+                <th className="py-3 px-3 md:px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-zinc-800/60">
@@ -186,7 +186,7 @@ export default function WordTableView({
                     className="hover:bg-slate-50/80 dark:hover:bg-zinc-800/40 cursor-pointer transition-colors group"
                   >
                     {/* Word Column */}
-                    <td className="py-3 px-4 font-mono font-bold text-slate-900 dark:text-white">
+                    <td className="py-3 px-3 md:px-4 font-mono font-bold text-slate-900 dark:text-white">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="group-hover:text-cyan-600 dark:group-hover:text-cyan-300 transition-colors text-sm">
                           {item.word}
@@ -199,7 +199,7 @@ export default function WordTableView({
                         <button
                           onClick={(e) => handleSpeak(item.word, e)}
                           title="Listen"
-                          className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 p-0.5 rounded transition-colors"
+                          className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 p-2.5 -m-2 md:p-0.5 md:m-0 rounded transition-colors"
                         >
                           <Volume2 className="w-3.5 h-3.5" />
                         </button>
@@ -207,7 +207,7 @@ export default function WordTableView({
                     </td>
 
                     {/* Topic Column */}
-                    <td className="py-3 px-4 whitespace-nowrap">
+                    <td className="hidden md:table-cell py-3 px-4 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium bg-cyan-50 dark:bg-cyan-950/50 text-cyan-700 dark:text-cyan-300 border border-cyan-200 dark:border-cyan-800/50">
                         <Tag className="w-2.5 h-2.5 opacity-70" />
                         {item.topic || "General Tech"}
@@ -215,12 +215,12 @@ export default function WordTableView({
                     </td>
 
                     {/* Meaning Column */}
-                    <td className="py-3 px-4 text-slate-700 dark:text-zinc-300 font-normal text-xs max-w-md line-clamp-2 leading-relaxed">
+                    <td className="py-3 px-3 md:px-4 text-slate-700 dark:text-zinc-300 font-normal text-xs max-w-md line-clamp-2 leading-relaxed">
                       {item.meaning_vn}
                     </td>
 
                     {/* Appearances / Correct vs Wrong */}
-                    <td className="py-3 px-4 text-center font-mono">
+                    <td className="hidden md:table-cell py-3 px-4 text-center font-mono">
                       <div className="flex flex-col items-center gap-1">
                         <span
                           className={`px-2 py-0.5 rounded text-[11px] font-bold ${
@@ -257,19 +257,19 @@ export default function WordTableView({
                     </td>
 
                     {/* Stability / Ease Factor */}
-                    <td className="py-3 px-4 text-center font-mono text-slate-700 dark:text-zinc-300">
+                    <td className="hidden md:table-cell py-3 px-4 text-center font-mono text-slate-700 dark:text-zinc-300">
                       {item.srs.stability && item.srs.stability > 0
                         ? `${Number(item.srs.stability).toFixed(1)}d`
                         : `${item.srs.interval}d`}
                     </td>
 
                     {/* Interval */}
-                    <td className="py-3 px-4 text-center font-mono text-slate-500 dark:text-zinc-400">
+                    <td className="hidden md:table-cell py-3 px-4 text-center font-mono text-slate-500 dark:text-zinc-400">
                       {item.srs.interval}d
                     </td>
 
                     {/* Next Review Status & Countdown */}
-                    <td className="py-3 px-4 whitespace-nowrap">
+                    <td className="py-3 px-3 md:px-4 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
                         <span
                           title={relative?.exactDateStr}
@@ -290,7 +290,7 @@ export default function WordTableView({
                             setTrajectoryWord(item);
                           }}
                           title="Xem lộ trình các lần ôn tiếp theo"
-                          className="p-1 rounded-lg text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                          className="p-2 md:p-1 rounded-lg text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
                         >
                           <Sparkles className="w-3.5 h-3.5 text-cyan-500" />
                         </button>
@@ -298,12 +298,12 @@ export default function WordTableView({
                     </td>
 
                     {/* Actions Column */}
-                    <td className="py-3 px-4 text-right">
+                    <td className="py-3 px-3 md:px-4 text-right">
                       <div className="flex items-center justify-end gap-2">
                         <button
                           onClick={(e) => onDeleteWord(item.id, item.word, e)}
                           title="Delete word"
-                          className="text-slate-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400 p-1 rounded transition-colors"
+                          className="text-slate-400 hover:text-rose-600 dark:text-zinc-500 dark:hover:text-rose-400 p-2.5 -m-1.5 md:p-1 md:m-0 rounded transition-colors"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
@@ -320,7 +320,7 @@ export default function WordTableView({
           <div className="p-3 border-t border-slate-200 dark:border-zinc-800 flex justify-center">
             <button
               onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
-              className="px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors"
+              className="max-md:min-h-10 px-4 py-1.5 rounded-lg border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-800 dark:text-zinc-200 text-xs font-medium transition-colors"
             >
               Xem thêm ({remaining} từ còn lại)
             </button>

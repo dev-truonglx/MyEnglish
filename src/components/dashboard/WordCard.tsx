@@ -79,7 +79,7 @@ const WordCard = memo(function WordCard({
               <button
                 onClick={(e) => onSpeak(item.word, e)}
                 title="Listen pronunciation"
-                className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-1 rounded hover:bg-slate-100 dark:hover:bg-zinc-800/80"
+                className="text-slate-400 hover:text-cyan-600 dark:text-zinc-500 dark:hover:text-cyan-400 transition-colors p-2.5 -m-1.5 md:p-1 md:m-0 rounded hover:bg-slate-100 dark:hover:bg-zinc-800/80"
               >
                 <Volume2 className="w-3.5 h-3.5" />
               </button>
@@ -127,7 +127,7 @@ const WordCard = memo(function WordCard({
             <button
               onClick={(e) => onDelete(item.id, item.word, e)}
               title="Xoá từ này"
-              className="p-1 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors opacity-0 group-hover:opacity-100"
+              className="p-2.5 -m-1.5 md:p-1 md:m-0 rounded-md text-slate-400 hover:text-rose-500 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors max-md:opacity-100 md:opacity-0 md:group-hover:opacity-100"
             >
               <Trash2 className="w-3.5 h-3.5" />
             </button>
@@ -143,7 +143,7 @@ const WordCard = memo(function WordCard({
               onOpenTrajectory?.(item);
             }}
             title={`Lịch nhắc lại: ${relativeInfo.label} (${relativeInfo.exactDateStr}). Bấm để xem lộ trình nhắc lại.`}
-            className={`text-[10px] font-mono px-2.5 py-1 rounded-full border flex items-center gap-1.5 transition-all hover:scale-105 ${relativeInfo.badgeClass}`}
+            className={`max-md:min-h-10 text-[10px] font-mono px-2.5 py-1 rounded-full border flex items-center gap-1.5 transition-all hover:scale-105 ${relativeInfo.badgeClass}`}
           >
             <Clock className="w-3 h-3 opacity-80" />
             <span>{relativeInfo.label}</span>

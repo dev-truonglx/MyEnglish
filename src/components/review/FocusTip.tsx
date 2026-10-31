@@ -33,7 +33,7 @@ export default function FocusTip({ onStart }: { onStart: (minutes: number) => vo
       </div>
       <button
         onClick={() => onStart(minutes)}
-        className="px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
+        className="px-3 py-1.5 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-xs font-semibold"
       >
         Thử ngay {minutes}′
       </button>

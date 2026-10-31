@@ -61,8 +61,8 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-4">
-      <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-5">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 dark:bg-black/60 backdrop-blur-sm p-3 md:p-4">
+      <div className="w-full max-w-2xl max-h-[90dvh] md:max-h-[90vh] overflow-y-auto rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xl p-4 md:p-6 space-y-5">
         {step === "migrate" ? (
           <>
             <div className="space-y-2">
@@ -89,7 +89,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
                 <button
                   onClick={() => reset(false)}
                   disabled={busy}
-                  className="text-xs text-rose-600 hover:underline disabled:opacity-50"
+                  className="text-xs max-md:min-h-10 max-md:inline-flex max-md:items-center text-rose-600 hover:underline disabled:opacity-50"
                 >
                   Xoá mà không sao lưu
                 </button>
@@ -97,7 +97,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
               <button
                 onClick={() => reset(true)}
                 disabled={busy}
-                className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-60"
+                className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 py-2.5 px-5 rounded-xl bg-cyan-600 hover:bg-cyan-500 !text-white text-sm font-semibold disabled:opacity-60"
               >
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}
                 Sao lưu & bắt đầu lại
@@ -108,7 +108,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
           <>
             <div className="space-y-1">
               <h2 className="text-xl font-bold text-slate-900 dark:text-white">Bạn muốn học từ vựng cấp nào?</h2>
-              {backupPath && <p className="text-xs text-emerald-700 dark:text-emerald-400">Đã sao lưu vào {backupPath}</p>}
+              {backupPath && <p className="text-xs text-emerald-700 dark:text-emerald-400">{backupPath}</p>}
               <p className="text-sm text-slate-500 dark:text-zinc-400">
                 Việc học luôn bắt đầu từ A1; chọn thêm cấp cao hơn để trộn vào. Đổi lại lúc nào cũng được trong tab Lộ trình từ vựng.
               </p>
@@ -120,7 +120,7 @@ export default function VocabSetupScreen({ mode, onDone }: VocabSetupScreenProps
               <button
                 onClick={start}
                 disabled={busy}
-                className="inline-flex items-center gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 !text-white text-sm font-semibold disabled:opacity-60"
+                className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-2 py-2.5 px-5 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 !text-white text-sm font-semibold disabled:opacity-60"
               >
                 {busy && <Loader2 className="w-4 h-4 animate-spin" />}
                 Bắt đầu học

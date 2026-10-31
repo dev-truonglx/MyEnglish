@@ -280,7 +280,7 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
           <button
             type="button"
             onClick={() => setExerciseImportOpen(true)}
-            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-300 hover:text-cyan-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-cyan-800 dark:hover:text-cyan-300 shrink-0"
+            className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 md:py-1.5 max-md:min-h-[40px] text-xs font-semibold text-slate-600 shadow-sm transition hover:border-cyan-300 hover:text-cyan-700 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:border-cyan-800 dark:hover:text-cyan-300 shrink-0"
           >
             <Sparkles className="h-3.5 w-3.5" />
             <span>Nhập bài tập AI & Lịch sử</span>
@@ -562,7 +562,7 @@ function TodayPanel({
   return (
     <section aria-label="Hôm nay" className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
       {/* The one thing to do next */}
-      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-cyan-300 bg-gradient-to-br from-cyan-50 to-white p-5 shadow-md shadow-cyan-500/5 dark:border-cyan-800/70 dark:from-cyan-950/30 dark:to-zinc-900">
+      <div className="flex flex-col justify-between gap-4 rounded-2xl border border-cyan-300 bg-gradient-to-br from-cyan-50 to-white p-4 md:p-5 shadow-md shadow-cyan-500/5 dark:border-cyan-800/70 dark:from-cyan-950/30 dark:to-zinc-900">
         <div className="space-y-1.5">
           <span className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-cyan-700 dark:text-cyan-300">
             {primary.icon}
@@ -583,7 +583,7 @@ function TodayPanel({
             type="button"
             onClick={primary.action ?? undefined}
             disabled={starting && primary.key === "review"}
-            className="inline-flex items-center gap-2 rounded-xl bg-cyan-600 px-5 py-2.5 text-sm font-bold !text-white shadow-sm shadow-cyan-600/30 transition hover:bg-cyan-500 disabled:opacity-60"
+            className="inline-flex items-center max-md:justify-center gap-2 rounded-xl bg-cyan-600 px-5 py-3 md:py-2.5 max-md:min-h-[40px] text-sm font-bold !text-white shadow-sm shadow-cyan-600/30 transition hover:bg-cyan-500 disabled:opacity-60 w-full sm:w-auto"
           >
             {starting && primary.key === "review" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             {primary.actionText}
@@ -637,7 +637,7 @@ function TodayPanel({
               ) : null}
             </>
           );
-          const cls = `flex w-full items-center gap-3 rounded-xl border px-3.5 py-2.5 text-left transition ${
+          const cls = `flex w-full items-center gap-3 rounded-xl border px-3 md:px-3.5 py-2.5 min-h-[44px] text-left transition ${
             isPrimary
               ? "border-cyan-200 bg-cyan-50/60 dark:border-cyan-900/60 dark:bg-cyan-950/20"
               : "border-slate-200 bg-white dark:border-zinc-800 dark:bg-zinc-900"

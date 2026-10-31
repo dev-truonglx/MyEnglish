@@ -1,0 +1,4 @@
+# fsrs only uses seeded generators; no OS randomness exists (or is needed) in a plain wasm module.
+# "unsupported" makes any unexpected use fail loudly instead of silently giving different results.
+[target.wasm32-unknown-unknown]
+rustflags = ['--cfg', 'getrandom_backend="unsupported"']

@@ -58,7 +58,7 @@ export default function SpellingCard({
             </div>
 
             {/* Audio & Clue Card */}
-            <div className="p-5 md:p-6 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-center space-y-3.5 max-w-lg mx-auto w-full shadow-inner shrink-0">
+            <div className="p-4 md:p-6 rounded-2xl bg-slate-50 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-center space-y-3.5 max-w-lg mx-auto w-full shadow-inner shrink-0">
               {/* No audio or IPA before answering: hearing the word would turn recall into dictation.
                   The pronunciation plays as feedback once the answer is checked. */}
               {currentWord.part_of_speech && (
@@ -96,7 +96,7 @@ export default function SpellingCard({
                   data-1p-ignore="true"
                   data-form-type="other"
                   placeholder="Gõ chính tả từ tiếng Anh và nhấn Enter ↵..."
-                  className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-2xl px-6 py-3.5 text-lg md:text-xl font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-widest font-bold shadow-sm transition-all ${
+                  className={`w-full bg-white dark:bg-zinc-900 border-2 rounded-2xl px-3 md:px-6 py-3.5 text-lg md:text-xl font-mono text-slate-900 dark:text-white placeholder:text-slate-400 dark:placeholder:text-zinc-500 focus:outline-none text-center tracking-widest font-bold shadow-sm transition-all ${
                     isCorrect
                       ? "border-emerald-500 bg-emerald-50/50 dark:bg-emerald-950/20 text-emerald-900 dark:text-emerald-100 ring-4 ring-emerald-500/10"
                       : isShaking
@@ -165,7 +165,7 @@ export default function SpellingCard({
                       <button
                         type="button"
                         onClick={() => setShowHint(true)}
-                        className="text-slate-400 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 text-xs flex items-center gap-1 transition-colors"
+                        className="text-slate-400 hover:text-emerald-600 dark:text-zinc-500 dark:hover:text-emerald-400 text-xs flex items-center gap-1 max-md:min-h-10 transition-colors"
                       >
                         <HelpCircle className="w-3.5 h-3.5" />
                         <span>Gợi ý</span>
@@ -173,7 +173,7 @@ export default function SpellingCard({
                       <button
                         type="button"
                         onClick={handleSkip}
-                        className="text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs flex items-center gap-1 transition-colors"
+                        className="text-slate-400 hover:text-slate-700 dark:text-zinc-500 dark:hover:text-zinc-300 text-xs flex items-center gap-1 max-md:min-h-10 transition-colors"
                         title="Bỏ qua từ này (đánh giá: Quên)"
                       >
                         <SkipForward className="w-3.5 h-3.5" />
@@ -182,7 +182,7 @@ export default function SpellingCard({
                       <button
                         type="button"
                         onClick={handleShowAnswer}
-                        className="text-slate-400 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 text-xs underline transition-colors"
+                        className="text-slate-400 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 text-xs underline max-md:min-h-10 transition-colors"
                       >
                         Xem đáp án
                       </button>
@@ -193,7 +193,7 @@ export default function SpellingCard({
                     <button
                       type="button"
                       onClick={handleSkip}
-                      className="py-2.5 px-3 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+                      className="py-2.5 px-3 max-md:min-h-11 rounded-xl border border-slate-300 dark:border-zinc-700 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
                       title="Bỏ qua từ này (chuyển sang từ tiếp theo và đánh giá: Quên)"
                     >
                       <SkipForward className="w-4 h-4 text-slate-500 dark:text-zinc-400" />
@@ -203,7 +203,7 @@ export default function SpellingCard({
                     <button
                       type="button"
                       onClick={handleShowAnswer}
-                      className="py-2.5 px-3 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
+                      className="py-2.5 px-3 max-md:min-h-11 rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/60 dark:hover:bg-emerald-900/60 text-emerald-800 dark:text-emerald-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors shadow-2xs"
                       title="Xem chi tiết đáp án & giải thích ngữ pháp"
                     >
                       <Eye className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
@@ -242,7 +242,7 @@ export default function SpellingCard({
             </div>
             <button
               onClick={() => handleSpeak(currentWord.word)}
-              className="p-1 rounded hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors"
+              className="p-3 -m-2 md:m-0 md:p-1 shrink-0 rounded hover:bg-slate-200 dark:hover:bg-zinc-800 transition-colors"
               title="Nghe phát âm"
             >
               <Volume2 className="w-4 h-4" />

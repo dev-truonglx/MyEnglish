@@ -70,7 +70,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
 
   if (!user) {
     return (
-      <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/30 dark:to-zinc-900 p-5 space-y-3 shadow-sm">
+      <div className="rounded-2xl border border-amber-200 dark:border-amber-900/50 bg-gradient-to-br from-amber-50 to-white dark:from-amber-950/30 dark:to-zinc-900 p-4 md:p-5 space-y-3 shadow-sm">
         <div className="flex items-center gap-2">
           <Trophy className="w-5 h-5 text-amber-500" />
           <span className="text-sm font-bold text-slate-900 dark:text-white">Đua XP mỗi tuần</span>
@@ -80,7 +80,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
         </p>
         <button
           onClick={() => onNavigate("account")}
-          className="px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
+          className="max-md:min-h-10 px-3 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold inline-flex items-center gap-1.5"
         >
           <UserPlus className="w-3.5 h-3.5" /> Đăng nhập
         </button>
@@ -91,7 +91,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
             } catch {}
             window.dispatchEvent(new CustomEvent("myenglish-rank-invite-dismissed"));
           }}
-          className="block text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 underline"
+          className="block max-md:min-h-10 text-[11px] text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 underline"
         >
           Không hiện nữa
         </button>
@@ -133,7 +133,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
                 key={g.id ?? "all"}
                 onClick={() => setScope(g.id)}
                 className={cn(
-                  "px-2 py-0.5 rounded-md text-[11px] font-semibold border",
+                  "max-md:min-h-10 px-2 py-0.5 rounded-md text-[11px] font-semibold border",
                   activeScope === g.id
                     ? "bg-amber-500 border-amber-500 text-white"
                     : "border-slate-200 dark:border-zinc-700 text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800"
@@ -182,7 +182,7 @@ export function RankPanel({ onNavigate }: { onNavigate: (tab: DashboardTab) => v
 
       <div className="px-4 py-2.5 border-t border-slate-100 dark:border-zinc-800 flex items-center justify-between text-[11px]">
         <span className="text-slate-400 dark:text-zinc-500">{stale ? "Chưa cập nhật được, đang hiện số cũ" : "XP tuần này"}</span>
-        <button onClick={() => onNavigate("leaderboard")} className="font-semibold text-cyan-700 dark:text-cyan-400 hover:underline inline-flex items-center">
+        <button onClick={() => onNavigate("leaderboard")} className="max-md:min-h-10 font-semibold text-cyan-700 dark:text-cyan-400 hover:underline inline-flex items-center">
           Xem đầy đủ <ChevronRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -202,7 +202,7 @@ export function RankLine({ onOpen }: { onOpen: () => void }) {
       type="button"
       onClick={onOpen}
       title="Thứ hạng XP tuần này • Bấm để xem bảng xếp hạng"
-      className="w-full text-left rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/70 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-950/40 px-3 py-2 flex items-center gap-2 text-xs transition-colors shadow-sm"
+      className="w-full max-md:min-h-10 text-left rounded-xl border border-amber-200 dark:border-amber-900/40 bg-amber-50/70 dark:bg-amber-950/20 hover:bg-amber-100/70 dark:hover:bg-amber-950/40 px-3 py-2 flex items-center gap-2 text-xs transition-colors shadow-sm"
     >
       <Trophy className="w-3.5 h-3.5 shrink-0 text-amber-500" />
       <span className="font-bold text-amber-700 dark:text-amber-300 whitespace-nowrap">#{standing.rank}</span>

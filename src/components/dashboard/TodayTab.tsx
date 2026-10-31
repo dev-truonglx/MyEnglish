@@ -104,7 +104,7 @@ function StreakNotices({ stats, now }: { stats: StreakStats; now: Date }) {
   const repaired = !!stats.repairedDates?.includes(yesterday);
   const close = (key: string) => setClosed((c) => ({ ...c, [key]: true }));
   const closeButton = (key: string) => (
-    <button onClick={() => close(key)} className="shrink-0 p-0.5 rounded opacity-60 hover:opacity-100" aria-label="Đóng">
+    <button onClick={() => close(key)} className="shrink-0 p-3 -m-2.5 md:p-0.5 md:m-0 rounded opacity-60 hover:opacity-100" aria-label="Đóng">
       <X className="w-4 h-4" />
     </button>
   );
@@ -306,7 +306,7 @@ export default function TodayTab({
   const statCard = "flex items-center gap-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 min-w-0";
 
   return (
-    <div className={PAGE_CONTAINER}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3`}>
       <div className="space-y-4">
         {/* Greeting on the left, the three numbers as compact cards on the right (they wrap below on narrow windows) */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -318,7 +318,7 @@ export default function TodayTab({
               {now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long" })}
             </p>
           </div>
-          <div className="grid grid-cols-3 gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto">
             <div className={statCard} title="Chuỗi ngày học">
               <Flame className="w-5 h-5 text-orange-500 shrink-0" />
               <div className="min-w-0">
@@ -377,7 +377,7 @@ export default function TodayTab({
             {loading ? (
               <div className="h-40 rounded-2xl border border-slate-200 dark:border-zinc-800 bg-slate-50 dark:bg-zinc-900/60 animate-pulse" />
             ) : empty ? (
-              <div className="rounded-2xl border border-cyan-200 dark:border-cyan-800/50 bg-gradient-to-br from-cyan-50 to-white dark:from-cyan-950/40 dark:to-zinc-900 p-6 shadow-sm space-y-3">
+              <div className="rounded-2xl border border-cyan-200 dark:border-cyan-800/50 bg-gradient-to-br from-cyan-50 to-white dark:from-cyan-950/40 dark:to-zinc-900 p-4 md:p-6 shadow-sm space-y-3">
                 <p className="text-lg font-bold text-slate-900 dark:text-white">Chưa có từ nào để học</p>
                 <p className="text-sm text-slate-600 dark:text-zinc-300">
                   {AI_VOCAB_ENABLED
@@ -387,7 +387,7 @@ export default function TodayTab({
                 <button
                   onClick={() => setActiveTab("capture")}
                   autoFocus
-                  className="px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] text-white text-sm font-bold shadow-md shadow-cyan-600/30 inline-flex items-center gap-2 transition-all"
+                  className="max-md:min-h-10 px-6 py-3 rounded-xl bg-cyan-600 hover:bg-cyan-700 active:scale-[0.98] text-white text-sm font-bold shadow-md shadow-cyan-600/30 inline-flex items-center gap-2 transition-all"
                 >
                   <Layers className="w-4 h-4" /> Mở {pathLabel}
                 </button>
@@ -424,7 +424,7 @@ export default function TodayTab({
             {!loading && forgottenDue >= FORGOTTEN_HINT_MIN && (
               <button
                 onClick={() => setActiveTab("forgotten")}
-                className="w-full flex items-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/30 text-left text-sm text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/50 transition-colors"
+                className="w-full max-md:min-h-10 flex items-center gap-2 px-4 py-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50 bg-rose-50 dark:bg-rose-950/30 text-left text-sm text-rose-800 dark:text-rose-200 hover:bg-rose-100 dark:hover:bg-rose-950/50 transition-colors"
               >
                 <Bug className="w-4 h-4 text-rose-500 shrink-0" />
                 <span className="flex-1">
@@ -489,7 +489,7 @@ export default function TodayTab({
                   </div>
                   <button
                     onClick={onStartReflex}
-                    className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 px-5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95"
+                    className="w-full sm:w-auto shrink-0 inline-flex items-center justify-center gap-1.5 max-md:min-h-10 px-5 py-2.5 rounded-xl bg-slate-950 hover:bg-slate-900 text-amber-400 font-bold text-xs shadow-md transition-all transform active:scale-95"
                   >
                     <Zap className="w-3.5 h-3.5 fill-amber-400" />
                     <span>Bắt đầu luyện phản xạ</span>

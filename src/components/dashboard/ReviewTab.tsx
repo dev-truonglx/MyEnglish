@@ -89,7 +89,7 @@ export default function ReviewTab({
   const maxDay = forecast ? Math.max(1, ...forecast.days.map((d) => d.reviews)) : 1;
 
   return (
-    <div className={PAGE_CONTAINER}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3`}>
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_320px] items-start">
         {/* ── Main column ── */}
         <div className="min-w-0 space-y-6">
@@ -102,7 +102,7 @@ export default function ReviewTab({
 
           {/* Today: how much, and every way to start */}
           {!inComeback && (
-            <div className="rounded-2xl border border-orange-200 dark:border-orange-900/40 bg-gradient-to-br from-orange-50 via-white to-white dark:from-orange-950/20 dark:via-zinc-900 dark:to-zinc-900 p-5 sm:p-6 space-y-4 shadow-sm">
+            <div className="rounded-2xl border border-orange-200 dark:border-orange-900/40 bg-gradient-to-br from-orange-50 via-white to-white dark:from-orange-950/20 dark:via-zinc-900 dark:to-zinc-900 p-4 md:p-6 space-y-4 shadow-sm">
               <div className="flex flex-wrap items-end justify-between gap-4">
                 <div className="space-y-1">
                   <div className="text-[11px] font-semibold uppercase tracking-wider text-orange-700/80 dark:text-orange-300/80">Hôm nay</div>
@@ -127,7 +127,7 @@ export default function ReviewTab({
                   onClick={() => handleStartReview(true)}
                   disabled={words.length === 0}
                   autoFocus
-                  className="flex-1 min-w-[200px] inline-flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-sm font-bold shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40"
+                  className="flex-1 min-w-[200px] inline-flex items-center justify-center max-md:min-h-10 gap-2 py-3 px-4 rounded-xl bg-gradient-to-r from-orange-500 to-amber-600 hover:from-orange-400 hover:to-amber-500 !text-white text-sm font-bold shadow-lg shadow-orange-500/20 transition-all disabled:opacity-40"
                 >
                   {dueCount > 0 ? <Play className="w-4 h-4 fill-white" /> : isCapped ? <RotateCcw className="w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
                   {startLabel}
@@ -138,7 +138,7 @@ export default function ReviewTab({
                     onClick={() => onStartFocus(focusMinutes)}
                     disabled={words.length === 0}
                     title="Phiên tập trung: ẩn mọi thứ khác, tắt nhắc nhở"
-                    className="inline-flex items-center gap-1.5 py-3 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold shadow-sm shadow-violet-600/30 disabled:opacity-40"
+                    className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1.5 py-3 px-4 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold shadow-sm shadow-violet-600/30 disabled:opacity-40"
                   >
                     <Crosshair className="w-4 h-4" /> Tập trung {focusMinutes}′
                   </button>
@@ -147,7 +147,7 @@ export default function ReviewTab({
                   onClick={() => handleStartReview(false)}
                   disabled={words.length === 0}
                   title="Luyện thêm các từ đã học (từ vừa trả lời đúng liên tiếp được nghỉ), không ảnh hưởng lịch ôn"
-                  className="inline-flex items-center gap-1.5 py-3 px-4 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-sm font-medium disabled:opacity-40"
+                  className="inline-flex items-center max-md:justify-center max-md:min-h-10 gap-1.5 py-3 px-4 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-sm font-medium disabled:opacity-40"
                 >
                   <Dumbbell className="w-4 h-4" /> Luyện tất cả
                 </button>
@@ -192,7 +192,7 @@ export default function ReviewTab({
                         {due > 0 && (
                           <button
                             onClick={() => handleStartReview(true, top)}
-                            className="px-2.5 py-1 rounded-lg bg-orange-50 hover:bg-orange-100 dark:bg-orange-500/15 dark:hover:bg-orange-500/25 text-orange-700 dark:text-orange-300 text-xs font-semibold inline-flex items-center gap-1"
+                            className="px-2.5 py-1 max-md:min-h-10 rounded-lg bg-orange-50 hover:bg-orange-100 dark:bg-orange-500/15 dark:hover:bg-orange-500/25 text-orange-700 dark:text-orange-300 text-xs font-semibold inline-flex items-center max-md:justify-center gap-1"
                           >
                             <Play className="w-3 h-3 fill-current" /> Ôn {due}
                           </button>
@@ -200,7 +200,7 @@ export default function ReviewTab({
                         <button
                           onClick={() => handleStartReview(false, top)}
                           title={`Luyện thêm ${total} từ ${top}, không ảnh hưởng lịch ôn`}
-                          className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-medium"
+                          className="px-2.5 py-1 max-md:min-h-10 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-medium max-md:inline-flex max-md:items-center max-md:justify-center"
                         >
                           Luyện
                         </button>
@@ -220,12 +220,12 @@ export default function ReviewTab({
                   Từ đang chờ ôn <span className="font-normal text-slate-400 dark:text-zinc-500">({dueWordCount})</span>
                 </h3>
                 {onOpenDueWords && (
-                  <button onClick={onOpenDueWords} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline inline-flex items-center gap-1">
+                  <button onClick={onOpenDueWords} className="text-xs text-cyan-600 dark:text-cyan-400 hover:underline inline-flex items-center gap-1 max-md:min-h-10 py-1 md:py-0">
                     Xem tất cả <ArrowRight className="w-3 h-3" />
                   </button>
                 )}
               </div>
-              <div className="grid grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2">
+              <div className="grid grid-cols-[repeat(auto-fill,minmax(140px,1fr))] sm:grid-cols-[repeat(auto-fill,minmax(170px,1fr))] gap-2">
                 {libraryStats.dueWords.slice(0, DUE_CHIPS).map((w) => {
                   const reviewed = !!w.srs.stability && w.srs.stability > 0;
                   return (
@@ -265,7 +265,7 @@ export default function ReviewTab({
         <aside className="min-w-0 grid gap-6 items-start md:grid-cols-2 lg:grid-cols-1 lg:sticky lg:top-0">
           <WeeklyProgressCard words={words} compact />
 
-          <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-5 space-y-3 shadow-sm">
+          <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/60 p-4 md:p-5 space-y-3 shadow-sm">
             <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
               <CalendarDays className="w-4 h-4 text-cyan-500" /> 7 ngày tới
             </h3>

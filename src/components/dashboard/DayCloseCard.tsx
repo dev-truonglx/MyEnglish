@@ -106,7 +106,7 @@ export default function DayCloseCard({
     <div className="rounded-2xl border border-emerald-200 dark:border-emerald-800/50 bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/30 dark:to-zinc-900 shadow-sm overflow-hidden">
       {status.done ? (
         // The loud part: the learner must know for sure they can stop
-        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-5 space-y-3" data-testid="day-done">
+        <div className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white p-4 md:p-5 space-y-3" data-testid="day-done">
           <div className="flex items-center gap-4">
             <div className="w-14 h-14 rounded-full bg-white/20 ring-4 ring-white/30 flex items-center justify-center shrink-0">
               <Check className="w-8 h-8" strokeWidth={3} />
@@ -122,7 +122,7 @@ export default function DayCloseCard({
           </p>
         </div>
       ) : (
-        <div className="p-5 pb-0 flex items-center gap-4">
+        <div className="p-4 pb-0 md:p-5 md:pb-0 flex items-center gap-4">
           <GoalRing percent={streakStats.goalPercentage} reached={reached} />
           <div className="min-w-0 space-y-1">
             <p className="text-lg font-bold text-slate-900 dark:text-white">{status.title}</p>
@@ -131,7 +131,7 @@ export default function DayCloseCard({
         </div>
       )}
 
-      <div className="p-5 space-y-3">
+      <div className="p-4 md:p-5 space-y-3">
         <p className="text-sm text-slate-700 dark:text-zinc-300 inline-flex items-center gap-1.5 flex-wrap">{streakLine}</p>
         {!status.done && (
           <p className="flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-zinc-100">
@@ -148,20 +148,20 @@ export default function DayCloseCard({
           {studied ? (
             <button
               onClick={() => onNextStep(nextStep)}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-semibold shadow-md shadow-emerald-600/20 inline-flex items-center gap-2 transition"
+              className="max-md:min-h-10 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-semibold shadow-md shadow-emerald-600/20 inline-flex items-center gap-2 transition"
             >
               {nextStep.label} <ArrowRight className="w-4 h-4" />
             </button>
           ) : (
             <button
               onClick={onQuickStart}
-              className="px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-semibold shadow-md shadow-emerald-600/20 inline-flex items-center gap-2 transition"
+              className="max-md:min-h-10 px-5 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 active:scale-[0.98] text-white text-sm font-semibold shadow-md shadow-emerald-600/20 inline-flex items-center gap-2 transition"
             >
               <Timer className="w-4 h-4" /> Chỉ 1 phút: ôn nhanh 3 thẻ
             </button>
           )}
           {more && (
-            <button onClick={more.onClick} className="text-xs font-medium text-slate-500 dark:text-zinc-400 hover:text-cyan-700 dark:hover:text-cyan-300 underline-offset-2 hover:underline">
+            <button onClick={more.onClick} className="max-md:inline-flex max-md:items-center max-md:min-h-10 max-md:text-left text-xs font-medium text-slate-500 dark:text-zinc-400 hover:text-cyan-700 dark:hover:text-cyan-300 underline-offset-2 hover:underline">
               Muốn học thêm? {more.label}
             </button>
           )}

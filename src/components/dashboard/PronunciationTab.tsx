@@ -64,7 +64,7 @@ function useShortcuts(handler: (e: KeyboardEvent) => boolean | void) {
 
 function Kbd({ children }: { children: React.ReactNode }) {
   return (
-    <kbd className="inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded border border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-[10px] font-mono font-semibold text-slate-600 dark:text-zinc-300">
+    <kbd className="hidden md:inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded border border-slate-300 dark:border-zinc-600 bg-white dark:bg-zinc-800 text-[10px] font-mono font-semibold text-slate-600 dark:text-zinc-300">
       {children}
     </kbd>
   );
@@ -198,7 +198,7 @@ function LearnStep({ lesson, onNext, onQuiz }: { lesson: PronunciationLesson; on
         </button>
         <button
           onClick={onNext}
-          className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5"
+          className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5"
         >
           Tiếp: Đọc to theo <ArrowRight className="w-4 h-4" /> <Kbd>Enter</Kbd>
         </button>
@@ -261,10 +261,10 @@ function SayAloud({ lessonId, items, onQuiz }: { lessonId: string; items: Pronun
         </p>
         <p className="text-sm text-slate-600 dark:text-zinc-400">Giờ kiểm tra tai bằng bài nghe nhé.</p>
         <div className="flex flex-wrap justify-center gap-2">
-          <button onClick={again} className="px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
+          <button onClick={again} className="px-4 py-2 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5 text-slate-700 dark:text-zinc-200">
             <RotateCcw className="w-4 h-4" /> Đọc lại vòng nữa <Kbd>R</Kbd>
           </button>
-          <button onClick={onQuiz} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5">
+          <button onClick={onQuiz} className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5">
             Làm bài nghe <ArrowRight className="w-4 h-4" /> <Kbd>Enter</Kbd>
           </button>
         </div>
@@ -292,13 +292,13 @@ function SayAloud({ lessonId, items, onQuiz }: { lessonId: string; items: Pronun
           <div className="flex gap-2 pt-2">
             <button
               onClick={() => handleSpeak(item.text)}
-              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5"
+              className="px-4 py-2 max-md:min-h-10 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5"
             >
               <Volume2 className="w-4 h-4" /> Nghe <Kbd>Space</Kbd>
             </button>
             <button
               onClick={() => handleSpeak(item.text, SLOW_RATE)}
-              className="px-3 py-2 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5 text-slate-700 dark:text-zinc-200"
+              className="px-3 py-2 max-md:min-h-10 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5 text-slate-700 dark:text-zinc-200"
             >
               <Snail className="w-4 h-4" /> Chậm <Kbd>S</Kbd>
             </button>
@@ -307,13 +307,13 @@ function SayAloud({ lessonId, items, onQuiz }: { lessonId: string; items: Pronun
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={() => rate(true)}
-            className="py-3 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2"
+            className="py-3 max-md:min-h-10 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold inline-flex items-center justify-center gap-2"
           >
             <Check className="w-4 h-4" /> Mình đọc được <Kbd>1</Kbd>
           </button>
           <button
             onClick={() => rate(false)}
-            className="py-3 rounded-xl border-2 border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 text-sm font-semibold inline-flex items-center justify-center gap-2"
+            className="py-3 max-md:min-h-10 rounded-xl border-2 border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-200 hover:bg-slate-50 dark:hover:bg-zinc-800 text-sm font-semibold inline-flex items-center justify-center gap-2"
           >
             Chưa chắc, từ khác <Kbd>2</Kbd>
           </button>
@@ -438,30 +438,30 @@ function Quiz({
         )}
         <div className="flex flex-wrap justify-center gap-2">
           {result.next ? (
-            <button onClick={primary} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5">
+            <button onClick={primary} className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5">
               Bài tiếp: {result.next.title} <ArrowRight className="w-4 h-4" /> <Kbd>Enter</Kbd>
             </button>
           ) : result.passed ? (
-            <button onClick={onBack} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5">
+            <button onClick={onBack} className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5">
               Về danh sách bài <Kbd>Enter</Kbd>
             </button>
           ) : (
-            <button onClick={restart} className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5">
+            <button onClick={restart} className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5">
               <RotateCcw className="w-4 h-4" /> Làm lại <Kbd>Enter</Kbd>
             </button>
           )}
           {(result.passed || result.next) && (
-            <button onClick={restart} className="px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
+            <button onClick={restart} className="px-4 py-2 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5 text-slate-700 dark:text-zinc-200">
               <RotateCcw className="w-4 h-4" /> Làm lại <Kbd>R</Kbd>
             </button>
           )}
           {!result.passed && (
-            <button onClick={onReview} className="px-4 py-2 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5 text-slate-700 dark:text-zinc-200">
+            <button onClick={onReview} className="px-4 py-2 max-md:min-h-10 rounded-lg border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5 text-slate-700 dark:text-zinc-200">
               <BookOpen className="w-4 h-4" /> Nghe lại từ mẫu
             </button>
           )}
           {result.next && (
-            <button onClick={onBack} className="px-4 py-2 rounded-lg text-sm text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800">
+            <button onClick={onBack} className="px-4 py-2 max-md:min-h-10 max-md:inline-flex max-md:items-center max-md:justify-center rounded-lg text-sm text-slate-600 dark:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800">
               Danh sách bài
             </button>
           )}
@@ -488,13 +488,13 @@ function Quiz({
           <div className="flex gap-2">
             <button
               onClick={() => handleSpeak(q.say)}
-              className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5"
+              className="px-5 py-2.5 max-md:min-h-10 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5"
             >
               <Volume2 className="w-5 h-5" /> Nghe lại <Kbd>Space</Kbd>
             </button>
             <button
               onClick={() => handleSpeak(q.say, SLOW_RATE)}
-              className="px-3 py-2.5 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center gap-1.5 text-slate-700 dark:text-zinc-200"
+              className="px-3 py-2.5 max-md:min-h-10 rounded-xl border border-slate-300 dark:border-zinc-700 text-sm inline-flex items-center max-md:justify-center gap-1.5 text-slate-700 dark:text-zinc-200"
             >
               <Snail className="w-4 h-4" /> Chậm <Kbd>S</Kbd>
             </button>
@@ -551,7 +551,7 @@ function Quiz({
               </span>
               <button
                 onClick={next}
-                className="px-4 py-2 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
+                className="px-4 py-2 max-md:min-h-10 rounded-lg bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold inline-flex items-center max-md:justify-center gap-1.5 cursor-pointer shadow-xs active:scale-95 transition-all"
               >
                 {index + 1 >= total ? "Xem kết quả" : "Câu tiếp"} <Kbd>Enter</Kbd>
               </button>
@@ -605,7 +605,7 @@ function LessonView({
     <div className="max-w-3xl mx-auto space-y-4">
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-3">
-          <button onClick={onBack} className="text-sm text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 inline-flex items-center gap-1">
+          <button onClick={onBack} className="text-sm max-md:min-h-10 py-2 md:py-0 text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200 inline-flex items-center gap-1">
             <ArrowLeft className="w-4 h-4" /> Danh sách bài
           </button>
           <span className="text-xs text-slate-500 dark:text-zinc-400">
@@ -627,7 +627,7 @@ function LessonView({
                 role="tab"
                 aria-selected={active}
                 onClick={() => setStep(s.id)}
-                className={`flex items-center justify-center gap-1.5 py-2 px-2 rounded-lg text-sm font-semibold transition-colors ${
+                className={`flex items-center justify-center gap-1.5 py-2 px-2 max-md:min-h-10 rounded-lg text-sm font-semibold transition-colors ${
                   active
                     ? "bg-white dark:bg-zinc-900 text-violet-700 dark:text-violet-300 shadow-sm"
                     : "text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-zinc-200"
@@ -706,7 +706,7 @@ export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
   if (open && openIndex >= 0) {
     const lesson = lessons[openIndex];
     return (
-      <div className={PAGE_CONTAINER}>
+      <div className={`${PAGE_CONTAINER} max-md:p-3`}>
         <LessonView
           key={`${lesson.id}-${open.n}`}
           lesson={lesson}
@@ -726,7 +726,7 @@ export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
   const passedCount = lessons.filter((l) => isLessonPassed(progress[l.id])).length;
 
   return (
-    <div className={PAGE_CONTAINER}>
+    <div className={`${PAGE_CONTAINER} max-md:p-3`}>
       <div className="max-w-3xl mx-auto space-y-4">
         <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
@@ -766,13 +766,13 @@ export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
                 <>
                   <button
                     onClick={() => openLesson(next.id, "quiz")}
-                    className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold inline-flex items-center gap-1.5"
+                    className="px-5 py-2.5 max-md:min-h-10 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold inline-flex items-center max-md:justify-center gap-1.5"
                   >
                     <Ear className="w-4 h-4" /> Làm lại bài nghe ({next.quiz.length} câu) <Kbd>Enter</Kbd>
                   </button>
                   <button
                     onClick={() => openLesson(next.id, "learn")}
-                    className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 text-sm font-semibold text-slate-700 dark:text-zinc-200"
+                    className="px-4 py-2.5 max-md:min-h-10 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 text-sm font-semibold text-slate-700 dark:text-zinc-200 max-md:inline-flex max-md:items-center max-md:justify-center"
                   >
                     Nghe lại từ mẫu
                   </button>
@@ -781,13 +781,13 @@ export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
                 <>
                   <button
                     onClick={() => openLesson(next.id, "learn")}
-                    className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold inline-flex items-center gap-1.5"
+                    className="px-5 py-2.5 max-md:min-h-10 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-bold inline-flex items-center max-md:justify-center gap-1.5"
                   >
                     Bắt đầu luyện <ArrowRight className="w-4 h-4" /> <Kbd>Enter</Kbd>
                   </button>
                   <button
                     onClick={() => openLesson(next.id, "quiz")}
-                    className="px-4 py-2.5 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 text-sm font-semibold text-slate-700 dark:text-zinc-200 inline-flex items-center gap-1.5"
+                    className="px-4 py-2.5 max-md:min-h-10 rounded-xl border border-slate-300 dark:border-zinc-700 bg-white/70 dark:bg-zinc-900/70 text-sm font-semibold text-slate-700 dark:text-zinc-200 inline-flex items-center max-md:justify-center gap-1.5"
                   >
                     <Ear className="w-4 h-4" /> Làm bài nghe ngay
                   </button>
@@ -832,7 +832,7 @@ export default function PronunciationTab({ resetKey }: { resetKey?: number }) {
                   key={l.id}
                   onClick={() => openLesson(l.id, "learn")}
                   title={l.tagline}
-                  className={`group w-full text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-white dark:bg-zinc-900 hover:border-violet-300 dark:hover:border-violet-700 ${
+                  className={`group w-full max-md:min-h-12 text-left flex items-center gap-3 px-3 py-2.5 rounded-xl border bg-white dark:bg-zinc-900 hover:border-violet-300 dark:hover:border-violet-700 ${
                     status.tone === "next" ? "border-violet-300 dark:border-violet-800" : "border-slate-200 dark:border-zinc-800"
                   }`}
                 >
