@@ -53,7 +53,7 @@ create table if not exists public.grammar_content (
 
 alter table public.grammar_content enable row level security;
 drop policy if exists grammar_content_select on public.grammar_content;
-create policy grammar_content_select on public.grammar_content for select to authenticated
+create policy grammar_content_select on public.grammar_content for select to anon, authenticated
   using (exists (
     select 1 from public.catalog_meta m
     where m.key = 'grammar' and coalesce((m.value ->> 'enabled')::boolean, false)
@@ -63,5 +63,4 @@ create policy grammar_content_select on public.grammar_content for select to aut
 -- Privileges: read only. Everything else is revoked; service_role keeps its own access.
 -- ---------------------------------------------------------------------------------------------
 revoke all on public.catalog_meta, public.catalog_words, public.grammar_content from anon, authenticated;
-grant select on public.catalog_meta, public.catalog_words to anon, authenticated;
-grant select on public.grammar_content to authenticated;
+grant select on public.catalog_meta, public.catalog_words, public.grammar_content to anon, authenticated;

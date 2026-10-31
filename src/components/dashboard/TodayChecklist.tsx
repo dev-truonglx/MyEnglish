@@ -75,9 +75,9 @@ export default function TodayChecklist({
         </div>
       )}
 
-      <div className="md:gap-3 flex flex-wrap md:flex-nowrap items-baseline justify-between max-md:gap-x-3 max-md:gap-y-0.5">
-        <p className="text-sm font-semibold text-cyan-800 dark:text-cyan-300">{heading}</p>
-        <p className="text-xs text-slate-500 dark:text-zinc-400 shrink-0">
+      <div className="flex items-baseline justify-between gap-2">
+        <p className="text-sm font-semibold text-cyan-800 dark:text-cyan-300 truncate">{heading}</p>
+        <p className="text-xs text-slate-500 dark:text-zinc-400 shrink-0 text-right">
           {tasks.length - left.length}/{tasks.length} việc · còn ~{minutesLeft} phút
         </p>
       </div>

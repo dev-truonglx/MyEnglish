@@ -68,9 +68,9 @@ export default function ClozeCard({
             <div className="text-center space-y-1 shrink-0">
               <span className="text-xs font-mono uppercase tracking-wider text-indigo-700 dark:text-indigo-400 font-bold flex items-center justify-center gap-1.5">
                 <FileCode className="w-4 h-4" />
-                Điền từ tiếng Anh còn thiếu vào ngữ cảnh
+                Điền từ tiếng Anh còn thiếu
               </span>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
+              <p className="hidden md:block text-xs text-slate-500 dark:text-zinc-400">
                 Gõ từ và nhấn Enter. Đúng thì xem lại đáp án rồi nhấn Enter để sang câu mới; sai thì nhập lại.
               </p>
             </div>

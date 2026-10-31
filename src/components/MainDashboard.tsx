@@ -56,6 +56,14 @@ const VocabSetupScreen = lazy(() => import("./VocabSetupScreen"));
 const GrammarTenseSetupModal = lazy(() => import("./grammar/GrammarTenseSetupModal"));
 const loadReflexChallengeModal = () => import("./reflex/ReflexChallengeModal");
 const ReflexChallengeModal = lazy(loadReflexChallengeModal);
+const AuthSyncPromptModal = lazy(() => import("./AuthSyncPromptModal"));
+import {
+  promptAuthSyncIfGuest,
+  PROMPT_AUTH_SYNC_EVENT,
+  type AuthPromptOptions,
+  type AuthPromptReason,
+} from "@/services/authPrompt";
+import { useAuthStore } from "@/stores/authStore";
 
 function TabFallback() {
   return (
@@ -203,6 +211,66 @@ export default function MainDashboard({
     confirmText?: string;
   } | null>(null);
 
+  const [authSyncPrompt, setAuthSyncPrompt] = useState<{
+    isOpen: boolean;
+    reason: AuthPromptReason;
+    title?: string;
+    message?: string;
+  }>({ isOpen: false, reason: "exit_lesson" });
+
+  useEffect(() => {
+    const onPrompt = (e: Event) => {
+      const custom = e as CustomEvent<AuthPromptOptions>;
+      setAuthSyncPrompt({
+        isOpen: true,
+        reason: custom.detail?.reason ?? "exit_lesson",
+        title: custom.detail?.title,
+        message: custom.detail?.message,
+      });
+    };
+    window.addEventListener(PROMPT_AUTH_SYNC_EVENT, onPrompt);
+    return () => window.removeEventListener(PROMPT_AUTH_SYNC_EVENT, onPrompt);
+  }, []);
+
+  // Handle tab closing or browser navigation while studying as a guest
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      const { configured, user } = useAuthStore.getState();
+      if (!configured || user) return;
+      if (isReviewingRef.current) {
+        e.preventDefault();
+        e.returnValue = "Bạn chưa đăng nhập. Hãy đăng nhập hoặc đăng ký để đồng bộ dữ liệu học.";
+        try {
+          sessionStorage.setItem("myenglish_pending_auth_prompt", "close_tab");
+        } catch {}
+        return e.returnValue;
+      }
+    };
+
+    const checkPendingPrompt = () => {
+      try {
+        if (sessionStorage.getItem("myenglish_pending_auth_prompt") === "close_tab") {
+          sessionStorage.removeItem("myenglish_pending_auth_prompt");
+          promptAuthSyncIfGuest({
+            reason: "close_tab",
+            title: "Lưu tiến độ trước khi rời đi",
+            message:
+              "Bạn chưa đăng nhập. Hãy đăng nhập hoặc đăng ký tài khoản để đồng bộ dữ liệu học và không bị mất kết quả khi tắt tab.",
+          });
+        }
+      } catch {}
+    };
+
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener("focus", checkPendingPrompt);
+    document.addEventListener("visibilitychange", checkPendingPrompt);
+    return () => {
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener("focus", checkPendingPrompt);
+      document.removeEventListener("visibilitychange", checkPendingPrompt);
+    };
+  }, []);
+
   /**
    * If a review session has already completed (reached SessionSummary), automatically finalize it
    * when the user navigates away or tries to start another session without pressing "Hoàn tất".
@@ -215,6 +283,7 @@ export default function MainDashboard({
       setIsReviewing(false);
       setFocusPlan(null);
       topUpNewWords().catch(() => {}).finally(() => refreshWords());
+      promptAuthSyncIfGuest("exit_lesson");
       return true;
     }
     return false;
@@ -283,6 +352,7 @@ export default function MainDashboard({
       setTabResetKey((k) => k + 1);
       setGrammarLessonToOpen(null);
     }
+    promptAuthSyncIfGuest("exit_lesson");
   }, [confirmExitNav, refreshWords]);
 
   useEffect(() => {
@@ -1334,8 +1404,8 @@ export default function MainDashboard({
         forgottenDue={forgottenDue}
       />
       )}
-      {/* BOTTOM NAV (phones only, same condition as the sidebar) */}
-      {!focusing && (
+      {/* BOTTOM NAV (phones only, hidden during active review session) */}
+      {!focusing && !isReviewing && (
       <MobileNav
         activeTab={activeTab}
         setActiveTab={handleSelectTab}
@@ -1350,9 +1420,9 @@ export default function MainDashboard({
       )}
 
       {/* MAIN CONTENT AREA */}
-      <main className={`flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-zinc-950${focusing ? "" : " pb-14 md:pb-0"}`}>
+      <main className={`flex-1 flex flex-col min-w-0 overflow-hidden bg-slate-50 dark:bg-zinc-950${focusing || isReviewing ? "" : " pb-14 md:pb-0"}`}>
         {/* Top App Bar */}
-        {!focusing && (
+        {!focusing && !isReviewing && (
         <DashboardHeader
           searchInputRef={searchInputRef}
           searchQuery={searchQuery}
@@ -1584,6 +1654,7 @@ export default function MainDashboard({
                   setFocusPlan(null);
                   handleSelectTab(tab);
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                  promptAuthSyncIfGuest("exit_lesson");
                 }}
                 onFinish={() => {
                   sessionCompletedRef.current = false;
@@ -1594,6 +1665,7 @@ export default function MainDashboard({
                   // Close the loop on the day: back to "Hôm nay" (what is left, the streak, the goal)
                   setActiveTab("today");
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                  promptAuthSyncIfGuest("exit_lesson");
                 }}
                 onExit={() => {
                   sessionCompletedRef.current = false;
@@ -1604,6 +1676,7 @@ export default function MainDashboard({
                   setActiveTab("today");
                   // Reviews answered before exiting were already persisted
                   topUpNewWords().catch(() => {}).finally(() => refreshWords());
+                  promptAuthSyncIfGuest("exit_lesson");
                 }}
               />
             </Suspense>
@@ -1637,7 +1710,10 @@ export default function MainDashboard({
       {showReviewModalPreview && (
         <Suspense fallback={null}>
           <FocusReviewModal
-            onClose={() => setShowReviewModalPreview(false)}
+            onClose={() => {
+              setShowReviewModalPreview(false);
+              promptAuthSyncIfGuest("exit_lesson");
+            }}
             isPreview={true}
           />
         </Suspense>
@@ -1667,7 +1743,10 @@ export default function MainDashboard({
           <ReflexChallengeModal
             words={words}
             isOpen={reflexChallengeOpen}
-            onClose={() => setReflexChallengeOpen(false)}
+            onClose={() => {
+              setReflexChallengeOpen(false);
+              promptAuthSyncIfGuest("exit_lesson");
+            }}
             onXPUpdated={() => {
               void refreshWords();
             }}
@@ -1677,6 +1756,26 @@ export default function MainDashboard({
 
       {/* LEVEL UP CELEBRATION & BADGE UNLOCK TOASTS */}
       <LevelUpModal />
+
+      {/* GUEST AUTH & SYNC PROMPT MODAL */}
+      {authSyncPrompt.isOpen && (
+        <Suspense fallback={null}>
+          <AuthSyncPromptModal
+            isOpen={authSyncPrompt.isOpen}
+            reason={authSyncPrompt.reason}
+            title={authSyncPrompt.title}
+            message={authSyncPrompt.message}
+            onClose={() => setAuthSyncPrompt((prev) => ({ ...prev, isOpen: false }))}
+            onSuccess={() => {
+              setAuthSyncPrompt((prev) => ({ ...prev, isOpen: false }));
+              setGlobalToast({
+                title: "Đồng bộ thành công",
+                body: "Tiến trình học của bạn đã được lưu lên đám mây.",
+              });
+            }}
+          />
+        </Suspense>
+      )}
 
       {/* CONFIRM EXIT CURRENT REVIEW MODAL */}
       {confirmExitNav && (

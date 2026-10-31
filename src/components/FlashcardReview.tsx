@@ -313,7 +313,7 @@ export default function FlashcardReview({
   const answerShown = isIntroCard || hasCheckedAnswer || (effectiveExerciseType === "flip" && isFlipped);
 
   return (
-    <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-3 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
+    <div className="flex-1 min-h-0 flex flex-col items-center justify-between p-2 sm:p-4 md:p-6 max-w-2xl mx-auto w-full select-none h-full">
       {focus && (
         <FocusBar
           remainingMs={focusSession.remainingMs}
@@ -404,7 +404,7 @@ export default function FlashcardReview({
               }
             : undefined
         }
-        className={`w-full flex-1 min-h-[200px] max-h-[620px] my-auto overflow-y-auto overflow-x-hidden rounded-3xl border bg-white dark:bg-zinc-950 p-4 md:p-6 shadow-xl dark:shadow-2xl flex flex-col justify-between transition-all relative ${
+        className={`w-full flex-1 min-h-0 max-h-none md:max-h-[640px] my-1 md:my-auto overflow-y-auto overflow-x-hidden rounded-2xl md:rounded-3xl border bg-white dark:bg-zinc-950 p-2.5 sm:p-4 md:p-6 shadow-md md:shadow-xl dark:shadow-2xl flex flex-col justify-between transition-all relative ${
           answerShown ? "select-text" : ""
         } ${
           effectiveExerciseType === "flip" ? "cursor-pointer hover:border-slate-400 dark:hover:border-zinc-700/80" : ""
@@ -462,7 +462,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: MULTIPLE CHOICE ----------------- */}
         {effectiveExerciseType === "multiple_choice" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <MultipleChoiceExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -477,7 +477,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: LETTER TILES (first step of typed recall) ----------------- */}
         {effectiveExerciseType === "letter_tiles" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <LetterTilesExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -491,7 +491,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: SENTENCE BUILDER ----------------- */}
         {effectiveExerciseType === "sentence_builder" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <SentenceBuilderExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -506,7 +506,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: CONTEXT MATCH ----------------- */}
         {effectiveExerciseType === "context_match" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <ContextMatchExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -523,7 +523,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: MEANING MATCH (MINI-GAME) ----------------- */}
         {effectiveExerciseType === "meaning_match" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <MeaningMatchExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -540,7 +540,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: LISTENING DICTATION ----------------- */}
         {effectiveExerciseType === "listening" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <ListeningDictationExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -555,7 +555,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: FREE WRITING (AI-graded own sentence) ----------------- */}
         {effectiveExerciseType === "free_writing" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <FreeWritingExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -571,7 +571,7 @@ export default function FlashcardReview({
 
         {/* ----------------- MODE: REVERSE CLOZE ----------------- */}
         {effectiveExerciseType === "reverse_cloze" && (
-          <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+          <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
             <ReverseClozeExercise
               key={`${currentWord.id}-${currentIndex}`}
               word={currentWord}
@@ -588,7 +588,7 @@ export default function FlashcardReview({
         {/* ----------------- MODE 1: STANDARD FLIP ----------------- */}
         {effectiveExerciseType === "flip" &&
           (isPretestCard && pretest ? (
-            <div className="flex-1 min-h-[160px] flex flex-col justify-center py-2 overflow-y-auto">
+            <div className="flex-1 min-h-0 flex flex-col justify-center py-1 md:py-2 overflow-y-auto">
               <PretestCard question={pretest} phonetic={currentWord.phonetic} onDone={handlePretestDone} />
             </div>
           ) : (

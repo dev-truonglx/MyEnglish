@@ -11,7 +11,7 @@ interface ReviewTopBarProps {
   handleModeChange: (newMode: StudyMode) => void;
   currentIndex: number;
   queue: ReviewCard[];
-  currentWord: ReviewCard;
+  currentWord?: ReviewCard;
   practiceMode: boolean;
   consecutiveCorrect?: number;
   /** Focus session: leaving goes through its own bar (asks first) */
@@ -25,7 +25,6 @@ export default function ReviewTopBar({
   handleModeChange,
   currentIndex,
   queue,
-  currentWord,
   practiceMode,
   consecutiveCorrect,
   hideExit = false,
@@ -34,22 +33,22 @@ export default function ReviewTopBar({
   // answers is the most immediate reward a beginner gets
   const simple = isSimpleMode();
   return (
-    <div className="w-full shrink-0 mb-3 flex items-center justify-between flex-wrap gap-3">
+    <div className="w-full shrink-0 mb-2 md:mb-3 flex items-center justify-between gap-2">
       {hideExit ? (
         <span />
       ) : (
         <button
           onClick={onExit}
-          className="inline-flex items-center gap-1.5 max-md:min-h-10 pr-3 md:pr-0 text-xs text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+          className="inline-flex items-center gap-1 py-1 pr-2 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white transition-colors shrink-0"
         >
           <ChevronLeft className="w-4 h-4" />
           <span>Thoát</span>
         </button>
       )}
 
-      {/* Study Mode Selector */}
+      {/* Study Mode Selector (desktop only: on mobile we keep screen clean and focused) */}
       {!simple && (
-      <div className="flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-x-auto max-w-full gap-1">
+      <div className="hidden md:flex items-center bg-slate-100 dark:bg-zinc-900/90 p-1 rounded-xl border border-slate-200 dark:border-zinc-800 shadow-sm overflow-x-auto max-w-full gap-1">
         <button
           onClick={() => handleModeChange("mixed")}
           className={`flex items-center gap-1 px-2.5 py-1.5 max-md:min-h-10 rounded-lg text-xs font-medium shrink-0 transition-all ${
@@ -147,53 +146,44 @@ export default function ReviewTopBar({
       )}
 
       {/* Progress indicator & Streak Pill */}
-      <div className="flex items-center gap-3 flex-wrap justify-end">
+      <div className="flex items-center gap-2 md:gap-3 justify-end shrink-0">
         {consecutiveCorrect !== undefined && consecutiveCorrect >= 3 && (
           <div
             // A new key at every combo (5, 10…): the pill zooms in again together with the combo sound
             key={`combo-${Math.floor(consecutiveCorrect / COMBO_EVERY)}`}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold shadow-md transition-all duration-300 animate-in fade-in zoom-in-95 ${
+            className={`inline-flex items-center gap-1 px-2 md:px-3 py-0.5 md:py-1 rounded-full text-[10px] md:text-xs font-bold shadow-xs transition-all duration-300 animate-in fade-in zoom-in-95 ${
               consecutiveCorrect >= 10
-                ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 shadow-amber-500/25 border border-yellow-300"
+                ? "bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 text-slate-950 border border-yellow-300"
                 : consecutiveCorrect >= 5
-                ? "bg-gradient-to-r from-rose-500 to-orange-500 text-white shadow-rose-500/25 border border-rose-400/50"
-                : "bg-gradient-to-r from-orange-500 to-amber-500 text-white shadow-orange-500/20 border border-orange-400/40"
+                ? "bg-gradient-to-r from-rose-500 to-orange-500 text-white border border-rose-400/50"
+                : "bg-gradient-to-r from-orange-500 to-amber-500 text-white border border-orange-400/40"
             }`}
             title={`Chuỗi trả lời đúng liên tiếp: ${consecutiveCorrect} câu`}
           >
-            <span className="text-sm select-none animate-pulse">
+            <span className="text-xs select-none">
               {consecutiveCorrect >= 10 ? "👑" : consecutiveCorrect >= 5 ? "⚡" : "🔥"}
             </span>
-            <span className="tracking-wide">
-              {`Đúng liền ${consecutiveCorrect} câu`}
+            <span className="tracking-tight hidden sm:inline">
+              {`Đúng liền ${consecutiveCorrect}`}
+            </span>
+            <span className="tracking-tight sm:hidden font-mono">
+              {consecutiveCorrect}
             </span>
           </div>
         )}
 
-        <div className="text-xs font-mono text-slate-500 dark:text-zinc-400">
-          Còn <span className="text-slate-900 dark:text-white font-bold">{itemsLeft(queue.length, currentIndex)}</span> thẻ
-          {currentWord && (
-            <span
-              className="ml-2 px-1.5 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300"
-              title={
-                currentWord.direction === "production"
-                  ? "Tự nhớ ra từ tiếng Anh từ nghĩa tiếng Việt (lịch ôn riêng)"
-                  : "Hiểu nghĩa khi gặp từ tiếng Anh (lịch ôn riêng)"
-              }
-            >
-              {currentWord.direction === "production" ? "Tự nhớ ra từ" : "Hiểu nghĩa"}
-            </span>
-          )}
+        <div className="text-[11px] md:text-xs font-mono text-slate-500 dark:text-zinc-400 flex items-center gap-1">
+          <span>Còn <strong className="text-slate-900 dark:text-white font-bold">{itemsLeft(queue.length, currentIndex)}</strong></span>
           {practiceMode && (
             <span
-              className="ml-2 px-1.5 py-0.5 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300"
+              className="hidden sm:inline-block ml-1 px-1.5 py-0.2 rounded bg-sky-100 dark:bg-sky-950/60 text-sky-700 dark:text-sky-300 text-[10px]"
               title="Không có từ đến hạn: phiên này không thay đổi lịch ôn"
             >
               Luyện thêm
             </span>
           )}
         </div>
-        <div className="w-24 h-2 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
+        <div className="w-14 sm:w-20 md:w-24 h-1.5 md:h-2 rounded-full bg-slate-200 dark:bg-zinc-800 overflow-hidden">
           <div
             className="h-full bg-gradient-to-r from-cyan-500 to-blue-500 transition-all duration-300"
             style={{ width: `${((currentIndex + 1) / queue.length) * 100}%` }}

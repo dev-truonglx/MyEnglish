@@ -303,7 +303,7 @@ export default function TodayTab({
 
   const showQuests = !loading && !empty;
   const twoColumns = showQuests || showRank;
-  const statCard = "flex items-center gap-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 py-2 min-w-0";
+  const statCard = "flex items-center gap-1.5 sm:gap-2.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-2 py-1.5 sm:px-3 sm:py-2 min-w-0 overflow-hidden";
 
   return (
     <div className={`${PAGE_CONTAINER} max-md:p-3`}>
@@ -311,33 +311,33 @@ export default function TodayTab({
         {/* Greeting on the left, the three numbers as compact cards on the right (they wrap below on narrow windows) */}
         <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
           <div className="min-w-0">
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white leading-tight truncate">
+            <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white leading-tight truncate">
               {greeting(now.getHours(), signedIn ? displayName : null)} 👋
             </h2>
             <p className="text-xs text-slate-500 dark:text-zinc-400">
               {now.toLocaleDateString("vi-VN", { weekday: "long", day: "numeric", month: "long" })}
             </p>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 w-full sm:w-auto">
+          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 w-full sm:w-auto">
             <div className={statCard} title="Chuỗi ngày học">
-              <Flame className="w-5 h-5 text-orange-500 shrink-0" />
+              <Flame className="w-4 h-4 sm:w-5 sm:h-5 text-orange-500 shrink-0" />
               <div className="min-w-0">
-                <div className="text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">{streakStats.currentStreak} ngày</div>
-                <div className={`text-[11px] truncate ${streakStats.goalReached ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-zinc-400"}`}>
+                <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">{streakStats.currentStreak} ngày</div>
+                <div className={`text-[10px] sm:text-[11px] truncate ${streakStats.goalReached ? "text-emerald-600 dark:text-emerald-400" : "text-slate-500 dark:text-zinc-400"}`}>
                   {streakStats.todayCount === 0
-                    ? "Hôm nay chưa học"
-                    : `Hôm nay ${streakStats.todayCount}/${streakStats.dailyGoal} câu${streakStats.goalReached ? " ✓" : ""}`}
+                    ? "Chưa học"
+                    : `${streakStats.todayCount}/${streakStats.dailyGoal} câu${streakStats.goalReached ? " ✓" : ""}`}
                 </div>
               </div>
             </div>
             <div className={statCard} title="Từ của bạn">
-              <Target className="w-5 h-5 text-emerald-500 shrink-0" />
+              <Target className="w-4 h-4 sm:w-5 sm:h-5 text-emerald-500 shrink-0" />
               <div className="min-w-0">
-                <div className="text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">
-                  {status.rememberedLong} <span className="text-xs font-semibold text-slate-500 dark:text-zinc-400">{WORD_STATUS_LABELS.remembered_long.toLowerCase()}</span>
+                <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
+                  {status.rememberedLong} <span className="text-[10px] sm:text-xs font-semibold text-slate-500 dark:text-zinc-400">{WORD_STATUS_LABELS.remembered_long.toLowerCase()}</span>
                 </div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
-                  {status.learning} từ {WORD_STATUS_LABELS.learning.toLowerCase()}
+                <div className="text-[10px] sm:text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                  {status.learning} {WORD_STATUS_LABELS.learning.toLowerCase()}
                 </div>
               </div>
             </div>
@@ -345,12 +345,12 @@ export default function TodayTab({
               className={statCard}
               title={gain && baseline ? `Hiểu tài liệu IT: tăng từ ngày ${baseline.day.split("-").slice(1).reverse().map(Number).join("/")}` : "Hiểu tài liệu IT: số từ bạn đã nhận ra"}
             >
-              <BookOpenText className="w-5 h-5 text-violet-500 shrink-0" />
+              <BookOpenText className="w-4 h-4 sm:w-5 sm:h-5 text-violet-500 shrink-0" />
               <div className="min-w-0">
-                <div className="text-sm font-bold text-slate-900 dark:text-white whitespace-nowrap">
+                <div className="text-xs sm:text-sm font-bold text-slate-900 dark:text-white truncate">
                   {gain ? (
                     <>
-                      <span className="text-xs font-semibold text-slate-400 dark:text-zinc-500">{gain.from}% → </span>
+                      <span className="text-[10px] sm:text-xs font-semibold text-slate-400 dark:text-zinc-500">{gain.from}% → </span>
                       {gain.to}%
                     </>
                   ) : coverage ? (
@@ -359,7 +359,7 @@ export default function TodayTab({
                     "…"
                   )}
                 </div>
-                <div className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">hiểu tài liệu IT</div>
+                <div className="text-[10px] sm:text-[11px] text-slate-500 dark:text-zinc-400 truncate">tài liệu IT</div>
               </div>
             </div>
           </div>

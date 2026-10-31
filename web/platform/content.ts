@@ -34,10 +34,15 @@ export async function fetchVocabCatalog(): Promise<Record<string, unknown>> {
   return { ...head, words: rows.map((r) => r.data) };
 }
 
-/** An empty book when it is hidden or not uploaded: grammarBook.ts then seeds nothing and tries again later */
+/** An empty book when it is hidden, not uploaded, or unauthenticated: grammarBook.ts then seeds nothing and tries again later */
 export async function fetchGrammarCatalog(): Promise<Record<string, unknown>> {
-  const meta = await readMeta("grammar");
-  if (!meta || meta.enabled === false) return { version: 0, totalFiles: 0, files: [] };
-  const rows = await readAll<{ data: unknown }>("grammar_content", "data");
-  return { version: meta.version, totalFiles: rows.length, files: rows.map((r) => r.data) };
+  try {
+    const meta = await readMeta("grammar");
+    if (!meta || meta.enabled === false) return { version: 0, totalFiles: 0, files: [] };
+    const rows = await readAll<{ data: unknown }>("grammar_content", "data");
+    return { version: meta.version, totalFiles: rows.length, files: rows.map((r) => r.data) };
+  } catch (err) {
+    console.info("fetchGrammarCatalog: fallback to local grammar catalog", err instanceof Error ? `(${err.message})` : err);
+    return { version: 0, totalFiles: 0, files: [] };
+  }
 }

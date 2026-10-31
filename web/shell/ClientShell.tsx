@@ -177,14 +177,14 @@ export default function ClientShell({
     };
   }, []);
 
-  // 2. An account is required (plan §11)
+  // 2. Allow guest to learn first; login prompt only triggers when exiting a lesson or closing the tab
   useEffect(() => {
     if (!ready) return;
     setPhase((p) => {
-      if (p.kind === "auth" || p.kind === "login") return user ? { kind: "preparing", steps: [] } : { kind: "login" };
+      if (p.kind === "auth") return { kind: "preparing", steps: [] };
       return p;
     });
-  }, [ready, user]);
+  }, [ready]);
 
   // 3. Database, deck, the account's progress, then the app
   const preparing = phase.kind === "preparing";
@@ -219,8 +219,9 @@ export default function ClientShell({
 
       // First pass before the app renders, so a learner new to this browser sees their own progress
       // instead of the first-run onboarding
-      if (devOffline) show(2, "done", "Bỏ qua (chế độ dev offline)");
-      else {
+      if (devOffline || !useAuthStore.getState().user) {
+        show(2, "done", useAuthStore.getState().user ? "Bỏ qua (chế độ dev offline)" : "Chưa đăng nhập (dữ liệu lưu trên máy này)");
+      } else {
         const { runSync } = await import("@/services/sync/manager");
         await runSync();
         const syncError = useAuthStore.getState().sync.error;

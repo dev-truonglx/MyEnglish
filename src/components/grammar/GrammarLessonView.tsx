@@ -20,6 +20,7 @@ import HandbookView from "./HandbookView";
 import GrammarPlayer from "./GrammarPlayer";
 import GrammarExerciseImportModal from "./GrammarExerciseImportModal";
 import { LessonStatusChip, MasteryBar } from "./PathPicker";
+import { promptAuthSyncIfGuest } from "@/services/authPrompt";
 
 export type GrammarLessonTab = "handbook" | "practice" | "diagnostic";
 
@@ -122,6 +123,7 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
   const closePlayer = () => {
     setPlayer(null);
     setTick((t) => t + 1);
+    promptAuthSyncIfGuest("exit_lesson");
   };
 
   /** A question that uses another lesson opens that lesson; this lesson's own handbook is shown here */
@@ -222,7 +224,10 @@ export default function GrammarLessonView({ lesson, chapterId, initialTab = "han
           mode={player.mode}
           title={player.title}
           subtitle={player.subtitle}
-          onFinish={player.onFinish}
+          onFinish={(results, info) => {
+            player.onFinish?.(results, info);
+            promptAuthSyncIfGuest("exit_lesson");
+          }}
           onExit={closePlayer}
           onOpenLesson={openFromPlayer}
         />

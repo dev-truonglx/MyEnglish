@@ -73,8 +73,8 @@ export default function GradingBar({
       </button>
     );
   return (
-    // Phones: min height instead of fixed h-14 so the 2x2 grade grid can grow
-    <div className="w-full mt-3 max-md:min-h-14 md:h-14 shrink-0 flex items-center justify-center">
+    // Phones: compact min height so cards have maximum room for exercise content
+    <div className="w-full mt-1.5 md:mt-3 min-h-10 md:h-14 shrink-0 flex items-center justify-center">
       {introMode ? (
         <div className="w-full md:h-full flex gap-2">
           {knownButton("flex-1 h-full")}

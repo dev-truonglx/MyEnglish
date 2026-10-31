@@ -52,9 +52,10 @@ export default function FlipCard({ currentWord, synonyms, isFlipped, setIsFlippe
             </div>
           )}
 
-          <div className="pt-4 md:pt-8 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 animate-pulse">
-            <Eye className="w-4 h-4" />
-            <span>Nhấn Space hoặc click vào thẻ để xem định nghĩa</span>
+          <div className="pt-2 md:pt-8 text-xs text-slate-500 dark:text-zinc-400 flex items-center gap-1.5 animate-pulse">
+            <Eye className="w-4 h-4 shrink-0" />
+            <span className="md:hidden">Chạm vào thẻ để xem định nghĩa</span>
+            <span className="hidden md:inline">Nhấn Space hoặc click vào thẻ để xem định nghĩa</span>
           </div>
         </div>
       ) : (

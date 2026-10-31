@@ -19,6 +19,7 @@ import GrammarImportDialog from "./GrammarImportDialog";
 import GrammarExerciseImportModal from "./GrammarExerciseImportModal";
 import GrammarPlayer from "./GrammarPlayer";
 import { PAGE_CONTAINER } from "../dashboard/shared";
+import { promptAuthSyncIfGuest } from "@/services/authPrompt";
 
 interface GrammarHubProps {
   initialLessonId?: string | null;
@@ -225,10 +226,13 @@ export default function GrammarHub({ initialLessonId = null, resetKey }: Grammar
           mode={player.mode}
           title={player.title}
           subtitle={player.subtitle}
-          onFinish={() => {}}
+          onFinish={() => {
+            promptAuthSyncIfGuest("exit_lesson");
+          }}
           onExit={() => {
             setPlayer(null);
             void loadData();
+            promptAuthSyncIfGuest("exit_lesson");
           }}
           onOpenLesson={(lessonId) => {
             setPlayer(null);

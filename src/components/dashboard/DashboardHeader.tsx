@@ -118,7 +118,7 @@ export default function DashboardHeader({
   return (
     <>
     {/* Phones: the search takes a row of its own, the controls wrap under it */}
-    <header className="min-h-14 py-2 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-3 md:px-6 flex flex-wrap md:flex-nowrap items-center justify-between gap-3 shrink-0 backdrop-blur-md">
+    <header className="min-h-14 py-2 border-b border-slate-200 dark:border-zinc-800/80 bg-white/80 dark:bg-zinc-900/40 px-3 md:px-6 flex flex-wrap md:flex-nowrap items-center justify-between gap-2 md:gap-3 shrink-0 backdrop-blur-md max-w-full overflow-x-hidden">
       {/* Search Bar: it only filters the word library, so it is only shown there */}
       {activeTab !== "library" ? (
         <div className="hidden md:block flex-1" />

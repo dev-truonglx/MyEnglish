@@ -50,9 +50,9 @@ export default function SpellingCard({
             <div className="text-center space-y-1 shrink-0">
               <span className="text-xs font-mono uppercase tracking-wider text-emerald-700 dark:text-emerald-400 font-bold flex items-center justify-center gap-1.5">
                 <Keyboard className="w-4 h-4" />
-                Luyện gõ chính tả (Spelling Recall)
+                Luyện gõ chính tả
               </span>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">
+              <p className="hidden md:block text-xs text-slate-500 dark:text-zinc-400">
                 Đọc nghĩa, tự nhớ ra từ tiếng Anh rồi nhấn Enter. Phát âm sẽ được đọc sau khi trả lời.
               </p>
             </div>

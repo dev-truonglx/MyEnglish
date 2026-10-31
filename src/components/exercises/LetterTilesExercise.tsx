@@ -375,16 +375,16 @@ export default function LetterTilesExercise({
   }, [tiles, picked, pick, undo, check, letterCount, state]);
 
   return (
-    <div className="w-full max-w-xl mx-auto space-y-3 md:space-y-4 animate-in fade-in duration-200">
+    <div className="w-full max-w-xl mx-auto space-y-2 md:space-y-4 animate-in fade-in duration-200">
       {!hideHeader ? (
-        <div className="rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-4 md:p-6 text-center space-y-2 shadow-sm">
-          <div className="text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
-          <h2 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-white break-words">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn, target, example), target)}</h2>
-          {word.part_of_speech && <p className="text-xs italic text-slate-400">{word.part_of_speech}</p>}
-          {example?.sentence_vn && <p className="text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
+        <div className="rounded-xl md:rounded-2xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900/80 p-2.5 md:p-5 text-center space-y-1 md:space-y-2 shadow-xs">
+          <div className="text-[10px] md:text-[11px] font-medium text-cyan-700 dark:text-cyan-400">Xếp chữ cái thành từ tiếng Anh có nghĩa:</div>
+          <h2 className="text-lg md:text-2xl font-bold text-slate-900 dark:text-white break-words">{maskTargetInMeaning(getConciseMeaning(word.meaning_vn, target, example), target)}</h2>
+          {word.part_of_speech && <p className="text-[11px] md:text-xs italic text-slate-400">{word.part_of_speech}</p>}
+          {example?.sentence_vn && <p className="text-xs md:text-sm text-slate-500 dark:text-zinc-400">Ví dụ: {example.sentence_vn}</p>}
         </div>
       ) : (
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400 pt-1">
+        <div className="flex items-center justify-between text-xs font-semibold text-slate-600 dark:text-zinc-400 pt-0.5">
           <span>Xếp chữ cái thành từ tiếng Anh:</span>
           <span className="text-[11px] font-mono text-cyan-600 dark:text-cyan-400 font-bold">
             {letterCount} chữ cái
@@ -393,12 +393,12 @@ export default function LetterTilesExercise({
       )}
 
       {/* Slots */}
-      <div className={`flex flex-wrap justify-center items-center gap-1 md:gap-1.5 min-h-[44px] md:min-h-[52px] py-1 ${state === "wrong" ? "animate-shake" : ""}`}>
+      <div className={`flex flex-wrap justify-center items-center gap-1 md:gap-1.5 min-h-[36px] md:min-h-[52px] py-0.5 ${state === "wrong" ? "animate-shake" : ""}`}>
         {slots.map((slotChar, i) => {
           const isFixed = FIXED.test(slotChar);
           if (isFixed) {
             return (
-              <span key={i} className="w-3 md:w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500">
+              <span key={i} className="w-2.5 md:w-4 flex items-center justify-center font-bold text-slate-400 dark:text-zinc-500 text-sm md:text-base">
                 {slotChar === " " ? "" : slotChar}
               </span>
             );
@@ -416,7 +416,7 @@ export default function LetterTilesExercise({
                 type="button"
                 onClick={() => unpickAt(nonFixedIdx)}
                 title="Bấm để xóa chữ này"
-                className={`w-8 h-10 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-lg md:text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
+                className={`w-7 h-8.5 sm:w-8 sm:h-9 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-base md:text-xl font-bold font-mono transition-all cursor-pointer select-none group shadow-xs ${
                   state === "wrong"
                     ? "border-amber-400 bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:border-rose-400 hover:bg-rose-50"
                     : "border-cyan-400 bg-cyan-50 dark:bg-cyan-950/30 text-slate-900 dark:text-white hover:border-rose-400 hover:bg-rose-50/80 hover:text-rose-600 dark:hover:bg-rose-950/40 dark:hover:text-rose-300 hover:scale-105 active:scale-95"
@@ -430,7 +430,7 @@ export default function LetterTilesExercise({
           return (
             <span
               key={i}
-              className={`w-8 h-10 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-lg md:text-xl font-bold font-mono select-none ${
+              className={`w-7 h-8.5 sm:w-8 sm:h-9 md:w-10 md:h-12 rounded-lg border-2 flex items-center justify-center text-base md:text-xl font-bold font-mono select-none ${
                 state === "correct"
                   ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300"
                   : state === "give_up"
@@ -449,7 +449,7 @@ export default function LetterTilesExercise({
       </div>
 
       {/* Tiles */}
-      <div className="flex flex-wrap justify-center gap-1.5 md:gap-2 py-1">
+      <div className="flex flex-wrap justify-center gap-1 md:gap-2 py-0.5">
         {tiles.map((t) => {
           const used = picked.includes(t.id);
           const pickedIdx = picked.indexOf(t.id);
@@ -465,7 +465,7 @@ export default function LetterTilesExercise({
               }}
               disabled={state === "correct" || state === "give_up"}
               title={used ? "Bấm để xóa chữ này khỏi từ đã ghép" : undefined}
-              className={`w-10 h-10 md:w-11 md:h-11 rounded-xl text-base md:text-lg font-bold font-mono shadow-sm transition-all max-md:flex max-md:items-center max-md:justify-center ${
+              className={`w-8.5 h-8.5 sm:w-10 sm:h-10 md:w-11 md:h-11 rounded-lg md:rounded-xl text-base md:text-lg font-bold font-mono shadow-xs transition-all flex items-center justify-center ${
                 used || state === "give_up"
                   ? "bg-slate-100 dark:bg-zinc-800/60 text-slate-400 dark:text-zinc-500 border border-dashed border-slate-300/70 dark:border-zinc-700/70 cursor-not-allowed opacity-60"
                   : "bg-white dark:bg-zinc-900 border-2 border-slate-300 dark:border-zinc-700 text-slate-800 dark:text-zinc-100 hover:border-cyan-400 active:scale-95 cursor-pointer"
