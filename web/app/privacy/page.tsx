@@ -9,8 +9,22 @@ export const metadata: Metadata = {
 
 export default function PrivacyPolicyPage() {
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-200 py-12 px-4 sm:px-6 lg:px-8 selection:bg-cyan-500 selection:text-white">
-      <div className="max-w-4xl mx-auto space-y-10">
+    <div className="fixed inset-0 overflow-y-auto overflow-x-hidden select-text bg-slate-50 dark:bg-zinc-950 text-slate-800 dark:text-zinc-200">
+      <style
+        dangerouslySetInnerHTML={{
+          __html: `
+            html, body {
+              height: auto !important;
+              min-height: 100% !important;
+              overflow-y: auto !important;
+              overflow-x: hidden !important;
+              user-select: text !important;
+            }
+          `,
+        }}
+      />
+      <main className="min-h-full py-12 px-4 sm:px-6 lg:px-8 selection:bg-cyan-500 selection:text-white">
+        <div className="max-w-4xl mx-auto space-y-10">
         {/* Header */}
         <header className="border-b border-slate-200 dark:border-zinc-800 pb-8 text-center sm:text-left">
           <div className="flex flex-col sm:flex-row items-center gap-4 mb-4">
@@ -294,5 +308,6 @@ export default function PrivacyPolicyPage() {
         </footer>
       </div>
     </main>
+  </div>
   );
 }
