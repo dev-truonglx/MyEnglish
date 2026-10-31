@@ -288,10 +288,10 @@ export default function PrivacyPolicyPage() {
               <p>
                 <strong>Email hỗ trợ (Support Email):</strong>{" "}
                 <a
-                  href="mailto:contact.myenglish.app@gmail.com"
+                  href="mailto:truonglx.dev@gmail.com"
                   className="text-cyan-600 dark:text-cyan-400 hover:underline font-medium"
                 >
-                  contact.myenglish.app@gmail.com
+                  truonglx.dev@gmail.com
                 </a>
               </p>
               <p>
