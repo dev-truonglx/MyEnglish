@@ -41,6 +41,7 @@ const FlashcardReview = lazy(() => import("./FlashcardReview"));
 const AnalyticsView = lazy(() => import("./AnalyticsView"));
 const CliGuideView = lazy(() => import("./CliGuideView"));
 const FocusReviewModal = lazy(() => import("./FocusReviewModal"));
+const ReviewNudge = lazy(() => import("./ReviewNudge"));
 const GrammarHub = lazy(() => import("./grammar/GrammarHub"));
 const OnboardingFlow = lazy(() => import("./OnboardingFlow"));
 const ReadingTab = lazy(() => import("./dashboard/ReadingTab"));
@@ -110,7 +111,12 @@ import DeleteWordModal from "./dashboard/DeleteWordModal";
 import type { WordCardMeta } from "./dashboard/WordCard";
 import { WORDS_CHANGED_WHILE_HIDDEN_EVENT, type WordsChangedDetail } from "@/services/reviewRecorder";
 import { getFocusSettings, newFocusPlan, saveFocusSettings, type FocusPlan } from "@/services/focusSession";
-import { resetIgnoredNudges, START_FOCUS_EVENT } from "@/services/reminderSettings";
+import {
+  hideReviewPopup,
+  resetIgnoredNudges,
+  START_FOCUS_EVENT,
+  type ReviewNudgePayload,
+} from "@/services/reminderSettings";
 import { loadForgottenWords } from "@/services/forgottenWords";
 import { checkKnownNow } from "@/services/knownWords";
 import { addKnownChecks, knownCheckCard } from "@/services/easyWords";
@@ -160,6 +166,7 @@ export default function MainDashboard({
   const refreshWordsByIds = useWordsStore((s) => s.refreshWordsByIds);
 
   const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
+  const [nudgePreviewPayload, setNudgePreviewPayload] = useState<ReviewNudgePayload | null>(null);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
   const [searchQuery, setSearchQuery] = useState(() => {
     try {
@@ -175,9 +182,11 @@ export default function MainDashboard({
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
   // The app opens on the unified active tab (or initialTab if specified)
   const [activeTab, setActiveTab] = useState<DashboardTab>(() => {
-    if (initialTab) return initialTab;
+    const isDesktop = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+    if (initialTab && (isDesktop || initialTab !== "writing")) return initialTab;
     const saved = getUnifiedSession();
     if (saved.isReviewing && saved.review?.cards?.length) return "review";
+    if (!isDesktop && saved.activeTab === "writing") return "today";
     return saved.activeTab || "today";
   });
   const activeTabRef = useRef(activeTab);
@@ -962,6 +971,7 @@ export default function MainDashboard({
       .catch(() => { });
 
     const handleOpenPreview = () => {
+      setNudgePreviewPayload(null);
       if (onOpenReviewPopupPreview) {
         onOpenReviewPopupPreview();
       } else {
@@ -969,8 +979,15 @@ export default function MainDashboard({
       }
     };
     const handleClosePreview = () => setShowReviewModalPreview(false);
+    const handleOpenNudgePreview = (e: Event) => {
+      const detail = (e as CustomEvent<ReviewNudgePayload | null>).detail;
+      if (detail) setNudgePreviewPayload(detail);
+    };
+    const handleCloseNudgePreview = () => setNudgePreviewPayload(null);
     window.addEventListener("open-review-popup-preview", handleOpenPreview);
     window.addEventListener("close-review-popup-preview", handleClosePreview);
+    window.addEventListener("open-review-nudge-preview", handleOpenNudgePreview);
+    window.addEventListener("close-review-nudge-preview", handleCloseNudgePreview);
 
     // Reviews recorded in the popup / other windows
     let unlistenWordsChangedFn: (() => void) | null = null;
@@ -1037,6 +1054,8 @@ export default function MainDashboard({
       window.removeEventListener("words-changed", handleWordsChanged);
       window.removeEventListener("open-review-popup-preview", handleOpenPreview);
       window.removeEventListener("close-review-popup-preview", handleClosePreview);
+      window.removeEventListener("open-review-nudge-preview", handleOpenNudgePreview);
+      window.removeEventListener("close-review-nudge-preview", handleCloseNudgePreview);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("visibilitychange", handleVisible);
       if (unlistenWordsChangedFn) unlistenWordsChangedFn();
@@ -1975,12 +1994,24 @@ export default function MainDashboard({
         />
       )}
 
+      {/* IN-APP CORNER REMINDER NUDGE (WEB & EXTENSION) */}
+      {nudgePreviewPayload && !showReviewModalPreview && (
+        <Suspense fallback={null}>
+          <ReviewNudge
+            embedded
+            initialPayload={nudgePreviewPayload}
+            onDone={() => setNudgePreviewPayload(null)}
+          />
+        </Suspense>
+      )}
+
       {/* FOCUS REVIEW POP-UP MODAL (PREVIEW OR IN-APP MODE) */}
       {showReviewModalPreview && (
         <Suspense fallback={null}>
           <FocusReviewModal
             onClose={() => {
               setShowReviewModalPreview(false);
+              void hideReviewPopup();
               promptAuthSyncIfGuest("exit_lesson");
             }}
             isPreview={true}

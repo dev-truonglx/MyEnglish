@@ -47,6 +47,8 @@ interface ReviewNudgeProps {
   onDone?: () => void;
   /** Optional initial payload for SSR / tests / preview */
   initialPayload?: ReviewNudgePayload;
+  /** Rendered as a floating corner overlay inside the main dashboard (web / extension) */
+  embedded?: boolean;
 }
 
 // Each tick asks Rust whether the cursor is over the card: twice a second is enough to pause the countdown
@@ -61,7 +63,7 @@ export const CHAIN_NEXT_CLOSE_MS = 4500;
 /** Last seconds of the countdown where the card pulses gently to catch peripheral vision */
 export const ATTENTION_PULSE_SECONDS = 5;
 
-export default function ReviewNudge({ onDone, initialPayload }: ReviewNudgeProps) {
+export default function ReviewNudge({ onDone, initialPayload, embedded }: ReviewNudgeProps) {
   const [payload, setPayload] = useState<ReviewNudgePayload>(() => initialPayload ?? buildNudgePayload(0));
   const [mode, setMode] = useState<"nudge" | "quiz" | "later">(() =>
     initialPayload?.microQuiz && initialPayload?.motivation?.isMicroQuizPreferred ? "quiz" : "nudge"
@@ -322,6 +324,16 @@ export default function ReviewNudge({ onDone, initialPayload }: ReviewNudgeProps
   // Keys (1, 2, 3 for the quiz; Enter to start or advance chain; Esc to snooze) in browser preview
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === "INPUT" ||
+          target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
       if (mode === "quiz" && quizResult) {
         if (e.key === "Enter") {
           if (hasNextQuiz) handleNextQuizQuestion();
@@ -366,15 +378,15 @@ export default function ReviewNudge({ onDone, initialPayload }: ReviewNudgeProps
       })
       .catch(() => {});
 
-    if ("__TAURI_INTERNALS__" in window) {
-      invoke<(ReviewNudgePayload & { nudgeId?: number }) | null>("take_review_nudge_payload")
-        .then((pending) => {
-          if (!cancelled && pending) begin(pending);
-        })
-        .catch(() => {});
-    }
-
-    if (!("__TAURI_INTERNALS__" in window)) begin(buildNudgePayload(5));
+    invoke<(ReviewNudgePayload & { nudgeId?: number }) | null>("take_review_nudge_payload")
+      .then((pending) => {
+        if (cancelled) return;
+        if (pending) begin(pending);
+        else if (!("__TAURI_INTERNALS__" in window)) begin(initialPayload ?? buildNudgePayload(5));
+      })
+      .catch(() => {
+        if (!cancelled && !("__TAURI_INTERNALS__" in window)) begin(initialPayload ?? buildNudgePayload(5));
+      });
 
     return () => {
       cancelled = true;
@@ -557,7 +569,13 @@ export default function ReviewNudge({ onDone, initialPayload }: ReviewNudgeProps
   const remainingDueAfterChain = Math.max(0, payload.dueCount - chainAnswered);
 
   return (
-    <div className="w-screen h-screen flex items-start justify-end p-1.5 bg-transparent select-none font-sans">
+    <div
+      className={
+        embedded
+          ? "fixed top-4 right-4 z-50 w-[340px] max-w-[calc(100vw-2rem)] select-none font-sans"
+          : "w-screen h-screen flex items-start justify-end p-1.5 bg-transparent select-none font-sans"
+      }
+    >
       <div
         key={animationKey}
         className={`nudge-enter w-full rounded-2xl border bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden flex flex-col justify-between transition-colors ${

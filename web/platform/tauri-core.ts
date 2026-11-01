@@ -38,6 +38,10 @@ function notify(title: string, body: string): boolean {
 
 type Args = Record<string, unknown> | undefined;
 
+let nudgeSeq = 0;
+let lastNudgePayload: Record<string, unknown> | null = null;
+let reviewPopupVisible = false;
+
 const commands: Record<string, (args: Args) => unknown> = {
   // Tray badge → the tab title
   set_tray_due_count: (a) => {
@@ -49,12 +53,44 @@ const commands: Record<string, (args: Args) => unknown> = {
   send_desktop_notification: (a) => notify(String(a?.title ?? BASE_TITLE), String(a?.body ?? "")),
   // Nothing on the web can tell a fullscreen app, screen sharing or idle time
   get_popup_blockers: () => ({ fullscreen_app: null, screen_sharing_app: null, focus_mode: null, idle_seconds: null }),
-  // Floating windows do not exist: throwing makes reminderSettings open the in-page review instead
-  show_review_popup: () => unsupported("show_review_popup"),
-  show_review_nudge: () => unsupported("show_review_nudge"),
-  hide_review_popup: () => {},
-  hide_review_nudge: () => {},
-  take_review_nudge_payload: () => null,
+  // Floating windows are rendered as in-page overlays on the web
+  show_review_popup: () => {
+    lastNudgePayload = null;
+    reviewPopupVisible = true;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("close-review-nudge-preview"));
+      window.dispatchEvent(new CustomEvent("open-review-popup-preview"));
+    }
+    return true;
+  },
+  show_review_nudge: (a) => {
+    if (reviewPopupVisible) return false;
+    const raw = (a?.payload && typeof a.payload === "object" ? a.payload : {}) as Record<string, unknown>;
+    const payload = { ...raw, nudgeId: ++nudgeSeq };
+    lastNudgePayload = payload;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("open-review-nudge-preview", { detail: payload }));
+    }
+    void emit("review-nudge-opened", payload);
+    return true;
+  },
+  hide_review_popup: () => {
+    reviewPopupVisible = false;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("close-review-popup-preview"));
+    }
+  },
+  hide_review_nudge: () => {
+    lastNudgePayload = null;
+    if (typeof window !== "undefined") {
+      window.dispatchEvent(new CustomEvent("close-review-nudge-preview"));
+    }
+  },
+  take_review_nudge_payload: () => {
+    const p = lastNudgePayload;
+    lastNudgePayload = null;
+    return p;
+  },
   is_cursor_over_nudge: () => false,
   show_main_window: () => {
     window.focus();

@@ -161,6 +161,8 @@ export default function Sidebar({
       </span>
     ) : null;
 
+  const isDesktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
+
   const navItems: Array<{ tab: DashboardTab; label: string; icon: typeof BookOpen; iconClass?: string; badge?: ReactNode }> = [
     { tab: "today", label: "Hôm nay", icon: Sunrise, iconClass: "text-amber-500" },
     { tab: "review", label: "Ôn tập", icon: Flame, iconClass: "text-orange-400", badge: countBadge(dueCount, true) },
@@ -176,7 +178,7 @@ export default function Sidebar({
     { tab: "grammar", label: "Ngữ pháp", icon: GraduationCap, iconClass: "text-cyan-500", badge: countBadge(grammarDueCount, true) },
     { tab: "pronunciation", label: "Phát âm", icon: AudioLines, iconClass: "text-violet-500" },
     { tab: "reading", label: "Đọc", icon: BookOpenText },
-    { tab: "writing", label: "Viết & sổ lỗi", icon: NotebookPen },
+    ...(isDesktopApp ? [{ tab: "writing" as const, label: "Viết & sổ lỗi", icon: NotebookPen }] : []),
     AI_VOCAB_ENABLED
       ? {
           tab: "capture",

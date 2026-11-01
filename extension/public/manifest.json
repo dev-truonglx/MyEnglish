@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "MyEnglish - Học từ vựng & Ngữ pháp FSRS",
-  "version": "0.3.12",
+  "version": "0.3.13",
   "description": "Học từ vựng Oxford 5000 và ngữ pháp tiếng Anh với thuật toán lặp lại ngắt quãng FSRS, đồng bộ dữ liệu đám mây.",
   "icons": {
     "16": "icons/icon-16.png",

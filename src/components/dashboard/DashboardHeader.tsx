@@ -86,8 +86,10 @@ export default function DashboardHeader({
   };
 
   // Simple mode groups several tabs under one sidebar entry: their bar is hidden during a session on screen
+  const isDesktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const group = simpleMode ? navGroupOf(activeTab) : null;
-  const subTabs = group && group.tabs.length > 1 && !(isReviewing && activeTab === "review") ? group.tabs : null;
+  const groupTabs = group ? (isDesktopApp ? group.tabs : group.tabs.filter((t) => t.tab !== "writing")) : [];
+  const subTabs = groupTabs.length > 1 && !(isReviewing && activeTab === "review") ? groupTabs : null;
 
   // Word library: cards or table
   const viewToggle = (

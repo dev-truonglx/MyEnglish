@@ -106,6 +106,7 @@ interface CliGuideViewProps {
 }
 
 export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuideViewProps) {
+  const isDesktopApp = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
   const [cliStatus, setCliStatus] = useState<CliStatus | null>(null);
   const [checkingCli, setCheckingCli] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState<string | number | null>(null);
@@ -366,8 +367,9 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         <div>
           <h2 className="text-xl font-bold text-slate-900 dark:text-white tracking-tight">Cài đặt</h2>
           <p className="text-xs text-slate-500 dark:text-zinc-400">
-            Phần quan trọng cho việc học ở trên cùng; giao diện, AI và phần nâng cao được thu gọn, cần thì mở ra. Mỗi thay
-            đổi được lưu ngay.
+            {isDesktopApp
+              ? "Phần quan trọng cho việc học ở trên cùng; giao diện, AI và phần nâng cao được thu gọn, cần thì mở ra. Mỗi thay đổi được lưu ngay."
+              : "Phần quan trọng cho việc học ở trên cùng; giao diện và phần nâng cao được thu gọn, cần thì mở ra. Mỗi thay đổi được lưu ngay."}
           </p>
         </div>
       </div>
@@ -379,7 +381,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
             ["study", "Học mỗi ngày"],
             ["reminders", "Nhắc học"],
             ["display", "Giao diện & âm thanh"],
-            ["ai", "AI"],
+            ...(isDesktopApp ? ([["ai", "AI"]] as const) : []),
             ["algorithm", "Thuật toán lịch ôn"],
             ["data", "Dữ liệu"],
           ] as const
@@ -1173,7 +1175,8 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
         <DisplaySettings />
       </SettingsSection>
 
-      {/* 4. AI: không bắt buộc để học, thu gọn */}
+      {/* 4. AI: không bắt buộc để học, thu gọn (chỉ hiển thị trên bản Desktop) */}
+      {isDesktopApp && (
       <SettingsSection
         id="ai"
         tone="muted"
@@ -1685,6 +1688,7 @@ export default function CliGuideView({ onRefreshWords, onNavigateTab }: CliGuide
 
         </div>
       </SettingsSection>
+      )}
 
       {/* 5. THUẬT TOÁN LỊCH ÔN: nâng cao, đã có sẵn cấu hình mặc định */}
       <SettingsSection
