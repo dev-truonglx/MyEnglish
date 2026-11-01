@@ -55,7 +55,7 @@ interface AuthState {
 
 const initialSync: AuthState["sync"] = { status: "idle", lastSyncAt: null, error: null, lastReport: null, accountMismatch: false };
 
-let initialised = false;
+let initPromise: Promise<void> | null = null;
 
 export const useAuthStore = create<AuthState>((set, get) => {
   /** Run an auth call, keeping `busy` and `error` right whatever happens */
@@ -83,25 +83,31 @@ export const useAuthStore = create<AuthState>((set, get) => {
 
     init: async () => {
       const client = getSupabase();
-      if (!client || initialised) {
+      if (!client) {
         set({ ready: true });
         return;
       }
-      initialised = true;
-      const apply = (session: { user: { id: string; email?: string | null } } | null) => {
-        const user = session ? { id: session.user.id, email: session.user.email ?? "" } : null;
-        if (user?.id === get().user?.id) return;
-        set({ user, profile: user ? get().profile : null, sync: user ? get().sync : initialSync });
-        if (user) void get().refreshProfile();
-      };
-      client.auth.onAuthStateChange((_event, session) => apply(session));
-      try {
-        const { data } = await client.auth.getSession();
-        apply(data.session);
-      } catch {
-        // offline start: the stored session is used once the network is back
+      if (initPromise) {
+        await initPromise;
+        return;
       }
-      set({ ready: true });
+      initPromise = (async () => {
+        const apply = (session: { user: { id: string; email?: string | null } } | null) => {
+          const user = session ? { id: session.user.id, email: session.user.email ?? "" } : null;
+          if (user?.id === get().user?.id) return;
+          set({ user, profile: user ? get().profile : null, sync: user ? get().sync : initialSync });
+          if (user) void get().refreshProfile();
+        };
+        client.auth.onAuthStateChange((_event, session) => apply(session));
+        try {
+          const { data } = await client.auth.getSession();
+          apply(data.session);
+        } catch {
+          // offline start: the stored session is used once the network is back
+        }
+        set({ ready: true });
+      })();
+      await initPromise;
     },
 
     signUp: (email, password, displayName) =>

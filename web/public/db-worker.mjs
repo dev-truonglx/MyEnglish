@@ -15,49 +15,65 @@ self.sqlite3ApiConfig = {
   },
 };
 
-import sqlite3InitModule from "./sqlite/index.mjs";
-
 let sqlite3 = null;
 let pool = null;
 let db = null;
 let persistent = false;
+let currentDbName = "myenglish.db";
+let openPromise = null;
+
+async function getSqlite3() {
+  if (sqlite3) return sqlite3;
+  // Dynamic import ensures self.sqlite3ApiConfig is evaluated BEFORE sqlite3 initialization
+  const mod = await import("./sqlite/index.mjs");
+  const init = mod.default || mod;
+  sqlite3 = await init();
+  return sqlite3;
+}
 
 async function open(name) {
+  if (name) currentDbName = name;
   if (db) return { persistent };
-  if (!sqlite3) {
-    sqlite3 = await sqlite3InitModule();
-  }
+  if (openPromise) return openPromise;
 
-  // Attempt to open the OPFS SAHPool with retries to handle any brief lock handover delays
-  for (let attempt = 0; attempt < 8; attempt++) {
-    try {
-      if (!pool) {
-        pool = await sqlite3.installOpfsSAHPoolVfs({
-          name: "myenglish-sahpool",
-          preserveOnInitFailure: true,        // Never wipe or delete directory on error
-          forceReinitIfPreviouslyFailed: true, // Allow retrying if a previous attempt hit a lock
-        });
-      } else if (pool.isPaused?.()) {
-        await pool.unpauseVfs();
-      }
-      db = new pool.OpfsSAHPoolDb(`/${name}`);
-      persistent = true;
-      return { persistent };
-    } catch (err) {
-      pool = null;
-      if (attempt < 7) {
-        // Wait 100ms before retrying to allow any background worker to complete release
-        await new Promise((r) => setTimeout(r, 100));
-      } else {
-        console.warn("OPFS SAHPool unavailable after retries, keeping database in memory for this tab:", err);
+  openPromise = (async () => {
+    const s3 = await getSqlite3();
+
+    // Attempt to open the OPFS SAHPool with retries to handle any brief lock handover delays
+    for (let attempt = 0; attempt < 8; attempt++) {
+      try {
+        if (!pool) {
+          pool = await s3.installOpfsSAHPoolVfs({
+            name: "myenglish-sahpool",
+            preserveOnInitFailure: true,        // Never wipe or delete directory on error
+            forceReinitIfPreviouslyFailed: true, // Allow retrying if a previous attempt hit a lock
+          });
+        } else if (pool.isPaused?.()) {
+          await pool.unpauseVfs();
+        }
+        db = new pool.OpfsSAHPoolDb(`/${currentDbName}`);
+        persistent = true;
+        return { persistent };
+      } catch (err) {
+        pool = null;
+        if (attempt < 7) {
+          // Wait 100ms before retrying to allow any background worker to complete release
+          await new Promise((r) => setTimeout(r, 100));
+        } else {
+          console.warn("OPFS SAHPool unavailable after retries, keeping database in memory for this tab:", err);
+        }
       }
     }
-  }
 
-  // Safe fallback to in-memory if OPFS is held by another process or unavailable
-  db = new sqlite3.oo1.DB(":memory:", "c");
-  persistent = false;
-  return { persistent };
+    // Safe fallback to in-memory if OPFS is held by another process or unavailable
+    db = new s3.oo1.DB(":memory:", "c");
+    persistent = false;
+    return { persistent };
+  })().finally(() => {
+    openPromise = null;
+  });
+
+  return openPromise;
 }
 
 /** Same rewrite as the plugin's: `$1, $2` → positional `?`, booleans → 0/1, undefined → null */
@@ -77,7 +93,8 @@ function normalize(row) {
   return row;
 }
 
-function execute(sql, params) {
+async function execute(sql, params) {
+  if (!db) await open(currentDbName);
   if ((!params || params.length === 0) && !/\$\d+/.test(sql)) {
     db.exec(sql);
   } else {
@@ -90,33 +107,39 @@ function execute(sql, params) {
   };
 }
 
-function select(sql, params) {
+async function select(sql, params) {
+  if (!db) await open(currentDbName);
   const { q, args } = bind(sql, params);
   const rows = db.exec({ sql: q, bind: args.length ? args : undefined, rowMode: "object", returnValue: "resultRows" });
   return rows.map(normalize);
 }
 
-self.onmessage = async (e) => {
+// Serialize all worker operations so concurrent messages never race during initialization or transactions
+let messageQueue = Promise.resolve();
+
+self.onmessage = (e) => {
   const { id, op, sql, params, name } = e.data;
-  try {
-    let result;
-    if (op === "open") result = await open(name);
-    else if (op === "execute") result = execute(sql, params);
-    else if (op === "select") result = select(sql, params);
-    else if (op === "close") {
-      try {
-        db?.close();
-      } catch {}
-      db = null;
-      try {
-        if (pool && !pool.isPaused?.()) {
-          pool.pauseVfs();
-        }
-      } catch {}
-      result = true;
-    } else throw new Error(`unknown op ${op}`);
-    self.postMessage({ id, result });
-  } catch (err) {
-    self.postMessage({ id, error: String(err?.message ?? err) });
-  }
+  messageQueue = messageQueue.then(async () => {
+    try {
+      let result;
+      if (op === "open") result = await open(name);
+      else if (op === "execute") result = await execute(sql, params);
+      else if (op === "select") result = await select(sql, params);
+      else if (op === "close") {
+        try {
+          db?.close();
+        } catch {}
+        db = null;
+        try {
+          if (pool && !pool.isPaused?.()) {
+            pool.pauseVfs();
+          }
+        } catch {}
+        result = true;
+      } else throw new Error(`unknown op ${op}`);
+      self.postMessage({ id, result });
+    } catch (err) {
+      self.postMessage({ id, error: String(err?.message ?? err) });
+    }
+  });
 };

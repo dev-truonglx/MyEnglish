@@ -161,7 +161,15 @@ export default function MainDashboard({
 
   const [showReviewModalPreview, setShowReviewModalPreview] = useState(false);
   const [pipelineQueue, setPipelineQueue] = useState<PipelineItem[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState(() => {
+    try {
+      if (typeof window !== "undefined") {
+        const urlSearch = new URLSearchParams(window.location.search).get("search");
+        if (urlSearch) return urlSearch;
+      }
+    } catch {}
+    return getUnifiedSession().searchQuery || "";
+  });
   const [reviewTimeFilter, setReviewTimeFilter] = useState<ReviewTimeBucket>("all");
   const [selectedTopic, setSelectedTopic] = useState<string>("all");
   const [viewMode, setViewMode] = useState<ViewMode>("gallery");
@@ -169,6 +177,7 @@ export default function MainDashboard({
   const [activeTab, setActiveTab] = useState<DashboardTab>(() => {
     if (initialTab) return initialTab;
     const saved = getUnifiedSession();
+    if (saved.isReviewing && saved.review?.cards?.length) return "review";
     return saved.activeTab || "today";
   });
   const activeTabRef = useRef(activeTab);
@@ -179,7 +188,9 @@ export default function MainDashboard({
   // Incremented whenever a sidebar / header tab item is clicked so active tabs return to their main screen
   const [tabResetKey, setTabResetKey] = useState(0);
   // A grammar lesson to open when the Grammar tab is shown next (from the mistake notebook)
-  const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(null);
+  const [grammarLessonToOpen, setGrammarLessonToOpen] = useState<string | null>(() => {
+    return getUnifiedSession().grammarLessonId || null;
+  });
 
   // Simple mode (Settings): the sidebar shows five entries and the header the tabs of the current one
   const [simpleMode, setSimpleModeState] = useState(isSimpleMode);
@@ -211,20 +222,37 @@ export default function MainDashboard({
   // Web: keep URL and cross-tab session in sync when active tab changes
   const onTabChangeRef = useRef(onTabChange);
   onTabChangeRef.current = onTabChange;
+  const mountedTabSyncRef = useRef(false);
   useEffect(() => {
     if (isApplyingRemoteSyncRef.current) return;
     onTabChangeRef.current?.(activeTab);
+    if (!mountedTabSyncRef.current) {
+      mountedTabSyncRef.current = true;
+      if (!initialTab) return;
+    }
     saveUnifiedSession({ activeTab, action: "tab_change" });
   }, [activeTab]);
 
+  const mountedGrammarSyncRef = useRef(false);
   useEffect(() => {
     if (activeTab !== "grammar") setGrammarLessonToOpen(null);
     if (isApplyingRemoteSyncRef.current) return;
+    if (!mountedGrammarSyncRef.current) {
+      mountedGrammarSyncRef.current = true;
+      return;
+    }
     saveUnifiedSession({ grammarLessonId: grammarLessonToOpen, action: "grammar_change" });
   }, [activeTab, grammarLessonToOpen]);
 
+  const mountedSearchSyncRef = useRef(false);
   useEffect(() => {
     if (isApplyingRemoteSyncRef.current) return;
+    if (!mountedSearchSyncRef.current) {
+      mountedSearchSyncRef.current = true;
+      const hasUrlSearch =
+        typeof window !== "undefined" && !!new URLSearchParams(window.location.search).get("search");
+      if (!hasUrlSearch) return;
+    }
     saveUnifiedSession({ searchQuery });
   }, [searchQuery]);
 
@@ -335,6 +363,24 @@ export default function MainDashboard({
 
   // Synchronize on storage event and whenever user switches back to this tab
   useEffect(() => {
+    const crossTabEventMap: Record<string, string> = {
+      myenglish_xp_data_v1: "myenglish-xp-updated",
+      myenglish_study_logs_v1: "myenglish-activity-updated",
+      myenglish_daily_goal_v1: "myenglish-activity-updated",
+      myenglish_bonus_freezes_v1: "myenglish-activity-updated",
+      myenglish_streak_repairs_v1: "myenglish-activity-updated",
+      myenglish_daily_quests_v1: "myenglish-quests-updated",
+      myenglish_weekly_challenges_v1: "myenglish-weekly-challenges-updated",
+      myenglish_study_levels_v1: "myenglish-study-levels-changed",
+      myenglish_learner_profile_v1: "myenglish-profile-updated",
+      myenglish_grammar_introduced_v1: "myenglish-grammar-updated",
+      myenglish_grammar_intro_dates_v1: "myenglish-grammar-updated",
+      myenglish_grammar_item_levels_v1: "myenglish-grammar-updated",
+      myenglish_grammar_set_scores_v1: "myenglish-grammar-updated",
+      myenglish_grammar_selected_chapters_v1: "myenglish-grammar-updated",
+      myenglish_grammar_initial_tenses_v1: "myenglish-grammar-updated",
+    };
+
     const onStorage = (e: StorageEvent) => {
       if (e.key === UNIFIED_SESSION_KEY && e.newValue) {
         try {
@@ -343,6 +389,8 @@ export default function MainDashboard({
             applyRemoteSession(data);
           }
         } catch {}
+      } else if (e.key && crossTabEventMap[e.key]) {
+        window.dispatchEvent(new CustomEvent(crossTabEventMap[e.key]));
       }
     };
 
@@ -931,6 +979,7 @@ export default function MainDashboard({
     };
     window.addEventListener("words-changed", handleWordsChanged);
     const ownLabel = getInitialWindowLabel();
+    const ownTabId = getTabId();
     // Changes from another window while this one is hidden (answers in the popup): merged and dispatched once
     // when it is shown again, instead of reloading the list and every card after each answer.
     // undefined = none pending, null = reload everything
@@ -946,10 +995,10 @@ export default function MainDashboard({
     document.addEventListener("visibilitychange", handleVisible);
     listen<WordsChangedDetail | null>("words-changed", (event) => {
       if (isCancelled) return;
-      // A change from another window (the popup): re-dispatch the DOM event, so the cards listening to it
+      // A change from another window/tab: re-dispatch the DOM event, so the cards listening to it
       // (Today roadmap, vocabulary tab, insights) reload too, and this window's list with them (the DOM
       // listener above). This window's own changes already dispatched it.
-      if (event.payload?.source === ownLabel) return;
+      if (event.payload?.tabId ? event.payload.tabId === ownTabId : event.payload?.source === ownLabel) return;
       const wordIds = event.payload?.wordIds;
       if (document.visibilityState === "hidden") {
         if (!wordIds) hiddenChanges = null;

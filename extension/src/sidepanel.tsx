@@ -7,7 +7,7 @@ const rootEl = document.getElementById("root");
 if (rootEl) {
   ReactDOM.createRoot(rootEl).render(
     <React.StrictMode>
-      <ExtensionShell mode="sidepanel" initialTab="today" />
+      <ExtensionShell mode="sidepanel" />
     </React.StrictMode>
   );
 }

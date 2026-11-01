@@ -41,7 +41,9 @@ type Args = Record<string, unknown> | undefined;
 const commands: Record<string, (args: Args) => unknown> = {
   // Tray badge → the tab title
   set_tray_due_count: (a) => {
-    const due = Number(a?.reviews ?? 0);
+    const reviews = Number(a?.reviews ?? 0);
+    const newCards = Number(a?.newCards ?? 0);
+    const due = reviews > 0 ? reviews : reviews + newCards;
     document.title = due > 0 ? `(${due}) ${BASE_TITLE}` : BASE_TITLE;
   },
   send_desktop_notification: (a) => notify(String(a?.title ?? BASE_TITLE), String(a?.body ?? "")),

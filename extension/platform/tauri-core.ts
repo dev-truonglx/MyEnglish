@@ -48,14 +48,18 @@ type Args = Record<string, unknown> | undefined;
 const commands: Record<string, (args: Args) => unknown> = {
   // Update Chrome Extension toolbar icon badge count & document title
   set_tray_due_count: (a) => {
-    const due = Number(a?.reviews ?? 0);
+    const reviews = Number(a?.reviews ?? 0);
+    const newCards = Number(a?.newCards ?? 0);
+    const due = reviews > 0 ? reviews : reviews + newCards;
+    const hasUrgent = reviews > 0;
+    const text = due > 0 ? (due > 999 ? "999+" : String(due)) : "";
     document.title = due > 0 ? `(${due}) ${BASE_TITLE}` : BASE_TITLE;
     if (typeof chrome !== "undefined" && chrome.action?.setBadgeText) {
-      chrome.action.setBadgeText({ text: due > 0 ? String(due) : "" });
-      chrome.action.setBadgeBackgroundColor({ color: "#0891b2" });
+      chrome.action.setBadgeText({ text });
+      chrome.action.setBadgeBackgroundColor({ color: hasUrgent && due > 0 ? "#ef4444" : "#0891b2" });
     }
     if (typeof chrome !== "undefined" && chrome.storage?.local?.set) {
-      chrome.storage.local.set({ dueCount: due });
+      chrome.storage.local.set({ dueCount: due, hasUrgentReviews: hasUrgent });
     }
   },
   send_desktop_notification: (a) => notify(String(a?.title ?? BASE_TITLE), String(a?.body ?? "")),
@@ -67,7 +71,17 @@ const commands: Record<string, (args: Args) => unknown> = {
   take_review_nudge_payload: () => null,
   is_cursor_over_nudge: () => false,
   show_main_window: () => {
-    if (typeof chrome !== "undefined" && chrome.tabs?.create) {
+    if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+      const url = chrome.runtime.getURL("index.html");
+      chrome.tabs.query({ url: chrome.runtime.getURL("index.html*") }, (tabs) => {
+        if (tabs.length > 0 && tabs[0].id) {
+          chrome.tabs.update(tabs[0].id, { active: true });
+          if (tabs[0].windowId) chrome.windows.update(tabs[0].windowId, { focused: true });
+        } else {
+          chrome.tabs.create({ url });
+        }
+      });
+    } else if (typeof chrome !== "undefined" && chrome.tabs?.create) {
       chrome.tabs.create({ url: chrome.runtime.getURL("index.html") });
     } else {
       window.focus();

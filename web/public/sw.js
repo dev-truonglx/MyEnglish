@@ -2,7 +2,7 @@
 // Same-origin GET requests only; cross-origin calls (e.g. Supabase) are never touched.
 
 // Bump when db-worker.mjs or the SQLite files change: they are served cache-first and are not content-hashed
-const VERSION = "v2";
+const VERSION = "v3";
 const CACHE_NAME = `myenglish-${VERSION}`;
 
 const PRECACHE_URLS = [
@@ -43,7 +43,9 @@ function isStaticAsset(url) {
   return (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/sqlite/") ||
+    url.pathname.startsWith("/fsrs/") ||
     url.pathname === "/db-worker.mjs" ||
+    url.pathname === "/fsrs-worker.mjs" ||
     url.pathname === "/app-icon.png"
   );
 }

@@ -199,6 +199,15 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   } else if (message.type === "OPEN_DASHBOARD_TAB") {
     openOrFocusDashboardTab(message.tab, message.search);
     sendResponse({ ok: true });
+  } else if (message.type === "SET_OPEN_IN_TAB_ON_CLICK") {
+    const openInTab = !!message.value;
+    chrome.storage.local.set({ openInTabOnClick: openInTab });
+    if ((chrome as any).sidePanel?.setPanelBehavior) {
+      (chrome as any).sidePanel
+        .setPanelBehavior({ openPanelOnActionClick: !openInTab })
+        .catch(() => {});
+    }
+    sendResponse({ ok: true });
   }
   return true;
 });

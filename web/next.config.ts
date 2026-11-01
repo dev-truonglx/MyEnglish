@@ -47,6 +47,15 @@ const nextConfig: NextConfig = {
     config.output.environment = { ...config.output.environment, asyncFunction: true };
     return config;
   },
+  async redirects() {
+    return [
+      {
+        source: "/",
+        destination: "/learn",
+        permanent: false,
+      },
+    ];
+  },
   async rewrites() {
     return [
       {

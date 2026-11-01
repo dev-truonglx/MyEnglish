@@ -6,7 +6,22 @@
 let exportsPromise = null;
 
 function load() {
-  exportsPromise ??= WebAssembly.instantiateStreaming(fetch("/fsrs/myenglish_fsrs.wasm"), {}).then((r) => r.instance.exports);
+  const wasmUrl = "/fsrs/myenglish_fsrs.wasm";
+  exportsPromise ??= (
+    WebAssembly.instantiateStreaming
+      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), {})
+          .then((r) => r.instance.exports)
+          .catch(() =>
+            fetch(wasmUrl)
+              .then((r) => r.arrayBuffer())
+              .then((bytes) => WebAssembly.instantiate(bytes, {}))
+              .then((r) => r.instance.exports)
+          )
+      : fetch(wasmUrl)
+          .then((r) => r.arrayBuffer())
+          .then((bytes) => WebAssembly.instantiate(bytes, {}))
+          .then((r) => r.instance.exports)
+  );
   return exportsPromise;
 }
 

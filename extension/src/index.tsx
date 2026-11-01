@@ -28,7 +28,7 @@ function getTabFromUrl(): DashboardTab | undefined {
   } catch {
     // fallback
   }
-  return "today";
+  return undefined;
 }
 
 const rootEl = document.getElementById("root");

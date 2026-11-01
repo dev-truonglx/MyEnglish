@@ -7,6 +7,7 @@
 import { Rating } from "ts-fsrs";
 import { emit } from "@tauri-apps/api/event";
 import { getInitialWindowLabel } from "@/lib/windowLabel";
+import { getTabId } from "./unifiedSession";
 import type { CardDirection, ReviewCard, SRSReview } from "@/types/database";
 import { getDatabase, SRS_COLUMNS } from "./db";
 import { getFSRSScheduler, getFSRSSettings, recordReview, type FSRSResult } from "./srs";
@@ -211,6 +212,7 @@ export async function setWordSuspended(wordId: string, suspended: boolean): Prom
 /** Payload of the "words-changed" event (Tauri) and `detail` of the DOM event */
 export interface WordsChangedDetail {
   source?: string;
+  tabId?: string;
   /** Only these words changed (a review, an introduction): listeners may reload just them. Absent: anything. */
   wordIds?: string[];
 }
@@ -219,10 +221,10 @@ export interface WordsChangedDetail {
  *  the cards reload once it is shown): the cloud sync listens to it to push them meanwhile */
 export const WORDS_CHANGED_WHILE_HIDDEN_EVENT = "myenglish-words-changed-while-hidden";
 
-/** Tells every window the words changed. `source`: the Tauri event also comes back to the window that sent it,
- *  which has already had the DOM event, so only other windows' changes are re-dispatched there. */
+/** Tells every window the words changed. `source`/`tabId`: the Tauri/BroadcastChannel event also comes back to the window
+ *  that sent it, which has already had the DOM event, so only other windows/tabs' changes are re-dispatched there. */
 export function notifyWordsChanged(wordIds?: string[]): void {
-  emit("words-changed", { source: getInitialWindowLabel(), wordIds } satisfies WordsChangedDetail).catch(() => {});
+  emit("words-changed", { source: getInitialWindowLabel(), tabId: getTabId(), wordIds } satisfies WordsChangedDetail).catch(() => {});
   try {
     window.dispatchEvent(new CustomEvent<WordsChangedDetail>("words-changed", { detail: { wordIds } }));
   } catch {}

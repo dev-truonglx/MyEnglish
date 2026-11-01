@@ -122,7 +122,7 @@ if (rootEl) {
       <div className="flex flex-col w-full h-full overflow-hidden bg-background text-foreground">
         <PopupTopBar />
         <div className="flex-1 min-h-0 w-full overflow-hidden flex flex-col">
-          <ExtensionShell mode="popup" initialTab="today" />
+          <ExtensionShell mode="popup" />
         </div>
       </div>
     </React.StrictMode>

@@ -46,12 +46,18 @@ export default function ClientShell({
   const [applyUpdate, setApplyUpdate] = useState<(() => void) | null>(null);
 
   // Web: one URL per tab under basePath (/learn, or /dev in development).
+  // When opening the bare basePath (/learn), restore the unified cross-tab session unless a specific tab slug was requested.
   const [initialTab] = useState<DashboardTab | undefined>(() => {
     if (!basePath || typeof window === "undefined") return undefined;
+    const cleanBase = basePath.replace(/\/+$/, "");
+    const cleanPath = window.location.pathname.split(/[?#]/)[0].replace(/\/+$/, "");
+    if (cleanPath === cleanBase) {
+      return undefined;
+    }
     const tab = tabFromPath(window.location.pathname, basePath);
     if (!tab) {
       window.history.replaceState(null, "", basePath);
-      return "today";
+      return undefined;
     }
     return tab;
   });
@@ -143,6 +149,9 @@ export default function ClientShell({
         void (async () => {
           const { ensureCatalogSeeded } = await import("@/services/vocabCatalog");
           await ensureCatalogSeeded(devOffline ? loadLocalDeck : undefined).catch(() => {});
+
+          const { ensureGrammarBookSeeded } = await import("@/services/grammarBook");
+          await ensureGrammarBookSeeded().catch(() => {});
 
           const { settleKnownWords } = await import("@/services/reviewRecorder");
           await settleKnownWords().catch(() => {});

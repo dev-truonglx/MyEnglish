@@ -1,6 +1,7 @@
 import { getDatabase } from "./db";
 import { ensureCatalogSeeded } from "./vocabCatalog";
 import { ensureGrammarBookSeeded, notifyBookUpdated } from "./grammarBook";
+import { notifyWordsChanged } from "./reviewRecorder";
 import { GRAMMAR_CONTENT_VERSION_KEY, TARGET_GRAMMAR_CONTENT_VERSION } from "./grammarReset";
 import { RELEASE_WIPE_VERSION_KEY, TARGET_RELEASE_WIPE_VERSION } from "./releaseMigration";
 import { clearBackupCache } from "./storageBackup";
@@ -165,6 +166,7 @@ async function resetAllAppDataNow(options?: ResetOptions): Promise<boolean> {
     });
 
     // 8. Notify active listeners
+    notifyWordsChanged();
     if (typeof window !== "undefined") {
       window.dispatchEvent(new CustomEvent("myenglish-grammar-updated", { detail: { book: true } }));
       window.dispatchEvent(new CustomEvent("myenglish-activity-updated"));

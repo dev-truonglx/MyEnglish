@@ -10,7 +10,14 @@ function load() {
     : "/fsrs/myenglish_fsrs.wasm";
   exportsPromise ??= (
     WebAssembly.instantiateStreaming
-      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), {}).then((r) => r.instance.exports)
+      ? WebAssembly.instantiateStreaming(fetch(wasmUrl), {})
+          .then((r) => r.instance.exports)
+          .catch(() =>
+            fetch(wasmUrl)
+              .then((r) => r.arrayBuffer())
+              .then((bytes) => WebAssembly.instantiate(bytes, {}))
+              .then((r) => r.instance.exports)
+          )
       : fetch(wasmUrl)
           .then((r) => r.arrayBuffer())
           .then((bytes) => WebAssembly.instantiate(bytes, {}))

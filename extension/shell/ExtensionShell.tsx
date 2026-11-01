@@ -86,7 +86,17 @@ export default function ExtensionShell({
               <button
                 type="button"
                 onClick={() => {
-                  if (typeof chrome !== "undefined" && chrome.tabs?.create) {
+                  if (typeof chrome !== "undefined" && chrome.tabs?.query) {
+                    const url = chrome.runtime.getURL("index.html");
+                    chrome.tabs.query({ url: chrome.runtime.getURL("index.html*") }, (tabs) => {
+                      if (tabs.length > 0 && tabs[0].id) {
+                        chrome.tabs.update(tabs[0].id, { active: true });
+                        if (tabs[0].windowId) chrome.windows.update(tabs[0].windowId, { focused: true });
+                      } else {
+                        chrome.tabs.create({ url });
+                      }
+                    });
+                  } else if (typeof chrome !== "undefined" && chrome.tabs?.create) {
                     chrome.tabs.create({ url: chrome.runtime.getURL("index.html") });
                   } else {
                     window.open("/index.html", "_blank");
